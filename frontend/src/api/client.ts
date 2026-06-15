@@ -1,0 +1,118 @@
+import axios from 'axios'
+
+const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
+
+export const api = axios.create({ baseURL: BASE_URL })
+
+// Attach access token to every request
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('access_token')
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  return config
+})
+
+// Auto-refresh on 401
+api.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const original = error.config
+    if (error.response?.status === 401 && !original._retry) {
+      original._retry = true
+      const refresh = localStorage.getItem('refresh_token')
+      if (refresh) {
+        try {
+          const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refresh_token: refresh })
+          localStorage.setItem('access_token', data.access_token)
+          localStorage.setItem('refresh_token', data.refresh_token)
+          original.headers.Authorization = `Bearer ${data.access_token}`
+          return api(original)
+        } catch {
+          localStorage.removeItem('access_token')
+          localStorage.removeItem('refresh_token')
+          window.location.href = '/login'
+        }
+      }
+    }
+    return Promise.reject(error)
+  }
+)
+
+// ─── Auth ─────────────────────────────────────────────────────────────────────
+export const authApi = {
+  login: (email: string, password: string) =>
+    api.post('/auth/login', { email, password }).then(r => r.data),
+  me: () => api.get('/auth/me').then(r => r.data),
+}
+
+// ─── Projects ────────────────────────────────────────────────────────────────
+export const projectsApi = {
+  list: (page = 1) => api.get('/projects', { params: { page } }).then(r => r.data),
+  get: (id: string) => api.get(`/projects/${id}`).then(r => r.data),
+  create: (data: { name: string; description?: string }) =>
+    api.post('/projects', data).then(r => r.data),
+  update: (id: string, data: object) => api.patch(`/projects/${id}`, data).then(r => r.data),
+  addMember: (projectId: string, userId: string, role: string) =>
+    api.post(`/projects/${projectId}/members`, { user_id: userId, role }).then(r => r.data),
+}
+
+// ─── Jobs ─────────────────────────────────────────────────────────────────────
+export const jobsApi = {
+  list: (params?: object) => api.get('/jobs', { params }).then(r => r.data),
+  get: (id: string) => api.get(`/jobs/${id}`).then(r => r.data),
+  history: (id: string) => api.get(`/jobs/${id}/history`).then(r => r.data),
+  upload: (projectId: string, formData: FormData) =>
+    api.post(`/jobs/${projectId}/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+}
+
+// ─── Records ──────────────────────────────────────────────────────────────────
+export const recordsApi = {
+  list: (jobId: string, params?: object) =>
+    api.get('/records', { params: { job_id: jobId, ...params } }).then(r => r.data),
+  get: (id: string) => api.get(`/records/${id}`).then(r => r.data),
+  review: (id: string, action: string, note?: string, overrides?: Record<string, unknown>) =>
+    api.post(`/records/${id}/review`, {
+      action, note, field_overrides: overrides,
+    }).then(r => r.data),
+  bulkReview: (recordIds: string[], action: string, note?: string) =>
+    api.post('/records/bulk-review', { record_ids: recordIds, action, note }).then(r => r.data),
+}
+
+// ─── Schemas ──────────────────────────────────────────────────────────────────
+export const schemasApi = {
+  list: (projectId?: string) =>
+    api.get('/schemas', { params: { project_id: projectId } }).then(r => r.data),
+  create: (projectId: string, data: { name: string; definition: object }) =>
+    api.post(`/schemas/${projectId}`, data).then(r => r.data),
+  versions: (id: string) => api.get(`/schemas/${id}/versions`).then(r => r.data),
+}
+
+// ─── Submission ───────────────────────────────────────────────────────────────
+export const submissionApi = {
+  submit: (jobId: string, recordIds?: string[]) =>
+    api.post(
+      `/jobs/${jobId}/submit`,
+      { destination: 'json_download', record_ids: recordIds ?? null },
+      { responseType: 'blob' }
+    ).then(r => r),
+  list: (jobId: string) => api.get(`/jobs/${jobId}/submissions`).then(r => r.data),
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+export const statsApi = {
+  dashboard: () => api.get('/stats/dashboard').then(r => r.data),
+}
+
+// ─── Notifications ────────────────────────────────────────────────────────────
+export const notificationsApi = {
+  list: () => api.get('/notifications').then(r => r.data),
+  markRead: (id: string) => api.post(`/notifications/${id}/read`).then(r => r.data),
+}
+
+// ─── Users ────────────────────────────────────────────────────────────────────
+export const usersApi = {
+  list: () => api.get('/users').then(r => r.data),
+  create: (data: object) => api.post('/users', data).then(r => r.data),
+  update: (id: string, data: object) => api.patch(`/users/${id}`, data).then(r => r.data),
+}

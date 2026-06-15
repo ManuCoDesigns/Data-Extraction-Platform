@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+venv/
+.venv/
+dist/
+*.egg
+
+# Node
+node_modules/
+.env.local
+.env.production
+frontend/dist/
+
+# Uploads / temp
+/tmp/xtrium_uploads/
+*.pdf
+*.xlsx
+*.csv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+*.log
