@@ -309,3 +309,8 @@ Register in `backend/app/api/v1/routes/submission.py`.
 - [ ] Per-job system statistics dashboard
 - [ ] Re-extraction preserving valid human review actions
 - [ ] Audit log export (CSV/NDJSON)
+
+
+git remote add origin https://github.com/ManuCoDesigns/xtrium-platform.git
+git branch -M main
+git push -u origin main

@@ -2,9 +2,8 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# System deps for pdfplumber / psycopg2
 RUN apt-get update && apt-get install -y \
-    libpq-dev gcc libpoppler-cpp-dev pkg-config \
+    libpq-dev gcc \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
@@ -14,4 +13,5 @@ COPY . .
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Start script handles migrations then launches the server
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]

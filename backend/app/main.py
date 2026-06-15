@@ -7,12 +7,10 @@ from app.api.v1.routes import auth, users, projects, jobs, records, schemas, sub
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
     if settings.SENTRY_DSN:
         import sentry_sdk
         sentry_sdk.init(dsn=settings.SENTRY_DSN, environment=settings.ENVIRONMENT)
     yield
-    # Shutdown (nothing to tear down for now)
 
 
 app = FastAPI(
@@ -32,19 +30,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
 PREFIX = settings.API_V1_STR
-app.include_router(auth.router, prefix=PREFIX)
-app.include_router(users.router, prefix=PREFIX)
-app.include_router(projects.router, prefix=PREFIX)
-app.include_router(jobs.router, prefix=PREFIX)
-app.include_router(records.router, prefix=PREFIX)
-app.include_router(schemas.router, prefix=PREFIX)
+app.include_router(auth.router,       prefix=PREFIX)
+app.include_router(users.router,      prefix=PREFIX)
+app.include_router(projects.router,   prefix=PREFIX)
+app.include_router(jobs.router,       prefix=PREFIX)
+app.include_router(records.router,    prefix=PREFIX)
+app.include_router(schemas.router,    prefix=PREFIX)
 app.include_router(submission.router, prefix=PREFIX)
-app.include_router(submission.stats_router, prefix=PREFIX)
+app.include_router(submission.stats_router,         prefix=PREFIX)
 app.include_router(submission.notifications_router, prefix=PREFIX)
 
 
 @app.get("/health")
 def health():
     return {"status": "ok", "version": "1.0.0"}
+
+
+@app.get("/")
+def root():
+    return {"message": "Xtrium DataOps API", "docs": "/api/docs"}
