@@ -10,7 +10,7 @@ from sqlalchemy import (
     Column, String, Boolean, Integer, Float, DateTime, Text,
     ForeignKey, Enum as SAEnum, JSON, UniqueConstraint, Index
 )
-from sqlalchemy.dialects.postgresql import UUID, INET
+from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.orm import relationship
 from app.db.session import Base
 
@@ -112,7 +112,7 @@ class AuditAction(str, enum.Enum):
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    id = Column(String(36), primary_key=True, default=new_uuid)
     email = Column(String(255), unique=True, nullable=False, index=True)
     full_name = Column(String(255), nullable=False)
     hashed_password = Column(String(255), nullable=False)
@@ -129,8 +129,8 @@ class User(Base):
 class UserRoleAssignment(Base):
     __tablename__ = "user_roles"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(SAEnum(UserRole), nullable=False)
     created_at = Column(DateTime(timezone=True), default=now_utc)
 
@@ -143,11 +143,11 @@ class UserRoleAssignment(Base):
 class Project(Base):
     __tablename__ = "projects"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    id = Column(String(36), primary_key=True, default=new_uuid)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     status = Column(SAEnum(ProjectStatus), default=ProjectStatus.ACTIVE, nullable=False)
-    owner_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    owner_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     submission_destinations = Column(JSON, default=list)
     created_at = Column(DateTime(timezone=True), default=now_utc)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
@@ -162,9 +162,9 @@ class Project(Base):
 class ProjectMember(Base):
     __tablename__ = "project_members"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    project_id = Column(UUID(as_uuid=False), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     role = Column(SAEnum(UserRole), nullable=False)
     created_at = Column(DateTime(timezone=True), default=now_utc)
 
@@ -178,12 +178,12 @@ class ProjectMember(Base):
 class Schema(Base):
     __tablename__ = "schemas"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    project_id = Column(UUID(as_uuid=False), ForeignKey("projects.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
     name = Column(String(255), nullable=False)
     current_version = Column(Integer, default=1, nullable=False)
     is_archived = Column(Boolean, default=False)
-    created_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), default=now_utc)
 
     project = relationship("Project", back_populates="schemas")
@@ -194,13 +194,13 @@ class Schema(Base):
 class SchemaVersion(Base):
     __tablename__ = "schema_versions"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    schema_id = Column(UUID(as_uuid=False), ForeignKey("schemas.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=False)
     version = Column(Integer, nullable=False)
     definition = Column(JSON, nullable=False)  # Full JSON schema definition
     is_locked = Column(Boolean, default=False)
     locked_at = Column(DateTime(timezone=True), nullable=True)
-    created_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), default=now_utc)
 
     schema = relationship("Schema", back_populates="versions")
@@ -212,9 +212,9 @@ class SchemaVersion(Base):
 class ExtractionJob(Base):
     __tablename__ = "extraction_jobs"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    project_id = Column(UUID(as_uuid=False), ForeignKey("projects.id"), nullable=False)
-    schema_id = Column(UUID(as_uuid=False), ForeignKey("schemas.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=False)
     schema_version = Column(Integer, nullable=False)
     name = Column(String(255), nullable=False)
     source_file_url = Column(String(1024), nullable=True)
@@ -229,7 +229,7 @@ class ExtractionJob(Base):
     total_submitted = Column(Integer, default=0)
     parse_warnings = Column(JSON, default=list)
     error_message = Column(Text, nullable=True)
-    created_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), default=now_utc)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
@@ -248,8 +248,8 @@ class ExtractionJob(Base):
 class JobStateHistory(Base):
     __tablename__ = "job_state_history"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    job_id = Column(UUID(as_uuid=False), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False)
     state = Column(SAEnum(JobStatus), nullable=False)
     entered_at = Column(DateTime(timezone=True), default=now_utc)
     exited_at = Column(DateTime(timezone=True), nullable=True)
@@ -262,9 +262,9 @@ class JobStateHistory(Base):
 class JobReviewer(Base):
     __tablename__ = "job_reviewers"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    job_id = Column(UUID(as_uuid=False), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
     assigned_at = Column(DateTime(timezone=True), default=now_utc)
 
     job = relationship("ExtractionJob", back_populates="assigned_reviewers")
@@ -277,14 +277,14 @@ class JobReviewer(Base):
 class ExtractedRecord(Base):
     __tablename__ = "extracted_records"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    job_id = Column(UUID(as_uuid=False), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
     schema_version = Column(Integer, nullable=False)
     extraction_confidence = Column(SAEnum(ExtractionConfidence), nullable=False)
     pipeline_warnings = Column(JSON, default=list)
     review_status = Column(SAEnum(ReviewStatus), default=ReviewStatus.PENDING, nullable=False)
     review_note = Column(Text, nullable=True)
-    reviewed_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
+    reviewed_by = Column(String(36), ForeignKey("users.id"), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     llm_verdict = Column(SAEnum(LLMVerdict), nullable=True)
     llm_confidence = Column(Float, nullable=True)
@@ -314,9 +314,9 @@ class ExtractedRecord(Base):
 class LLMCallLog(Base):
     __tablename__ = "llm_call_log"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    record_id = Column(UUID(as_uuid=False), ForeignKey("extracted_records.id", ondelete="CASCADE"), nullable=False)
-    job_id = Column(UUID(as_uuid=False), ForeignKey("extraction_jobs.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="CASCADE"), nullable=False)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=False)
     model = Column(String(100), nullable=False)
     input_tokens = Column(Integer, nullable=True)
     output_tokens = Column(Integer, nullable=True)
@@ -336,8 +336,8 @@ class LLMCallLog(Base):
 class ValidationResult(Base):
     __tablename__ = "validation_results"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    record_id = Column(UUID(as_uuid=False), ForeignKey("extracted_records.id", ondelete="CASCADE"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="CASCADE"), nullable=False)
     is_valid = Column(Boolean, nullable=False)
     violations = Column(JSON, default=list)
     validated_by = Column(String(100), nullable=False)  # "system" or user_id
@@ -351,9 +351,9 @@ class ValidationResult(Base):
 class SubmissionBatch(Base):
     __tablename__ = "submission_batches"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    job_id = Column(UUID(as_uuid=False), ForeignKey("extraction_jobs.id"), nullable=False)
-    submitted_by = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=False)
+    submitted_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     destination = Column(String(100), nullable=False)
     record_count = Column(Integer, nullable=False)
     schema_version = Column(Integer, nullable=False)
@@ -372,8 +372,8 @@ class SubmissionBatch(Base):
 class Notification(Base):
     __tablename__ = "notifications"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
-    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String(255), nullable=False)
     body = Column(Text, nullable=False)
     link = Column(String(512), nullable=True)
@@ -388,12 +388,12 @@ class Notification(Base):
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
-    id = Column(UUID(as_uuid=False), primary_key=True, default=new_uuid)
+    id = Column(String(36), primary_key=True, default=new_uuid)
     timestamp = Column(DateTime(timezone=True), default=now_utc, nullable=False, index=True)
-    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
-    project_id = Column(UUID(as_uuid=False), ForeignKey("projects.id"), nullable=True)
-    job_id = Column(UUID(as_uuid=False), ForeignKey("extraction_jobs.id"), nullable=True)
-    record_id = Column(UUID(as_uuid=False), ForeignKey("extracted_records.id"), nullable=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=True)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=True)
+    record_id = Column(String(36), ForeignKey("extracted_records.id"), nullable=True)
     action = Column(SAEnum(AuditAction), nullable=False)
     before_value = Column(JSON, nullable=True)
     after_value = Column(JSON, nullable=True)
