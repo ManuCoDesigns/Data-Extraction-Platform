@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { AppLayout } from '@/components/layout/AppLayout'
 import { LoginPage } from '@/pages/Login'
@@ -46,6 +47,12 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
 }
 
 export function App() {
+  const fetchMe = useAuthStore((state) => state.fetchMe)
+
+  useEffect(() => {
+    fetchMe()
+  }, [fetchMe])
+
   return (
     <BrowserRouter>
       <Routes>
