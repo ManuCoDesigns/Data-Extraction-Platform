@@ -42,15 +42,15 @@ export function LoginPage() {
             Extract. Review.<br />Submit with confidence.
           </h1>
           <p className="text-white/50 text-lg leading-relaxed max-w-md">
-            AI-powered data extraction platform with human-in-the-loop review, 
+            Careerflow team AI-powered data extraction platform with human-in-the-loop review,
             LLM verification, and validated submission.
           </p>
 
           <div className="mt-12 grid grid-cols-3 gap-6">
             {[
               { label: 'Records Processed', value: '50k+' },
-              { label: 'Accuracy Rate',     value: '98.2%' },
-              { label: 'Projects Active',   value: '12' },
+              { label: 'Accuracy Rate', value: '98.2%' },
+              { label: 'Projects Active', value: '12' },
             ].map(({ label, value }) => (
               <div key={label}>
                 <p className="text-3xl font-bold text-white">{value}</p>
@@ -60,7 +60,7 @@ export function LoginPage() {
           </div>
         </div>
 
-        <p className="text-white/20 text-sm">Internal use only · Xtrium © 2026</p>
+        <p className="text-white/20 text-sm">Internal use only · Careerflow © 2026</p>
       </div>
 
       {/* Right panel — form */}
