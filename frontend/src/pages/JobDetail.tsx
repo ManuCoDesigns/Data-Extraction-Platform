@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, CheckCircle2, XCircle, Clock, RefreshCw, Send } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, XCircle, Clock, RefreshCw, Send, RotateCcw, AlertCircle } from 'lucide-react'
 import { jobsApi, recordsApi, submissionApi } from '@/api/client'
 import type { Job, JobStateHistory, ExtractedRecord } from '@/types'
 import {
   Button, Card, JobStatusBadge, ConfidenceBadge, LLMVerdictBadge,
-  Badge, Spinner, EmptyState, Modal, cn
+  Badge, Spinner, EmptyState, Modal, cn, toast
 } from '@/components/ui'
 import { format, formatDistanceToNow, differenceInSeconds } from 'date-fns'
 
 const POLL_STATES = ['queued', 'parsing', 'extracting', 'llm_review']
+const FAILED_STATES = ['parse_failed', 'extraction_failed', 'llm_failed', 'validation_failed', 'submission_failed']
 
 export function JobDetailPage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -46,6 +47,22 @@ export function JobDetailPage() {
   }, [job?.status])
 
   useEffect(() => { loadRecords() }, [reviewFilter])
+
+  const [retrying, setRetrying] = useState(false)
+
+  const handleRetry = async () => {
+    if (!jobId) return
+    setRetrying(true)
+    try {
+      await jobsApi.retry(jobId)
+      toast.success('Job queued for retry')
+      loadJob()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Retry failed')
+    } finally {
+      setRetrying(false)
+    }
+  }
 
   const handleSubmit = async () => {
     if (!jobId) return
@@ -98,6 +115,11 @@ export function JobDetailPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {FAILED_STATES.includes(job.status) && (
+            <Button variant="secondary" onClick={handleRetry} loading={retrying}>
+              <RotateCcw className="w-4 h-4" /> Retry Job
+            </Button>
+          )}
           {canReview && (
             <Link to={`/jobs/${jobId}/review`}>
               <Button variant="secondary">

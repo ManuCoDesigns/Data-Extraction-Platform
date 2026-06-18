@@ -63,6 +63,7 @@ export const jobsApi = {
   list: (params?: object) => api.get('/jobs', { params }).then(r => r.data),
   get: (id: string) => api.get(`/jobs/${id}`).then(r => r.data),
   history: (id: string) => api.get(`/jobs/${id}/history`).then(r => r.data),
+  retry: (id: string) => api.post(`/jobs/${id}/retry`).then(r => r.data),
   upload: (projectId: string, formData: FormData) =>
     api.post(`/jobs/${projectId}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -89,6 +90,9 @@ export const schemasApi = {
   create: (projectId: string, data: { name: string; definition: object }) =>
     api.post(`/schemas/${projectId}`, data).then(r => r.data),
   versions: (id: string) => api.get(`/schemas/${id}/versions`).then(r => r.data),
+  addVersion: (id: string, data: { name: string; definition: object }) =>
+    api.post(`/schemas/${id}/versions`, data).then(r => r.data),
+  archive: (id: string) => api.post(`/schemas/${id}/archive`).then(r => r.data),
 }
 
 // ─── Submission ───────────────────────────────────────────────────────────────

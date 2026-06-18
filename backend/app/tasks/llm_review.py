@@ -1,6 +1,10 @@
 """
 LLM Review task — verifies extracted records against raw source text via Claude.
 Non-blocking: if Claude fails, records are flagged llm_skipped and continue to review.
+
+Phase 2: The system prompt is now schema-aware — it includes the schema name,
+extraction_instructions from the schema definition, and field descriptions,
+so Claude understands the domain context and what each field should contain.
 """
 import json, hashlib, time
 from app.tasks.celery_app import celery_app
@@ -11,7 +15,7 @@ def run_llm_review(self, job_id: str, schema_id: str, schema_version: int):
     from app.db.session import SessionLocal
     from app.models.all_models import (
         ExtractionJob, ExtractedRecord, ReviewStatus, LLMVerdict,
-        LLMCallLog, JobStatus, JobStateHistory, SchemaVersion
+        LLMCallLog, JobStatus, JobStateHistory, SchemaVersion,
     )
     from app.core.config import settings
     import anthropic
@@ -41,28 +45,34 @@ def run_llm_review(self, job_id: str, schema_id: str, schema_version: int):
         for record in records:
             start_ms = int(time.time() * 1000)
             try:
+                # Build field context with descriptions for the LLM
+                field_context = []
+                for f in schema_definition.get("fields", []):
+                    if "fixed_value" not in f:
+                        field_context.append({
+                            "name": f["name"],
+                            "required": f.get("required", False),
+                            "type": f.get("type", "string"),
+                            "description": f.get("description", ""),
+                        })
+
                 user_content = json.dumps({
-                    "raw_source_text": record.raw_text[:3000],  # Cap to save tokens
+                    "raw_source_text": record.raw_text[:4000],
                     "extracted_record": record.extracted_fields,
-                    "schema_fields": [
-                        {"name": f["name"], "required": f.get("required", False)}
-                        for f in schema_definition.get("fields", [])
-                        if "fixed_value" not in f
-                    ],
-                })
+                    "schema_fields": field_context,
+                }, ensure_ascii=False)
+
                 prompt_hash = hashlib.sha256(user_content.encode()).hexdigest()[:16]
 
                 response = client.messages.create(
                     model=settings.LLM_MODEL,
-                    max_tokens=1000,
+                    max_tokens=1500,
                     system=system_prompt,
                     messages=[{"role": "user", "content": user_content}],
                 )
 
                 latency_ms = int(time.time() * 1000) - start_ms
                 raw_text = response.content[0].text if response.content else ""
-
-                # Parse structured response
                 result = _parse_llm_response(raw_text)
 
                 verdict_map = {
@@ -78,36 +88,30 @@ def run_llm_review(self, job_id: str, schema_id: str, schema_version: int):
                 record.llm_reason = result.get("reason", "")
                 record.llm_skipped = False
 
-                # Auto-quarantine REJECTs
                 if verdict == LLMVerdict.REJECT:
-                    from app.models.all_models import ReviewStatus
                     record.review_status = ReviewStatus.QUARANTINED
 
                 db.add(LLMCallLog(
-                    record_id=record.id,
-                    job_id=job_id,
+                    record_id=record.id, job_id=job_id,
                     model=settings.LLM_MODEL,
                     input_tokens=response.usage.input_tokens if response.usage else None,
                     output_tokens=response.usage.output_tokens if response.usage else None,
-                    latency_ms=latency_ms,
-                    prompt_hash=prompt_hash,
-                    verdict=verdict,
-                    confidence=record.llm_confidence,
+                    latency_ms=latency_ms, prompt_hash=prompt_hash,
+                    verdict=verdict, confidence=record.llm_confidence,
                     raw_response=result,
                 ))
                 db.flush()
 
             except Exception as e:
-                # Non-blocking: mark skipped, continue
                 record.llm_skipped = True
                 db.add(LLMCallLog(
                     record_id=record.id, job_id=job_id,
-                    model=settings.LLM_MODEL,
-                    error=str(e),
+                    model=settings.LLM_MODEL, error=str(e),
                 ))
                 db.flush()
 
-        # Transition job → ready_for_review
+        # Transition → ready_for_review
+        from datetime import datetime, timezone
         last = db.query(JobStateHistory).filter(
             JobStateHistory.job_id == job_id, JobStateHistory.exited_at == None
         ).first()
@@ -119,7 +123,6 @@ def run_llm_review(self, job_id: str, schema_id: str, schema_version: int):
 
     except Exception as e:
         db.rollback()
-        # LLM failure is non-blocking — transition anyway
         try:
             job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).first()
             if job:
@@ -133,46 +136,63 @@ def run_llm_review(self, job_id: str, schema_id: str, schema_version: int):
 
 def _build_system_prompt(schema_definition: dict) -> str:
     schema_name = schema_definition.get("name", "data extraction")
+    instructions = schema_definition.get("extraction_instructions", "")
+    grouping_key = schema_definition.get("grouping_key", "")
+
+    # Build field description block for context
+    fields = schema_definition.get("fields", [])
+    field_descriptions = []
+    for f in fields:
+        if "fixed_value" not in f:
+            desc = f.get("description", "")
+            required = "REQUIRED" if f.get("required") else "optional"
+            field_descriptions.append(f"  - {f['name']} ({f.get('type','string')}, {required}){': ' + desc if desc else ''}")
+    fields_block = "\n".join(field_descriptions) if field_descriptions else "  (no field descriptions defined)"
+
+    extraction_block = f"\nExtraction rules from this schema:\n{instructions}\n" if instructions else ""
+    grouping_block = f"\nEach record represents one unique '{grouping_key}'.\n" if grouping_key else ""
+
     return f"""You are a data quality reviewer for the {schema_name} extraction pipeline.
+{grouping_block}{extraction_block}
+Schema fields:
+{fields_block}
 
-You will be given:
-1. verbatim_source_text: the raw text from the source document
-2. extracted_record: the structured record extracted from that text
-3. schema_fields: the field definitions
+You will receive:
+1. raw_source_text: verbatim text from the source document
+2. extracted_record: the structured fields extracted from that text
+3. schema_fields: field definitions with types and descriptions
 
-For each non-fixed field, verify the extracted value matches or is derivable from the source text.
-Flag any field where the value appears incorrect, invented, or uncertain.
+For each non-fixed field, verify the extracted value is traceable to or derivable from the raw source.
+Flag any field where the value appears incorrect, invented, inconsistent, or uncertain.
 
-Respond ONLY with a valid JSON object. No preamble. No markdown. No explanation outside the JSON.
+Respond ONLY with valid JSON. No preamble, no markdown, no text outside the JSON.
 
 Required format:
 {{
   "verdict": "PASS" | "REVIEW" | "REJECT",
-  "confidence": <float 0.0 to 1.0>,
+  "confidence": <float 0.0–1.0>,
   "field_flags": [
     {{"field": "<field_name>", "issue": "<description>", "suggested_value": "<value or null>"}}
   ],
   "reason": "<one sentence summary>"
 }}
 
-Rules:
-- PASS: all fields verified, confidence >= 0.8
-- REVIEW: 1-2 fields uncertain or missing, rest verified
-- REJECT: company name incorrect, majority of fields unverifiable, or obvious extraction error"""
+Verdict rules:
+- PASS: all required fields verified, confidence >= 0.85
+- REVIEW: 1–2 fields uncertain or minor issues, rest verified
+- REJECT: primary identity field incorrect, majority of fields unverifiable, or obvious extraction error"""
 
 
 def _parse_llm_response(text: str) -> dict:
-    """Safely parse the LLM JSON response."""
     try:
-        # Strip markdown fences if present
         clean = text.strip()
         if clean.startswith("```"):
-            clean = clean.split("```")[1]
+            parts = clean.split("```")
+            clean = parts[1] if len(parts) > 1 else clean
             if clean.startswith("json"):
                 clean = clean[4:]
         return json.loads(clean.strip())
     except Exception:
-        # Best-effort parse failed — return safe default
         return {
             "verdict": "REVIEW",
             "confidence": 0.5,
