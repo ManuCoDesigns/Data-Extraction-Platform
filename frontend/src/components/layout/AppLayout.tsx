@@ -4,23 +4,13 @@ import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, FolderKanban, Briefcase, Database,
   Users, Bell, LogOut, ChevronRight, Settings,
-  BarChart3, Shield, Zap
+  BarChart3, Shield, Zap, Upload, ClipboardCheck
 } from 'lucide-react'
-import { cn, Avatar, ToastContainer } from '@/components/ui'
+import { cn, Avatar, Badge, ToastContainer } from '@/components/ui'
 import { notificationsApi } from '@/api/client'
+import { useCapability } from '@/lib/permissions'
 import type { Notification } from '@/types'
 import { formatDistanceToNow } from 'date-fns'
-
-const NAV = [
-  { to: '/',        icon: LayoutDashboard, label: 'Dashboard',  exact: true },
-  { to: '/projects',icon: FolderKanban,    label: 'Projects' },
-  { to: '/jobs',    icon: Briefcase,       label: 'Jobs' },
-  { to: '/schemas', icon: Database,        label: 'Schemas' },
-]
-const ADMIN_NAV = [
-  { to: '/admin/users', icon: Users,  label: 'Users' },
-  { to: '/settings',    icon: Settings,label: 'Settings' },
-]
 
 export function AppLayout() {
   const { user, logout, fetchMe } = useAuthStore()
@@ -30,22 +20,40 @@ export function AppLayout() {
   const [showNotif, setShowNotif] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
 
+  // Capabilities
+  const canManageUsers = useCapability('manage_users')
+  const canUploadJobs = useCapability('upload_extraction_jobs')
+  const canManageSchemas = useCapability('manage_schemas')
+  const canReview = useCapability('review_submissions')
+
   useEffect(() => { fetchMe() }, [])
 
   useEffect(() => {
     if (!user) return
-    notificationsApi.list().then(setNotifications).catch(() => {})
-    const iv = setInterval(() => notificationsApi.list().then(setNotifications).catch(() => {}), 60000)
+    notificationsApi.list().then(setNotifications).catch(() => { })
+    const iv = setInterval(() => notificationsApi.list().then(setNotifications).catch(() => { }), 60000)
     return () => clearInterval(iv)
   }, [user])
 
   if (!user) return null
 
-  const isAdmin = user.roles.includes('org_admin')
   const unread = notifications.filter(n => !n.is_read).length
-
-  // Breadcrumb from path
   const crumbs = location.pathname.split('/').filter(Boolean)
+
+  // Build nav dynamically based on capabilities
+  const mainNav = [
+    { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true, show: true },
+    { to: '/projects', icon: FolderKanban, label: 'Projects', exact: false, show: true },
+    { to: '/jobs', icon: Briefcase, label: 'Jobs', exact: false, show: canUploadJobs },
+    { to: '/schemas', icon: Database, label: 'Schemas', exact: false, show: canManageSchemas },
+  ].filter(n => n.show)
+
+  const adminNav = [
+    { to: '/admin/users', icon: Users, label: 'Users', show: canManageUsers },
+    { to: '/settings', icon: Settings, label: 'Settings', show: canManageUsers },
+  ].filter(n => n.show)
+
+  const showAdminSection = adminNav.length > 0
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden">
@@ -70,7 +78,7 @@ export function AppLayout() {
 
         {/* Nav */}
         <nav className="flex-1 px-2 py-4 space-y-0.5 overflow-y-auto scrollbar-thin">
-          {NAV.map(({ to, icon: Icon, label, exact }) => (
+          {mainNav.map(({ to, icon: Icon, label, exact }) => (
             <NavLink key={to} to={to} end={exact}
               className={({ isActive }) => cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150',
@@ -86,13 +94,13 @@ export function AppLayout() {
             </NavLink>
           ))}
 
-          {isAdmin && (
+          {showAdminSection && (
             <>
               <div className={cn('pt-5 pb-1', collapsed ? 'px-0' : 'px-3')}>
                 {!collapsed && <p className="text-xs font-semibold text-white/30 uppercase tracking-widest">Admin</p>}
                 {collapsed && <div className="w-6 h-px bg-white/20 mx-auto" />}
               </div>
-              {ADMIN_NAV.map(({ to, icon: Icon, label }) => (
+              {adminNav.map(({ to, icon: Icon, label }) => (
                 <NavLink key={to} to={to}
                   className={({ isActive }) => cn(
                     'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150',
@@ -112,15 +120,19 @@ export function AppLayout() {
         {/* User footer */}
         <div className={cn('border-t border-white/10 p-3 shrink-0', collapsed && 'flex justify-center')}>
           {collapsed ? (
-            <button onClick={logout} title="Sign out" className="p-2 text-white/50 hover:text-red-400 hover:bg-white/10 rounded-xl transition">
+            <button onClick={logout} title="Sign out"
+              className="p-2 text-white/50 hover:text-red-400 hover:bg-white/10 rounded-xl transition">
               <LogOut className="w-4 h-4" />
             </button>
           ) : (
-            <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-white/8 group transition cursor-pointer" onClick={() => navigate('/profile')}>
+            <div
+              className="flex items-center gap-3 p-2 rounded-xl hover:bg-white/8 group transition cursor-pointer"
+              onClick={() => navigate('/profile')}
+            >
               <Avatar name={user.full_name} size="sm" />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-white truncate">{user.full_name}</p>
-                <p className="text-xs text-white/40 truncate">{user.roles[0]?.replace(/_/g,' ')}</p>
+                <p className="text-xs text-white/40 truncate">{user.roles[0]?.replace(/_/g, ' ')}</p>
               </div>
               <button
                 onClick={e => { e.stopPropagation(); logout() }}
@@ -153,7 +165,7 @@ export function AppLayout() {
                   'capitalize font-medium',
                   i === crumbs.length - 1 ? 'text-gray-800' : 'text-gray-400'
                 )}>
-                  {crumb.replace(/-/g,' ')}
+                  {crumb.replace(/-/g, ' ')}
                 </span>
               </span>
             ))}
@@ -161,7 +173,7 @@ export function AppLayout() {
 
           {/* Right actions */}
           <div className="flex items-center gap-2">
-            {/* Notifications */}
+            {/* Notifications bell */}
             <div className="relative">
               <button
                 onClick={() => setShowNotif(v => !v)}
@@ -200,7 +212,9 @@ export function AppLayout() {
                           <div className={!n.is_read ? '' : 'ml-4'}>
                             <p className="text-sm font-medium text-gray-900">{n.title}</p>
                             <p className="text-xs text-gray-500 mt-0.5">{n.body}</p>
-                            <p className="text-xs text-gray-400 mt-1">{formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}</p>
+                            <p className="text-xs text-gray-400 mt-1">
+                              {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -210,14 +224,14 @@ export function AppLayout() {
               )}
             </div>
 
-            {/* Profile avatar */}
+            {/* Profile */}
             <button onClick={() => navigate('/profile')} className="hover:opacity-80 transition">
               <Avatar name={user.full_name} size="sm" />
             </button>
           </div>
         </header>
 
-        {/* Page */}
+        {/* Page content */}
         <main className="flex-1 overflow-y-auto scrollbar-thin page-enter">
           <Outlet />
         </main>
@@ -227,6 +241,3 @@ export function AppLayout() {
     </div>
   )
 }
-
-// Badge import fix
-import { Badge } from '@/components/ui'
