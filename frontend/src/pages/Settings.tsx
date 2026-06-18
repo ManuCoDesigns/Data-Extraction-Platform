@@ -86,73 +86,73 @@ function GeneralSettings() {
 
 function StorageSettings() {
   const [form, setForm] = useState({
-    provider: 'supabase',
-    supabase_url: '',
-    supabase_key: '',
+    provider: 'r2',
+    endpoint_url: '',
+    access_key_id: '',
+    secret_access_key: '',
     bucket: 'xtrium-uploads',
+    region: 'auto',
   })
-  const [testing, setTesting] = useState(false)
-  const [tested, setTested] = useState(false)
 
-  const testConnection = async () => {
-    setTesting(true)
-    await new Promise(r => setTimeout(r, 1500))
-    setTesting(false)
-    setTested(true)
-    toast.success('Storage connection successful')
-  }
+  const save = () => toast.info('This panel is a copy-paste helper, not a live integration — set these as actual Railway environment variables')
 
-  const save = () => toast.success('Storage settings saved — restart the backend to apply')
+  const providerHint = form.provider === 'r2'
+    ? 'Cloudflare dashboard → R2 → your bucket → Manage API tokens'
+    : 'AWS Console → IAM → your access key, and S3 → your bucket region'
 
   return (
     <Card className="p-6 space-y-5">
       <div className="flex items-start justify-between">
-        <h2 className="text-base font-semibold text-gray-900">Cloud Storage</h2>
-        <a href="https://supabase.com/docs/guides/storage" target="_blank" rel="noopener noreferrer"
+        <h2 className="text-base font-semibold text-gray-900">Object Storage</h2>
+        <a href={form.provider === 'r2' ? 'https://developers.cloudflare.com/r2/' : 'https://docs.aws.amazon.com/s3/'} target="_blank" rel="noopener noreferrer"
           className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700">
           Docs <ExternalLink className="w-3 h-3" />
         </a>
       </div>
 
-      <div className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-        <p className="text-sm font-medium text-blue-800">Supabase Storage</p>
-        <p className="text-xs text-blue-600 mt-1">
-          Since you're already on Supabase, use Supabase Storage — no extra setup needed. 
-          Add these values to your backend <code className="bg-blue-100 px-1 rounded">.env</code> file.
+      <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
+        <p className="text-sm font-medium text-amber-800">This panel doesn't save anything yet</p>
+        <p className="text-xs text-amber-700 mt-1">
+          There's no backend endpoint wired to this form. Use it to draft the values, then copy the
+          generated block below into your actual Railway environment variables.
         </p>
       </div>
 
       <Select label="Storage provider" value={form.provider} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}>
-        <option value="supabase">Supabase Storage</option>
         <option value="r2">Cloudflare R2</option>
         <option value="s3">AWS S3</option>
       </Select>
 
-      <Input label="Supabase Project URL" value={form.supabase_url} onChange={e => setForm(f => ({ ...f, supabase_url: e.target.value }))}
-        placeholder="https://xxxx.supabase.co" hint="Find this in Supabase → Settings → API" />
+      <Input label="Endpoint URL" value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))}
+        placeholder={form.provider === 'r2' ? 'https://<account_id>.r2.cloudflarestorage.com' : 'https://s3.<region>.amazonaws.com'}
+        hint={providerHint} />
 
-      <Input label="Supabase Service Key" type="password" value={form.supabase_key} onChange={e => setForm(f => ({ ...f, supabase_key: e.target.value }))}
-        placeholder="eyJhbGc..." hint="Use the service_role key (not anon key)" />
+      <Input label="Access Key ID" value={form.access_key_id} onChange={e => setForm(f => ({ ...f, access_key_id: e.target.value }))}
+        placeholder="AKIA... or R2 token key" />
+
+      <Input label="Secret Access Key" type="password" value={form.secret_access_key} onChange={e => setForm(f => ({ ...f, secret_access_key: e.target.value }))}
+        placeholder="••••••••" />
 
       <Input label="Bucket name" value={form.bucket} onChange={e => setForm(f => ({ ...f, bucket: e.target.value }))}
-        hint="Create this bucket in Supabase → Storage first" />
+        hint="Create this bucket with your provider first" />
+
+      <Input label="Region" value={form.region} onChange={e => setForm(f => ({ ...f, region: e.target.value }))}
+        hint="R2 uses 'auto'; AWS S3 needs the real region (e.g. us-east-1)" />
 
       <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-        <p className="text-xs font-semibold text-gray-700 mb-2">Add to backend/.env:</p>
+        <p className="text-xs font-semibold text-gray-700 mb-2">Set these in Railway → backend service → Variables:</p>
         <pre className="text-xs text-gray-600 font-mono whitespace-pre-wrap">
-{`SUPABASE_URL=${form.supabase_url || 'https://xxxx.supabase.co'}
-SUPABASE_SERVICE_KEY=your-service-role-key
-STORAGE_BUCKET=${form.bucket}
-STORAGE_PROVIDER=supabase`}
+{`STORAGE_PROVIDER=s3
+S3_ENDPOINT_URL=${form.endpoint_url || '(see hint above)'}
+S3_ACCESS_KEY_ID=${form.access_key_id || 'your-access-key'}
+S3_SECRET_ACCESS_KEY=your-secret-key
+S3_BUCKET_NAME=${form.bucket}
+S3_REGION=${form.region}`}
         </pre>
       </div>
 
-      <div className="pt-2 border-t border-gray-100 flex justify-between items-center">
-        <Button variant="secondary" onClick={testConnection} loading={testing}>
-          {tested ? <CheckCircle2 className="w-4 h-4 text-emerald-500" /> : null}
-          Test Connection
-        </Button>
-        <Button onClick={save}><Save className="w-4 h-4" /> Save Settings</Button>
+      <div className="pt-2 border-t border-gray-100 flex justify-end">
+        <Button onClick={save}><Save className="w-4 h-4" /> Copy Reminder</Button>
       </div>
     </Card>
   )

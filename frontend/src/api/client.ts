@@ -51,8 +51,11 @@ export const projectsApi = {
   create: (data: { name: string; description?: string }) =>
     api.post('/projects', data).then(r => r.data),
   update: (id: string, data: object) => api.patch(`/projects/${id}`, data).then(r => r.data),
+  listMembers: (id: string) => api.get(`/projects/${id}/members`).then(r => r.data),
   addMember: (projectId: string, userId: string, role: string) =>
     api.post(`/projects/${projectId}/members`, { user_id: userId, role }).then(r => r.data),
+  removeMember: (projectId: string, userId: string) =>
+    api.delete(`/projects/${projectId}/members/${userId}`).then(r => r.data),
 }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -115,4 +118,65 @@ export const usersApi = {
   list: () => api.get('/users').then(r => r.data),
   create: (data: object) => api.post('/users', data).then(r => r.data),
   update: (id: string, data: object) => api.patch(`/users/${id}`, data).then(r => r.data),
+}
+
+// ─── Project Resources (guidelines / SOPs / files / links) ────────────────────
+export const resourcesApi = {
+  list: (projectId: string) => api.get(`/projects/${projectId}/resources`).then(r => r.data),
+  createFile: (projectId: string, formData: FormData) =>
+    api.post(`/projects/${projectId}/resources`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+  createLink: (projectId: string, title: string, url: string, description?: string) => {
+    const fd = new FormData()
+    fd.append('type', 'link')
+    fd.append('title', title)
+    fd.append('url', url)
+    if (description) fd.append('description', description)
+    return api.post(`/projects/${projectId}/resources`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+  createInstruction: (projectId: string, type: 'instruction' | 'sop', title: string, body: string, description?: string) => {
+    const fd = new FormData()
+    fd.append('type', type)
+    fd.append('title', title)
+    fd.append('body', body)
+    if (description) fd.append('description', description)
+    return api.post(`/projects/${projectId}/resources`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
+  delete: (projectId: string, resourceId: string) =>
+    api.delete(`/projects/${projectId}/resources/${resourceId}`).then(r => r.data),
+  download: async (projectId: string, resourceId: string, filename: string) => {
+    const res = await api.get(`/projects/${projectId}/resources/${resourceId}/download`, { responseType: 'blob' })
+    triggerBrowserDownload(res.data, filename)
+  },
+}
+
+// ─── Work Submissions (annotator-submitted work + reviewer queue) ─────────────
+export const workSubmissionsApi = {
+  list: (projectId: string, status?: string) =>
+    api.get(`/projects/${projectId}/submissions`, { params: { status } }).then(r => r.data),
+  listMine: () => api.get('/submissions/me').then(r => r.data),
+  create: (projectId: string, formData: FormData) =>
+    api.post(`/projects/${projectId}/submissions`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+  review: (submissionId: string, action: string, notes?: string) =>
+    api.post(`/submissions/${submissionId}/review`, { action, notes }).then(r => r.data),
+  download: async (submissionId: string, filename: string) => {
+    const res = await api.get(`/submissions/${submissionId}/download`, { responseType: 'blob' })
+    triggerBrowserDownload(res.data, filename)
+  },
+}
+
+function triggerBrowserDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
 }

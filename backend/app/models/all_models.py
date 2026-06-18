@@ -105,6 +105,27 @@ class AuditAction(str, enum.Enum):
     PROJECT_CREATED = "project_created"
     PROJECT_STATUS_CHANGED = "project_status_changed"
     DESTINATION_CONFIGURED = "destination_configured"
+    MEMBER_ADDED = "member_added"
+    MEMBER_REMOVED = "member_removed"
+    RESOURCE_ADDED = "resource_added"
+    RESOURCE_DELETED = "resource_deleted"
+    WORK_SUBMITTED = "work_submitted"
+    WORK_REVIEWED = "work_reviewed"
+
+
+class ResourceType(str, enum.Enum):
+    FILE = "file"
+    LINK = "link"
+    INSTRUCTION = "instruction"
+    SOP = "sop"
+
+
+class SubmissionStatus(str, enum.Enum):
+    SUBMITTED = "submitted"
+    IN_REVIEW = "in_review"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    NEEDS_REVISION = "needs_revision"
 
 
 # ─── User ────────────────────────────────────────────────────────────────────
@@ -157,6 +178,8 @@ class Project(Base):
     members = relationship("ProjectMember", back_populates="project", cascade="all, delete-orphan")
     schemas = relationship("Schema", back_populates="project")
     jobs = relationship("ExtractionJob", back_populates="project")
+    resources = relationship("ProjectResource", back_populates="project", cascade="all, delete-orphan")
+    work_submissions = relationship("ProjectSubmission", back_populates="project", cascade="all, delete-orphan")
 
 
 class ProjectMember(Base):
@@ -171,6 +194,59 @@ class ProjectMember(Base):
     project = relationship("Project", back_populates="members")
     user = relationship("User", back_populates="project_memberships")
     __table_args__ = (UniqueConstraint("project_id", "user_id"),)
+
+
+# ─── Project Resource (admin-attached guidelines / SOPs / files / links) ─────
+
+class ProjectResource(Base):
+    __tablename__ = "project_resources"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    type = Column(SAEnum(ResourceType), nullable=False)
+    title = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    # For type=file: storage_key points into the storage backend (local disk or S3/R2).
+    # For type=link: url holds the external link.
+    # For type=instruction/sop: body holds the written text.
+    storage_key = Column(String(1024), nullable=True)
+    file_name = Column(String(512), nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    url = Column(String(1024), nullable=True)
+    body = Column(Text, nullable=True)
+    uploaded_by = Column(String(36), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+
+    project = relationship("Project", back_populates="resources")
+    uploader = relationship("User", foreign_keys=[uploaded_by])
+
+
+# ─── Project Submission (annotator-submitted work, reviewed by a reviewer) ───
+
+class ProjectSubmission(Base):
+    __tablename__ = "project_submissions"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String(255), nullable=True)
+    note = Column(Text, nullable=True)
+    storage_key = Column(String(1024), nullable=False)
+    file_name = Column(String(512), nullable=False)
+    file_size_bytes = Column(Integer, nullable=True)
+    status = Column(SAEnum(SubmissionStatus), default=SubmissionStatus.SUBMITTED, nullable=False, index=True)
+    reviewer_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    review_notes = Column(Text, nullable=True)
+    submitted_at = Column(DateTime(timezone=True), default=now_utc)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
+    project = relationship("Project", back_populates="work_submissions")
+    submitter = relationship("User", foreign_keys=[user_id])
+    reviewer = relationship("User", foreign_keys=[reviewer_id])
+
+    __table_args__ = (
+        Index("ix_submissions_project_status", "project_id", "status"),
+    )
 
 
 # ─── Schema ──────────────────────────────────────────────────────────────────

@@ -4,6 +4,7 @@ import { AppLayout } from '@/components/layout/AppLayout'
 import { LoginPage } from '@/pages/Login'
 import { DashboardPage } from '@/pages/Dashboard'
 import { ProjectsPage } from '@/pages/Projects'
+import { ProjectDetailPage } from '@/pages/ProjectDetail'
 import { JobsPage } from '@/pages/Jobs'
 import { JobDetailPage } from '@/pages/JobDetail'
 import { ReviewPage } from '@/pages/Review'
@@ -78,6 +79,11 @@ export function App() {
           <Route
             path="projects"
             element={<ProjectsPage />}
+          />
+
+          <Route
+            path="projects/:projectId"
+            element={<ProjectDetailPage />}
           />
 
           <Route

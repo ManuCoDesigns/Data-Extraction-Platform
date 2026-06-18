@@ -46,6 +46,7 @@ class UserOut(BaseModel):
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
+    password: Optional[str] = Field(None, min_length=8)
     roles: Optional[list[str]] = None
     is_active: Optional[bool] = None
 
@@ -82,6 +83,14 @@ class ProjectUpdate(BaseModel):
 class ProjectMemberAdd(BaseModel):
     user_id: str
     role: str
+
+
+class ProjectMemberOut(BaseModel):
+    user_id: str
+    role: str
+    full_name: str
+    email: str
+    created_at: datetime
 
 
 # ─── Schema ──────────────────────────────────────────────────────────────────
@@ -236,3 +245,59 @@ class PaginatedResponse(BaseModel):
     page: int
     page_size: int
     pages: int
+
+
+# ─── Project Resource ───────────────────────────────────────────────────────
+
+class ProjectResourceCreate(BaseModel):
+    type: str  # file | link | instruction | sop
+    title: str
+    description: Optional[str] = None
+    url: Optional[str] = None       # required when type == link
+    body: Optional[str] = None      # required when type in (instruction, sop) and no file
+
+    @model_validator(mode="after")
+    def check_required_fields(self):
+        if self.type == "link" and not self.url:
+            raise ValueError("url is required for type=link")
+        return self
+
+
+class ProjectResourceOut(BaseModel):
+    id: str
+    project_id: str
+    type: str
+    title: str
+    description: Optional[str]
+    file_name: Optional[str]
+    file_size_bytes: Optional[int]
+    url: Optional[str]
+    body: Optional[str]
+    uploaded_by: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ─── Project Submission (annotator work) ────────────────────────────────────
+
+class ProjectSubmissionOut(BaseModel):
+    id: str
+    project_id: str
+    user_id: str
+    title: Optional[str]
+    note: Optional[str]
+    file_name: str
+    file_size_bytes: Optional[int]
+    status: str
+    reviewer_id: Optional[str]
+    review_notes: Optional[str]
+    submitted_at: datetime
+    reviewed_at: Optional[datetime]
+
+    model_config = {"from_attributes": True}
+
+
+class ProjectSubmissionReview(BaseModel):
+    action: str  # approve | reject | needs_revision
+    notes: Optional[str] = None

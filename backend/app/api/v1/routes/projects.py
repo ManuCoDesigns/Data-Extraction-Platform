@@ -6,7 +6,7 @@ from app.core.security import get_current_user, require_roles
 from app.models.all_models import (
     Project, ProjectMember, UserRole, User, AuditLog, AuditAction, ProjectStatus
 )
-from app.schemas.api_schemas import ProjectCreate, ProjectOut, ProjectUpdate, ProjectMemberAdd, PaginatedResponse
+from app.schemas.api_schemas import ProjectCreate, ProjectOut, ProjectUpdate, ProjectMemberAdd, ProjectMemberOut, PaginatedResponse
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -126,6 +126,27 @@ def update_project(
     db.commit()
     db.refresh(project)
     return _serialize(project, db)
+
+
+@router.get("/{project_id}/members", response_model=list[ProjectMemberOut])
+def list_members(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    project = db.query(Project).filter(Project.id == project_id, Project.deleted_at == None).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not _can_access(current_user, project):
+        raise HTTPException(status_code=403, detail="Access denied")
+    return [
+        ProjectMemberOut(
+            user_id=m.user_id, role=m.role.value,
+            full_name=m.user.full_name, email=m.user.email,
+            created_at=m.created_at,
+        )
+        for m in project.members
+    ]
 
 
 @router.post("/{project_id}/members", status_code=201)

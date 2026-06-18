@@ -25,7 +25,7 @@ def list_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
-    _: User = Depends(require_roles("org_admin")),
+    _: User = Depends(require_roles("org_admin", "project_admin")),
 ):
     q = db.query(User).filter(User.deleted_at == None)
     total = q.count()
@@ -96,16 +96,29 @@ def update_user(
     user_id: str,
     payload: UserUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_roles("org_admin")),
+    current_user: User = Depends(get_current_user),
 ):
     user = db.query(User).filter(User.id == user_id, User.deleted_at == None).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    user_roles = {r.role.value for r in current_user.roles}
+    is_admin = "org_admin" in user_roles
+    is_self = current_user.id == user_id
+
+    if not is_admin and not is_self:
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+
+    # Non-admins may only change their own name/password — never roles or is_active.
+    if not is_admin and (payload.roles is not None or payload.is_active is not None):
+        raise HTTPException(status_code=403, detail="Only an org_admin can change roles or active status")
+
     before = {"roles": [r.role.value for r in user.roles], "is_active": user.is_active}
 
     if payload.full_name is not None:
         user.full_name = payload.full_name
+    if payload.password is not None:
+        user.hashed_password = hash_password(payload.password)
     if payload.is_active is not None:
         user.is_active = payload.is_active
     if payload.roles is not None:

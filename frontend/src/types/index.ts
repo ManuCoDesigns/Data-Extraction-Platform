@@ -28,6 +28,14 @@ export interface Project {
   job_count?: number
 }
 
+export interface ProjectMember {
+  user_id: string
+  role: string
+  full_name: string
+  email: string
+  created_at: string
+}
+
 // ─── Schema ──────────────────────────────────────────────────────────────────
 export interface Schema {
   id: string
@@ -172,4 +180,39 @@ export interface Notification {
   link?: string
   is_read: boolean
   created_at: string
+}
+
+// ─── Project Resource ───────────────────────────────────────────────────────
+export type ResourceType = 'file' | 'link' | 'instruction' | 'sop'
+
+export interface ProjectResource {
+  id: string
+  project_id: string
+  type: ResourceType
+  title: string
+  description?: string
+  file_name?: string
+  file_size_bytes?: number
+  url?: string
+  body?: string
+  uploaded_by: string
+  created_at: string
+}
+
+// ─── Project Submission (annotator work) ───────────────────────────────────
+export type WorkSubmissionStatus = 'submitted' | 'in_review' | 'approved' | 'rejected' | 'needs_revision'
+
+export interface ProjectSubmission {
+  id: string
+  project_id: string
+  user_id: string
+  title?: string
+  note?: string
+  file_name: string
+  file_size_bytes?: number
+  status: WorkSubmissionStatus
+  reviewer_id?: string
+  review_notes?: string
+  submitted_at: string
+  reviewed_at?: string
 }

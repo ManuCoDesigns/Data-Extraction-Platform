@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.core.config import settings
-from app.api.v1.routes import auth, users, projects, jobs, records, schemas, submission
+from app.api.v1.routes import auth, users, projects, jobs, records, schemas, submission, project_resources, work_submissions
 
 
 @asynccontextmanager
@@ -40,6 +40,8 @@ app.include_router(schemas.router,    prefix=PREFIX)
 app.include_router(submission.router, prefix=PREFIX)
 app.include_router(submission.stats_router,         prefix=PREFIX)
 app.include_router(submission.notifications_router, prefix=PREFIX)
+app.include_router(project_resources.router,        prefix=PREFIX)
+app.include_router(work_submissions.router,         prefix=PREFIX)
 
 
 @app.get("/health")
