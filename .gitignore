@@ -31,3 +31,9 @@ Thumbs.db
 
 # Docker
 *.log
+*.zip
+*.db
+*.db-wal
+*.db-shm
+*.bak
+allfiles.txt
