@@ -216,3 +216,58 @@ export interface ProjectSubmission {
   submitted_at: string
   reviewed_at?: string
 }
+
+// ─── Source (Kanban-tracked dataset) ───────────────────────────────────────
+export type SourceStatus =
+  | 'not_started' | 'extracting' | 'needs_fixes' | 'ready_for_review'
+  | 'in_review' | 'changes_requested' | 'llm_verification' | 'approved'
+
+export interface Source {
+  id: string
+  project_id: string
+  schema_id: string
+  schema_name?: string
+  name: string
+  description?: string
+  website_url?: string
+  status: SourceStatus
+  assigned_extractor_id?: string
+  assigned_extractor_name?: string
+  assigned_reviewer_id?: string
+  assigned_reviewer_name?: string
+  total_records: number
+  valid_records: number
+  invalid_records: number
+  approved_records: number
+  notes?: string
+  created_at: string
+  updated_at: string
+  extraction_started_at?: string
+  extraction_completed_at?: string
+  review_started_at?: string
+  review_completed_at?: string
+  approved_at?: string
+  created_by: string
+}
+
+export interface SourceUploadSummary {
+  total_rows: number
+  valid_rows: number
+  invalid_rows: number
+  job_id: string
+}
+
+export interface PerformanceStatRow {
+  user_id: string
+  name: string
+  sources_count: number
+  approved_count: number
+  total_hours: number
+  samples: number
+  avg_hours_per_source: number | null
+}
+
+export interface PerformanceStats {
+  extractors: PerformanceStatRow[]
+  reviewers: PerformanceStatRow[]
+}

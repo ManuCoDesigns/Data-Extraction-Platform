@@ -184,3 +184,30 @@ function triggerBrowserDownload(blob: Blob, filename: string) {
   a.click()
   URL.revokeObjectURL(url)
 }
+
+// ─── Sources (Kanban-tracked datasets) ─────────────────────────────────────
+export const sourcesApi = {
+  list: (projectId: string, status?: string) =>
+    api.get('/sources', { params: { project_id: projectId, status } }).then(r => r.data),
+  create: (projectId: string, data: object) =>
+    api.post('/sources', data, { params: { project_id: projectId } }).then(r => r.data),
+  get: (id: string) => api.get(`/sources/${id}`).then(r => r.data),
+  update: (id: string, data: object) => api.patch(`/sources/${id}`, data).then(r => r.data),
+  upload: (id: string, formData: FormData) =>
+    api.post(`/sources/${id}/upload`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data),
+  records: (id: string, params?: object) =>
+    api.get(`/sources/${id}/records`, { params }).then(r => r.data),
+  fixRecord: (sourceId: string, recordId: string, extracted_fields: object) =>
+    api.patch(`/sources/${sourceId}/records/${recordId}`, { extracted_fields }).then(r => r.data),
+  reviewRecord: (sourceId: string, recordId: string, action: 'approve' | 'reject', note?: string) =>
+    api.post(`/sources/${sourceId}/records/${recordId}/review`, { action, note }).then(r => r.data),
+  approve: (id: string) => api.post(`/sources/${id}/approve`).then(r => r.data),
+  export: async (id: string, filename: string) => {
+    const res = await api.get(`/sources/${id}/export`, { responseType: 'blob' })
+    triggerBrowserDownload(res.data, filename)
+  },
+  performanceStats: (projectId?: string) =>
+    api.get('/sources/stats/performance', { params: { project_id: projectId } }).then(r => r.data),
+}

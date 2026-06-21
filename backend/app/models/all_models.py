@@ -111,6 +111,23 @@ class AuditAction(str, enum.Enum):
     RESOURCE_DELETED = "resource_deleted"
     WORK_SUBMITTED = "work_submitted"
     WORK_REVIEWED = "work_reviewed"
+    SOURCE_CREATED = "source_created"
+    SOURCE_STATUS_CHANGED = "source_status_changed"
+    SOURCE_ASSIGNED = "source_assigned"
+    SOURCE_DATA_UPLOADED = "source_data_uploaded"
+    SOURCE_RECORD_FIXED = "source_record_fixed"
+    SOURCE_APPROVED = "source_approved"
+
+
+class SourceStatus(str, enum.Enum):
+    NOT_STARTED = "not_started"
+    EXTRACTING = "extracting"
+    NEEDS_FIXES = "needs_fixes"
+    READY_FOR_REVIEW = "ready_for_review"
+    IN_REVIEW = "in_review"
+    CHANGES_REQUESTED = "changes_requested"
+    LLM_VERIFICATION = "llm_verification"  # reserved for fast-follow — not yet auto-routed
+    APPROVED = "approved"
 
 
 class ResourceType(str, enum.Enum):
@@ -285,11 +302,59 @@ class SchemaVersion(Base):
 
 # ─── Extraction Job ──────────────────────────────────────────────────────────
 
+class Source(Base):
+    """
+    A tracked dataset within a project — the Kanban-card-level entity.
+    One Source has one schema, one (optional) website, one assigned extractor,
+    one assigned reviewer, and moves through a status pipeline as work happens.
+    A Source can have multiple upload batches (ExtractionJob rows) underneath it —
+    e.g. an initial upload plus re-uploads to fix validation errors.
+    """
+    __tablename__ = "sources"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text, nullable=True)
+    website_url = Column(String(1024), nullable=True)
+    status = Column(SAEnum(SourceStatus), default=SourceStatus.NOT_STARTED, nullable=False, index=True)
+
+    assigned_extractor_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    assigned_reviewer_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+
+    total_records = Column(Integer, default=0)
+    valid_records = Column(Integer, default=0)
+    invalid_records = Column(Integer, default=0)
+    approved_records = Column(Integer, default=0)
+
+    notes = Column(Text, nullable=True)  # assumptions / free-text notes for the cover sheet
+
+    # Timestamps for performance analytics
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
+    extraction_started_at = Column(DateTime(timezone=True), nullable=True)
+    extraction_completed_at = Column(DateTime(timezone=True), nullable=True)
+    review_started_at = Column(DateTime(timezone=True), nullable=True)
+    review_completed_at = Column(DateTime(timezone=True), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
+
+    project = relationship("Project", foreign_keys=[project_id])
+    schema = relationship("Schema", foreign_keys=[schema_id])
+    extractor = relationship("User", foreign_keys=[assigned_extractor_id])
+    reviewer = relationship("User", foreign_keys=[assigned_reviewer_id])
+    creator = relationship("User", foreign_keys=[created_by])
+    jobs = relationship("ExtractionJob", back_populates="source")
+
+
 class ExtractionJob(Base):
     __tablename__ = "extraction_jobs"
 
     id = Column(String(36), primary_key=True, default=new_uuid)
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=True, index=True)
     schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=False)
     schema_version = Column(Integer, nullable=False)
     name = Column(String(255), nullable=False)
@@ -310,6 +375,7 @@ class ExtractionJob(Base):
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
     project = relationship("Project", back_populates="jobs")
+    source = relationship("Source", back_populates="jobs")
     schema = relationship("Schema", back_populates="jobs")
     creator = relationship("User", foreign_keys=[created_by])
     records = relationship("ExtractedRecord", back_populates="job", cascade="all, delete-orphan")
@@ -358,6 +424,9 @@ class ExtractedRecord(Base):
     schema_version = Column(Integer, nullable=False)
     extraction_confidence = Column(SAEnum(ExtractionConfidence), nullable=False)
     pipeline_warnings = Column(JSON, default=list)
+    # Schema validation — structural conformance, separate from LLM content checks
+    is_schema_valid = Column(Boolean, default=True, nullable=False)
+    validation_errors = Column(JSON, default=list)  # [{field, error}]
     review_status = Column(SAEnum(ReviewStatus), default=ReviewStatus.PENDING, nullable=False)
     review_note = Column(Text, nullable=True)
     reviewed_by = Column(String(36), ForeignKey("users.id"), nullable=True)

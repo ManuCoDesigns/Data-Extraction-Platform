@@ -3,17 +3,19 @@ import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Link as LinkIcon, BookOpen, ClipboardList,
   Plus, Trash2, Download, Upload, CheckCircle, XCircle, RotateCcw,
+  Briefcase, RefreshCw, Database,
 } from 'lucide-react'
-import { projectsApi, resourcesApi, workSubmissionsApi, usersApi } from '@/api/client'
-import type { Project, ProjectMember, ProjectResource, ProjectSubmission, ResourceType, User } from '@/types'
+import { projectsApi, resourcesApi, workSubmissionsApi, usersApi, jobsApi, schemasApi } from '@/api/client'
+import type { Project, ProjectMember, ProjectResource, ProjectSubmission, ResourceType, User, Job, Schema } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { isProjectAdmin, canReviewProject } from '@/lib/permissions'
 import {
-  Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, cn, toast,
+  Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState,
+  Spinner, Avatar, cn, toast, JobStatusBadge,
 } from '@/components/ui'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, format } from 'date-fns'
 
-type Tab = 'overview' | 'resources' | 'submissions' | 'members'
+type Tab = 'overview' | 'resources' | 'jobs' | 'submissions' | 'members'
 
 const RESOURCE_ICON: Record<ResourceType, typeof FileText> = {
   file: FileText, link: LinkIcon, instruction: ClipboardList, sop: BookOpen,
@@ -32,6 +34,8 @@ export function ProjectDetailPage() {
   const [members, setMembers] = useState<ProjectMember[]>([])
   const [resources, setResources] = useState<ProjectResource[]>([])
   const [submissions, setSubmissions] = useState<ProjectSubmission[]>([])
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [schemas, setSchemas] = useState<Schema[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('overview')
 
@@ -42,6 +46,8 @@ export function ProjectDetailPage() {
       projectsApi.listMembers(projectId).then(setMembers),
       resourcesApi.list(projectId).then(setResources),
       workSubmissionsApi.list(projectId).then(setSubmissions).catch(() => setSubmissions([])),
+      jobsApi.list({ project_id: projectId, page_size: 20 }).then((r: any) => setJobs(r.items)).catch(() => {}),
+      schemasApi.list(projectId).then((r: any) => setSchemas(Array.isArray(r) ? r : [])).catch(() => {}),
     ]).finally(() => setLoading(false))
   }
 
@@ -53,11 +59,12 @@ export function ProjectDetailPage() {
   const isAdmin = isProjectAdmin(user.roles, user.id, members)
   const canReview = canReviewProject(user.roles, user.id, members)
 
-  const TABS: { id: Tab; label: string }[] = [
+  const TABS: { id: Tab; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' },
-    { id: 'resources', label: 'Resources' },
-    { id: 'submissions', label: 'Submissions' },
-    ...(isAdmin ? [{ id: 'members' as Tab, label: 'Members' }] : []),
+    { id: 'resources', label: 'Resources', count: resources.length || undefined },
+    { id: 'jobs', label: 'Jobs', count: jobs.length || undefined },
+    { id: 'submissions', label: 'Submissions', count: submissions.length || undefined },
+    ...(isAdmin ? [{ id: 'members' as Tab, label: 'Members', count: members.length || undefined }] : []),
   ]
 
   return (
@@ -72,12 +79,18 @@ export function ProjectDetailPage() {
             {project.description && <p className="text-sm text-gray-500 mt-0.5">{project.description}</p>}
           </div>
         </div>
-        <Badge variant={project.status === 'active' ? 'green' : 'gray'}>{project.status}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge variant={project.status === 'active' ? 'green' : 'gray'}>{project.status}</Badge>
+          <Link to={`/projects/${projectId}/sources`}>
+            <Button size="sm"><Database className="w-3.5 h-3.5" /> Sources Board</Button>
+          </Link>
+        </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Resources', value: resources.length },
+          { label: 'Jobs', value: jobs.length },
           { label: 'Members', value: members.length },
           { label: 'Submissions', value: submissions.length },
         ].map(({ label, value }) => (
@@ -88,17 +101,24 @@ export function ProjectDetailPage() {
         ))}
       </div>
 
-      <div className="border-b border-gray-200 flex gap-6">
+      <div className="border-b border-gray-200 flex gap-6 overflow-x-auto">
         {TABS.map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
             className={cn(
-              'pb-3 text-sm font-medium border-b-2 transition',
+              'pb-3 text-sm font-medium border-b-2 transition whitespace-nowrap flex items-center gap-1.5',
               tab === t.id ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700'
             )}
           >
             {t.label}
+            {t.count !== undefined && (
+              <span className={cn('text-xs px-1.5 py-0.5 rounded-full',
+                tab === t.id ? 'bg-brand-100 text-brand-700' : 'bg-gray-100 text-gray-500'
+              )}>
+                {t.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -119,8 +139,11 @@ export function ProjectDetailPage() {
         </Card>
       )}
 
-      {tab === 'resources' && (
-        <ResourcesTab projectId={project.id} resources={resources} isAdmin={isAdmin} onChange={load} />
+      {tab === 'jobs' && (
+        <JobsTab projectId={project.id} jobs={jobs} schemas={schemas} canUpload={isAdmin} onChange={load} />
+      )}
+
+      {tab === 'resources' && (        <ResourcesTab projectId={project.id} resources={resources} isAdmin={isAdmin} onChange={load} />
       )}
 
       {tab === 'submissions' && (
@@ -566,6 +589,171 @@ function MembersTab({ projectId, members, onChange }: {
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" type="button" onClick={() => setShowAdd(false)}>Cancel</Button>
             <Button type="submit" loading={saving} disabled={!userId}>Add Member</Button>
+          </div>
+        </form>
+      </Modal>
+    </div>
+  )
+}
+
+// ─── Jobs tab ────────────────────────────────────────────────────────────────
+import { useRef } from 'react'
+
+function JobsTab({ projectId, jobs, schemas, canUpload, onChange }: {
+  projectId: string; jobs: Job[]; schemas: Schema[]
+  canUpload: boolean; onChange: () => void
+}) {
+  const [showUpload, setShowUpload] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const [form, setForm] = useState({ schema_id: '', job_name: '' })
+  const [file, setFile] = useState<File | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const handleUpload = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!file || !form.schema_id || !form.job_name) return
+    setUploading(true)
+    try {
+      const fd = new FormData()
+      fd.append('file', file)
+      fd.append('job_name', form.job_name)
+      fd.append('schema_id', form.schema_id)
+      await jobsApi.upload(projectId, fd)
+      toast.success('Job started — extraction running')
+      setShowUpload(false)
+      setFile(null)
+      setForm({ schema_id: '', job_name: '' })
+      onChange()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Upload failed')
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">{jobs.length} extraction job{jobs.length !== 1 ? 's' : ''} in this project</p>
+        {canUpload && (
+          <Button onClick={() => setShowUpload(true)} size="sm">
+            <Upload className="w-3.5 h-3.5" /> New Job
+          </Button>
+        )}
+      </div>
+
+      {jobs.length === 0 ? (
+        <EmptyState
+          title="No jobs yet"
+          description="Upload a source file to start an extraction job."
+          action={canUpload ? (
+            <Button onClick={() => setShowUpload(true)}>
+              <Upload className="w-4 h-4" /> New Extraction Job
+            </Button>
+          ) : undefined}
+        />
+      ) : (
+        <Card className="overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase tracking-wide">
+                <th className="text-left px-5 py-3 font-medium">Job</th>
+                <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Status</th>
+                <th className="text-right px-4 py-3 font-medium hidden sm:table-cell">Records</th>
+                <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Created</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {jobs.map(job => (
+                <tr key={job.id} className="hover:bg-gray-50/60 transition">
+                  <td className="px-5 py-3">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 bg-brand-50 rounded-lg flex items-center justify-center shrink-0">
+                        <FileText className="w-3.5 h-3.5 text-brand-600" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-900 truncate">{job.name}</p>
+                        <p className="text-xs text-gray-400 truncate">{job.source_file_name}</p>
+                      </div>
+                    </div>
+                  </td>
+                  <td className="px-4 py-3 hidden sm:table-cell">
+                    <JobStatusBadge status={job.status} />
+                  </td>
+                  <td className="px-4 py-3 text-right text-xs hidden sm:table-cell">
+                    <span className="text-gray-700 font-medium">{job.total_extracted}</span>
+                    <span className="text-gray-400"> / </span>
+                    <span className="text-emerald-700 font-medium">{job.total_approved}</span>
+                  </td>
+                  <td className="px-4 py-3 text-xs text-gray-400 hidden md:table-cell">
+                    {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <Link
+                      to={`/jobs/${job.id}`}
+                      className="text-brand-600 hover:text-brand-700 text-xs font-medium"
+                    >
+                      Open →
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="New Extraction Job" description="Run the extraction pipeline on a source file using a schema from this project.">
+        <form onSubmit={handleUpload} className="space-y-4">
+          <Select
+            label="Schema"
+            value={form.schema_id}
+            onChange={e => setForm(f => ({ ...f, schema_id: e.target.value }))}
+            required
+          >
+            <option value="">{schemas.filter(s => !s.is_archived).length === 0 ? 'No schemas in this project — create one first' : 'Select a schema…'}</option>
+            {schemas.filter(s => !s.is_archived).map(s => (
+              <option key={s.id} value={s.id}>{s.name} (v{s.current_version})</option>
+            ))}
+          </Select>
+          <Input
+            label="Job name"
+            value={form.job_name}
+            onChange={e => setForm(f => ({ ...f, job_name: e.target.value }))}
+            placeholder="e.g. BGS DMQ 2020 — Run 1"
+            required
+          />
+          <div
+            onClick={() => !uploading && fileRef.current?.click()}
+            className={cn(
+              'border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition',
+              file ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
+              uploading && 'opacity-60 cursor-not-allowed'
+            )}
+          >
+            <input
+              ref={fileRef} type="file" accept=".pdf,.csv,.xlsx,.xls" className="hidden"
+              onChange={e => setFile(e.target.files?.[0] ?? null)}
+            />
+            <Upload className="w-5 h-5 mx-auto text-gray-400 mb-2" />
+            {file ? (
+              <div>
+                <p className="text-sm font-medium text-brand-700">{file.name}</p>
+                <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm text-gray-600 font-medium">Drop a file or click to browse</p>
+                <p className="text-xs text-gray-400 mt-1">PDF, CSV, XLSX — max 100MB</p>
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" type="button" onClick={() => setShowUpload(false)} disabled={uploading}>Cancel</Button>
+            <Button type="submit" loading={uploading} disabled={!file || !form.schema_id || !form.job_name}>
+              <Upload className="w-4 h-4" /> Start Extraction
+            </Button>
           </div>
         </form>
       </Modal>

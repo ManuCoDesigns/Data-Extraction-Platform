@@ -172,6 +172,8 @@ class RecordOut(BaseModel):
     schema_version: int
     extraction_confidence: str
     pipeline_warnings: list
+    is_schema_valid: bool = True
+    validation_errors: list = []
     review_status: str
     review_note: Optional[str]
     reviewed_by: Optional[str]
@@ -235,6 +237,73 @@ class NotificationOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ─── Source (Kanban-tracked dataset) ────────────────────────────────────────
+
+class SourceCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    website_url: Optional[str] = None
+    schema_id: str
+    assigned_extractor_id: Optional[str] = None
+    assigned_reviewer_id: Optional[str] = None
+
+
+class SourceUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    website_url: Optional[str] = None
+    status: Optional[str] = None
+    assigned_extractor_id: Optional[str] = None
+    assigned_reviewer_id: Optional[str] = None
+    notes: Optional[str] = None
+
+
+class SourceOut(BaseModel):
+    id: str
+    project_id: str
+    schema_id: str
+    schema_name: Optional[str] = None
+    name: str
+    description: Optional[str]
+    website_url: Optional[str]
+    status: str
+    assigned_extractor_id: Optional[str]
+    assigned_extractor_name: Optional[str] = None
+    assigned_reviewer_id: Optional[str]
+    assigned_reviewer_name: Optional[str] = None
+    total_records: int
+    valid_records: int
+    invalid_records: int
+    approved_records: int
+    notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    extraction_started_at: Optional[datetime]
+    extraction_completed_at: Optional[datetime]
+    review_started_at: Optional[datetime]
+    review_completed_at: Optional[datetime]
+    approved_at: Optional[datetime]
+    created_by: str
+
+    model_config = {"from_attributes": True}
+
+
+class SourceUploadSummary(BaseModel):
+    total_rows: int
+    valid_rows: int
+    invalid_rows: int
+    job_id: str
+
+
+class SourceRecordFix(BaseModel):
+    extracted_fields: dict
+
+
+class SourceRecordReview(BaseModel):
+    action: str  # approve | reject
+    note: Optional[str] = None
 
 
 # ─── Pagination ──────────────────────────────────────────────────────────────

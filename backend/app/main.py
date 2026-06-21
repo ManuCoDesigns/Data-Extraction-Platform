@@ -4,7 +4,7 @@ from fastapi.responses import Response
 from contextlib import asynccontextmanager
 import re
 from app.core.config import settings
-from app.api.v1.routes import auth, users, projects, jobs, records, schemas, submission, project_resources, work_submissions
+from app.api.v1.routes import auth, users, projects, jobs, records, schemas, submission, project_resources, work_submissions, sources
 
 
 # ─── CORS origin matching ─────────────────────────────────────────────────────
@@ -92,6 +92,7 @@ app.include_router(submission.stats_router,         prefix=PREFIX)
 app.include_router(submission.notifications_router, prefix=PREFIX)
 app.include_router(project_resources.router,        prefix=PREFIX)
 app.include_router(work_submissions.router,         prefix=PREFIX)
+app.include_router(sources.router,                  prefix=PREFIX)
 
 
 @app.get("/health")

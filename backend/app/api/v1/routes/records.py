@@ -20,6 +20,8 @@ def _serialize(r: ExtractedRecord) -> RecordOut:
         schema_version=r.schema_version,
         extraction_confidence=r.extraction_confidence.value,
         pipeline_warnings=r.pipeline_warnings or [],
+        is_schema_valid=r.is_schema_valid if r.is_schema_valid is not None else True,
+        validation_errors=r.validation_errors or [],
         review_status=r.review_status.value,
         review_note=r.review_note,
         reviewed_by=r.reviewed_by,

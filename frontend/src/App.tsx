@@ -5,6 +5,8 @@ import { LoginPage } from '@/pages/Login'
 import { DashboardPage } from '@/pages/Dashboard'
 import { ProjectsPage } from '@/pages/Projects'
 import { ProjectDetailPage } from '@/pages/ProjectDetail'
+import { SourcesPage } from '@/pages/Sources'
+import { SourceDetailPage } from '@/pages/SourceDetail'
 import { JobsPage } from '@/pages/Jobs'
 import { JobDetailPage } from '@/pages/JobDetail'
 import { ReviewPage } from '@/pages/Review'
@@ -84,6 +86,16 @@ export function App() {
           <Route
             path="projects/:projectId"
             element={<ProjectDetailPage />}
+          />
+
+          <Route
+            path="projects/:projectId/sources"
+            element={<SourcesPage />}
+          />
+
+          <Route
+            path="projects/:projectId/sources/:sourceId"
+            element={<SourceDetailPage />}
           />
 
           <Route
