@@ -136,24 +136,46 @@ def _recompute_counts(source: Source, db: Session):
 
 @router.get("", response_model=list[SourceOut])
 def list_sources(
-    project_id: str = Query(...),
+    project_id: str = Query(None),
     status: str = Query(None),
+    assigned_to_me: bool = Query(False, description="Only sources where I'm the extractor or reviewer"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    project = db.query(Project).filter(Project.id == project_id, Project.deleted_at == None).first()
-    if not project:
-        raise HTTPException(status_code=404, detail="Project not found")
-    if not _can_access(current_user, project):
-        raise HTTPException(status_code=403, detail="Access denied")
+    user_roles = {r.role.value for r in current_user.roles}
+    is_admin = "org_admin" in user_roles
 
-    q = db.query(Source).filter(Source.project_id == project_id)
+    if project_id:
+        project = db.query(Project).filter(Project.id == project_id, Project.deleted_at == None).first()
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+        if not _can_access(current_user, project):
+            raise HTTPException(status_code=403, detail="Access denied")
+        q = db.query(Source).filter(Source.project_id == project_id)
+    else:
+        # No project specified — return sources across every project the user can access
+        if is_admin:
+            q = db.query(Source)
+        else:
+            accessible_project_ids = [
+                m.project_id for m in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()
+            ]
+            if not accessible_project_ids:
+                return []
+            q = db.query(Source).filter(Source.project_id.in_(accessible_project_ids))
+
     if status:
         try:
             q = q.filter(Source.status == SourceStatus(status))
         except ValueError:
             pass
-    sources = q.order_by(Source.created_at.desc()).all()
+
+    if assigned_to_me:
+        q = q.filter(
+            (Source.assigned_extractor_id == current_user.id) | (Source.assigned_reviewer_id == current_user.id)
+        )
+
+    sources = q.order_by(Source.updated_at.desc()).all()
     return [_serialize_source(s) for s in sources]
 
 

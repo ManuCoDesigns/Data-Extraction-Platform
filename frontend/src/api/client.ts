@@ -187,8 +187,8 @@ function triggerBrowserDownload(blob: Blob, filename: string) {
 
 // ─── Sources (Kanban-tracked datasets) ─────────────────────────────────────
 export const sourcesApi = {
-  list: (projectId: string, status?: string) =>
-    api.get('/sources', { params: { project_id: projectId, status } }).then(r => r.data),
+  list: (projectId?: string, status?: string, assignedToMe?: boolean) =>
+    api.get('/sources', { params: { project_id: projectId, status, assigned_to_me: assignedToMe || undefined } }).then(r => r.data),
   create: (projectId: string, data: object) =>
     api.post('/sources', data, { params: { project_id: projectId } }).then(r => r.data),
   get: (id: string) => api.get(`/sources/${id}`).then(r => r.data),

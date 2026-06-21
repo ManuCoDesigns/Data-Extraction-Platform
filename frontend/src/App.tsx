@@ -15,6 +15,7 @@ import { UsersPage } from '@/pages/Users'
 import { ProfilePage } from '@/pages/Profile'
 import { SettingsPage } from '@/pages/Settings'
 import { useAuthStore } from '@/store/auth'
+import { hasCapability } from '@/lib/permissions'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuthStore()
@@ -49,6 +50,16 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+// Sources is the entire job for extractors/reviewers/QA — skip Dashboard
+// for them and land directly on the global Sources board. Admins still get
+// the fuller Dashboard since they need the project-wide overview.
+function IndexRoute() {
+  const { user } = useAuthStore()
+  if (!user) return null
+  const isAdminish = hasCapability(user.roles, 'manage_schemas') || hasCapability(user.roles, 'manage_users')
+  return isAdminish ? <DashboardPage /> : <SourcesPage />
+}
+
 export function App() {
   const fetchMe = useAuthStore((state) => state.fetchMe)
 
@@ -75,7 +86,12 @@ export function App() {
 
           <Route
             index
-            element={<DashboardPage />}
+            element={<IndexRoute />}
+          />
+
+          <Route
+            path="sources"
+            element={<SourcesPage />}
           />
 
           <Route

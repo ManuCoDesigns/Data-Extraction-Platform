@@ -2,7 +2,7 @@ import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { useEffect, useState } from 'react'
 import {
-  LayoutDashboard, FolderKanban, Briefcase, Database,
+  LayoutDashboard, FolderKanban, Briefcase, Database, Layers,
   Users, Bell, LogOut, ChevronRight, Settings,
   BarChart3, Shield, Zap, Upload, ClipboardCheck
 } from 'lucide-react'
@@ -21,17 +21,21 @@ export function AppLayout() {
   const [collapsed, setCollapsed] = useState(false)
 
   // Capabilities
-  const canManageUsers = useCapability('manage_users')
-  const canUploadJobs = useCapability('upload_extraction_jobs')
-  const canManageSchemas = useCapability('manage_schemas')
-  const canReview = useCapability('review_submissions')
+  const canManageUsers    = useCapability('manage_users')
+  const canUploadJobs     = useCapability('upload_extraction_jobs')
+  const canManageSchemas  = useCapability('manage_schemas')
+  const canReview         = useCapability('review_submissions')
+  // Admins (org_admin / project_admin) get the full toolset. Everyone else
+  // (extractor, reviewer, qa_lead, read_only) gets a minimal nav — Sources
+  // is their whole job, so it's the only thing in front of them.
+  const isAdminish = canManageSchemas || canManageUsers
 
   useEffect(() => { fetchMe() }, [])
 
   useEffect(() => {
     if (!user) return
-    notificationsApi.list().then(setNotifications).catch(() => { })
-    const iv = setInterval(() => notificationsApi.list().then(setNotifications).catch(() => { }), 60000)
+    notificationsApi.list().then(setNotifications).catch(() => {})
+    const iv = setInterval(() => notificationsApi.list().then(setNotifications).catch(() => {}), 60000)
     return () => clearInterval(iv)
   }, [user])
 
@@ -41,16 +45,22 @@ export function AppLayout() {
   const crumbs = location.pathname.split('/').filter(Boolean)
 
   // Build nav dynamically based on capabilities
-  const mainNav = [
-    { to: '/', icon: LayoutDashboard, label: 'Dashboard', exact: true, show: true },
-    { to: '/projects', icon: FolderKanban, label: 'Projects', exact: false, show: true },
-    { to: '/jobs', icon: Briefcase, label: 'Jobs', exact: false, show: canUploadJobs },
-    { to: '/schemas', icon: Database, label: 'Schemas', exact: false, show: canManageSchemas },
-  ].filter(n => n.show)
+  const mainNav = isAdminish
+    ? [
+        { to: '/sources',  icon: Database,        label: 'Sources',    exact: false, show: true },
+        { to: '/',         icon: LayoutDashboard, label: 'Dashboard',  exact: true,  show: true },
+        { to: '/projects', icon: FolderKanban,    label: 'Projects',   exact: false, show: true },
+        { to: '/jobs',     icon: Briefcase,       label: 'Jobs',       exact: false, show: canUploadJobs },
+        { to: '/schemas',  icon: Layers,          label: 'Schemas',    exact: false, show: canManageSchemas },
+      ].filter(n => n.show)
+    : [
+        { to: '/sources',  icon: Database,        label: 'Sources',    exact: false, show: true },
+        { to: '/projects', icon: FolderKanban,    label: 'Projects',   exact: false, show: true },
+      ].filter(n => n.show)
 
   const adminNav = [
-    { to: '/admin/users', icon: Users, label: 'Users', show: canManageUsers },
-    { to: '/settings', icon: Settings, label: 'Settings', show: canManageUsers },
+    { to: '/admin/users', icon: Users,    label: 'Users',    show: canManageUsers },
+    { to: '/settings',    icon: Settings, label: 'Settings', show: canManageUsers },
   ].filter(n => n.show)
 
   const showAdminSection = adminNav.length > 0
