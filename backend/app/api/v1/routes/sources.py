@@ -37,7 +37,9 @@ from app.services.schema_validator import validate_record, map_row_to_fields
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
-ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json"}
+ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt"}
+# Extensions that go through AI extraction (not mechanical row mapping)
+AI_EXTRACTION_EXTENSIONS = {".pdf", ".txt"}
 
 
 # ─── Permission helpers ──────────────────────────────────────────────────────
@@ -283,40 +285,83 @@ async def upload_to_source(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Two paths depending on file type:
+
+    Structured (CSV / Excel / JSON):
+      Rows are mapped mechanically onto schema fields and validated.
+      Fast — no LLM call, results in seconds.
+
+    Unstructured (PDF / TXT):
+      Claude reads the document, understands the schema, and extracts
+      every record it can find. Runs synchronously — no Celery needed.
+      Takes 10–30 seconds depending on document size.
+    """
     source = _get_source_or_404(source_id, db)
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor or a project admin can upload to this source")
 
-    import os
-    ext = os.path.splitext(file.filename or "")[1].lower()
-    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
-        raise HTTPException(status_code=422, detail=f"Unsupported file type: {ext}. Use CSV, XLSX, or JSON.")
+    import os as _os
+    filename = file.filename or ""
+    ext = _os.path.splitext(filename)[1].lower()
+    # Fallback: if no extension from filename, check content-type
+    if not ext:
+        ct = (file.content_type or "").lower()
+        if "pdf" in ct:
+            ext = ".pdf"
+        elif "text" in ct or "plain" in ct:
+            ext = ".txt"
+        elif "csv" in ct:
+            ext = ".csv"
+        elif "json" in ct:
+            ext = ".json"
+        elif "sheet" in ct or "excel" in ct or "spreadsheet" in ct:
+            ext = ".xlsx"
 
-    content = await file.read()
-    rows = _parse_rows(content, ext, file.filename)
-    if not rows:
-        raise HTTPException(status_code=422, detail="No rows found in the uploaded file")
+    if ext not in ALLOWED_UPLOAD_EXTENSIONS:
+        raise HTTPException(status_code=422, detail=f"Unsupported file type '{ext or file.content_type}'. Accepted: PDF, TXT, CSV, XLSX, JSON.")
 
     schema_ver = db.query(SchemaVersion).filter(
         SchemaVersion.schema_id == source.schema_id
     ).order_by(SchemaVersion.version.desc()).first()
     if not schema_ver:
-        raise HTTPException(status_code=422, detail="This source's schema has no versions defined")
+        raise HTTPException(status_code=422, detail="This source's schema has no field definitions yet.")
 
     schema_fields = schema_ver.definition.get("fields", [])
+    content = await file.read()
 
-    # Re-upload replaces the current record set for this source
+    # ── Route: AI extraction (PDF / TXT) ──────────────────────────────────────
+    if ext in AI_EXTRACTION_EXTENSIONS:
+        try:
+            rows = await _extract_with_llm(content, ext, schema_ver.definition, source)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"AI extraction failed: {str(e)}")
+        if not rows:
+            raise HTTPException(status_code=422, detail="AI extraction found no records in the document. Check that the document matches the schema and try again.")
+        extraction_method = "llm"
+    else:
+        # ── Route: mechanical row mapping (CSV / Excel / JSON) ─────────────────
+        rows = _parse_rows(content, ext, file.filename or "")
+        if not rows:
+            raise HTTPException(status_code=422, detail="No rows found in the uploaded file.")
+        extraction_method = "structured"
+
+    # Clear any previous records for this source (re-upload replaces everything)
     old_job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
     if old_job_ids:
         db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(old_job_ids)).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(ExtractionJob.id.in_(old_job_ids)).delete(synchronize_session=False)
 
-    file_ext_type = {".csv": FileSourceType.CSV, ".xlsx": FileSourceType.EXCEL,
-                      ".xls": FileSourceType.EXCEL, ".json": FileSourceType.CSV}[ext]
+    file_ext_type = {
+        ".csv": FileSourceType.CSV, ".xlsx": FileSourceType.EXCEL,
+        ".xls": FileSourceType.EXCEL, ".json": FileSourceType.CSV,
+        ".pdf": FileSourceType.PDF, ".txt": FileSourceType.CSV,
+    }.get(ext, FileSourceType.CSV)
 
     job = ExtractionJob(
         project_id=source.project_id, source_id=source_id,
         schema_id=source.schema_id, schema_version=schema_ver.version,
-        name=f"{source.name} — upload {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
+        name=f"{source.name} — {extraction_method} upload {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
         source_file_name=file.filename, source_file_size_bytes=len(content),
         source_type=file_ext_type, status=JobStatus.READY_FOR_REVIEW,
         total_raw_records=len(rows), total_extracted=len(rows),
@@ -327,17 +372,24 @@ async def upload_to_source(
 
     valid_count = 0
     for row in rows:
-        mapped = map_row_to_fields(row, schema_fields)
+        if extraction_method == "llm":
+            # LLM already returns schema-shaped dicts — just validate
+            mapped = {k: v for k, v in row.items() if k != "_raw_text"}
+            raw_text = row.get("_raw_text", json.dumps(row, ensure_ascii=False, default=str))
+        else:
+            mapped = map_row_to_fields(row, schema_fields)
+            raw_text = json.dumps(row, ensure_ascii=False, default=str)
+
         is_valid, errors = validate_record(mapped, schema_fields)
         if is_valid:
             valid_count += 1
-        confidence = ExtractionConfidence.HIGH if is_valid else ExtractionConfidence.FLAGGED
         record = ExtractedRecord(
             job_id=job.id, schema_version=schema_ver.version,
-            extraction_confidence=confidence, is_schema_valid=is_valid,
-            validation_errors=errors, review_status=ReviewStatus.PENDING,
-            extracted_fields=mapped, raw_text=json.dumps(row, ensure_ascii=False, default=str),
-            canonical_name=str(mapped.get("canonical_name") or mapped.get("name") or "")[:512] or None,
+            extraction_confidence=ExtractionConfidence.HIGH if is_valid else ExtractionConfidence.FLAGGED,
+            is_schema_valid=is_valid, validation_errors=errors,
+            review_status=ReviewStatus.PENDING,
+            extracted_fields=mapped, raw_text=raw_text,
+            canonical_name=str(mapped.get("canonical_name") or mapped.get("company_name") or mapped.get("material_name") or mapped.get("name") or "")[:512] or None,
         )
         db.add(record)
 
@@ -350,15 +402,128 @@ async def upload_to_source(
 
     db.flush()
     _recompute_counts(source, db)
-
     db.add(AuditLog(
         user_id=current_user.id, project_id=source.project_id,
         action=AuditAction.SOURCE_DATA_UPLOADED,
-        after_value={"file": file.filename, "rows": len(rows), "valid": valid_count, "invalid": invalid_count},
+        after_value={"file": file.filename, "method": extraction_method, "rows": len(rows), "valid": valid_count, "invalid": invalid_count},
     ))
     db.commit()
 
-    return SourceUploadSummary(total_rows=len(rows), valid_rows=valid_count, invalid_rows=invalid_count, job_id=job.id)
+    return SourceUploadSummary(
+        total_rows=len(rows), valid_rows=valid_count,
+        invalid_rows=invalid_count, job_id=job.id,
+    )
+
+
+async def _extract_with_llm(content: bytes, ext: str, schema_definition: dict, source: Source) -> list[dict]:
+    """
+    Uses Claude to extract structured records from a PDF or plain-text document.
+    Returns a list of dicts matching the schema's field names.
+    The model is told exactly what fields to extract, their types, and what
+    the extraction instructions say — same instructions human extractors follow.
+    """
+    import anthropic, re
+    from app.core.config import settings
+
+    # Extract readable text from the document
+    if ext == ".pdf":
+        import pdfplumber, io as _io
+        text_parts = []
+        with pdfplumber.open(_io.BytesIO(content)) as pdf:
+            for page in pdf.pages:
+                t = page.extract_text()
+                if t:
+                    text_parts.append(t)
+        doc_text = "\n\n".join(text_parts)
+    else:
+        doc_text = content.decode("utf-8", errors="replace")
+
+    if not doc_text.strip():
+        raise ValueError("Could not extract any readable text from the document.")
+
+    # Trim to ~60k chars to stay within context — for very large docs we take a representative sample
+    MAX_CHARS = 60000
+    if len(doc_text) > MAX_CHARS:
+        doc_text = doc_text[:MAX_CHARS] + "\n\n[Document truncated — extract from the above portion only]"
+
+    # Build a clean field spec for the prompt
+    fields = schema_definition.get("fields", [])
+    required_fields = [f for f in fields if f.get("required") and "fixed_value" not in f]
+    optional_fields = [f for f in fields if not f.get("required") and "fixed_value" not in f]
+    fixed_fields = {f["name"]: f["fixed_value"] for f in fields if "fixed_value" in f}
+
+    def field_line(f: dict) -> str:
+        parts = [f"- {f['name']} ({f.get('type','string')})"]
+        if f.get("description"):
+            parts.append(f": {f['description']}")
+        if f.get("enum"):
+            parts.append(f" — allowed values: {f['enum']}")
+        return "".join(parts)
+
+    extraction_instructions = schema_definition.get("extraction_instructions", "")
+    grouping_key = schema_definition.get("grouping_key", "")
+
+    system_prompt = f"""You are a precise data extraction specialist. You extract structured records from documents and return them as JSON.
+
+SCHEMA: {schema_definition.get('name', 'Data Extraction Schema')}
+{f'GROUPING: Each record represents one unique {grouping_key}.' if grouping_key else ''}
+{f'EXTRACTION RULES:\\n{extraction_instructions}' if extraction_instructions else ''}
+
+REQUIRED FIELDS (must be present in every record):
+{chr(10).join(field_line(f) for f in required_fields) or '(none)'}
+
+OPTIONAL FIELDS (include if present in the source):
+{chr(10).join(field_line(f) for f in optional_fields) or '(none)'}
+
+FIXED FIELDS (always set these exact values, do not extract from document):
+{chr(10).join(f'- {k}: {v}' for k, v in fixed_fields.items()) or '(none)'}
+
+RULES:
+1. Extract EVERY record you can find — do not skip any.
+2. If a field is not in the document, set it to null. Never invent values.
+3. Return ONLY a JSON array. No preamble, no explanation, no markdown code fences.
+4. Each element of the array is one record with exactly the field names above.
+5. String values should be clean — trim whitespace, preserve original casing.
+
+Example response format:
+[{{"field_one": "value", "field_two": 1, "optional_field": null}}, ...]"""
+
+    user_message = f"""Extract all records from this document:
+
+---
+{doc_text}
+---
+
+Return a JSON array of all records found."""
+
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=8000,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
+    )
+
+    raw_text = response.content[0].text if response.content else ""
+
+    # Strip markdown fences if model added them despite instructions
+    clean = raw_text.strip()
+    if clean.startswith("```"):
+        clean = re.sub(r"^```(?:json)?\s*", "", clean)
+        clean = re.sub(r"\s*```$", "", clean)
+
+    records = json.loads(clean.strip())
+    if not isinstance(records, list):
+        raise ValueError(f"Expected a JSON array, got {type(records).__name__}")
+
+    # Add fixed field values and a raw_text pointer on every record
+    for rec in records:
+        for k, v in fixed_fields.items():
+            rec[k] = v
+        if "_raw_text" not in rec:
+            rec["_raw_text"] = ""  # will be populated from the row itself
+
+    return records
 
 
 def _parse_rows(content: bytes, ext: str, filename: str) -> list[dict]:
@@ -668,3 +833,51 @@ def performance_stats(
         return out
 
     return {"extractors": finalize(by_extractor), "reviewers": finalize(by_reviewer)}
+
+
+# ─── Delete source ────────────────────────────────────────────────────────────
+
+@router.delete("/{source_id}", status_code=204)
+def delete_source(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a source and all its jobs and records. Only admins can do this."""
+    source = _get_source_or_404(source_id, db)
+    if not _can_manage_source(current_user, source):
+        raise HTTPException(status_code=403, detail="Only project admins can delete sources")
+    if source.status == SourceStatus.APPROVED:
+        raise HTTPException(status_code=422, detail="Approved sources cannot be deleted — they are part of the record.")
+    job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
+    if job_ids:
+        db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
+    db.delete(source)
+    db.add(AuditLog(
+        user_id=current_user.id, project_id=source.project_id,
+        action=AuditAction.SOURCE_STATUS_CHANGED,
+        before_value={"name": source.name, "status": source.status.value},
+        after_value={"deleted": True},
+    ))
+    db.commit()
+
+
+@router.delete("/{source_id}/records/{record_id}", status_code=204)
+def delete_source_record(
+    source_id: str, record_id: str,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Delete a single record from a source. Extractor or admin only."""
+    source = _get_source_or_404(source_id, db)
+    if not _is_assigned_extractor(current_user, source):
+        raise HTTPException(status_code=403, detail="Only the assigned extractor or admin can delete records")
+    record = db.query(ExtractedRecord).join(ExtractionJob).filter(
+        ExtractedRecord.id == record_id, ExtractionJob.source_id == source_id
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found in this source")
+    db.delete(record)
+    db.flush()
+    _recompute_counts(source, db)
+    db.commit()

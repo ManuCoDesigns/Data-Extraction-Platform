@@ -137,3 +137,27 @@ def update_user(
     db.commit()
     db.refresh(user)
     return _serialize_user(user)
+
+
+@router.delete("/{user_id}", status_code=204)
+def delete_user(
+    user_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("org_admin")),
+):
+    """Soft-delete (deactivate) a user. Cannot delete yourself."""
+    from datetime import datetime, timezone
+    if user_id == current_user.id:
+        raise HTTPException(status_code=422, detail="You cannot delete your own account")
+    user = db.query(User).filter(User.id == user_id, User.deleted_at == None).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    user.is_active = False
+    user.deleted_at = datetime.now(timezone.utc)
+    db.add(AuditLog(
+        user_id=current_user.id,
+        action=AuditAction.USER_ROLE_CHANGED,
+        before_value={"email": user.email, "active": True},
+        after_value={"deleted": True},
+    ))
+    db.commit()

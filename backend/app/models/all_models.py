@@ -103,6 +103,7 @@ class AuditAction(str, enum.Enum):
     USER_ROLE_CHANGED = "user_role_changed"
     USER_DEACTIVATED = "user_deactivated"
     PROJECT_CREATED = "project_created"
+    PROJECT_DELETED = "project_deleted"
     PROJECT_STATUS_CHANGED = "project_status_changed"
     DESTINATION_CONFIGURED = "destination_configured"
     MEMBER_ADDED = "member_added"

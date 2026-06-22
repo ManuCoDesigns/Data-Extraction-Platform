@@ -323,3 +323,42 @@ export function LLMVerdictBadge({ verdict, skipped }: { verdict?: string; skippe
   const map: Record<string, BadgeProps['variant']> = { PASS: 'green', REVIEW: 'amber', REJECT: 'red' }
   return <Badge variant={map[verdict] ?? 'gray'} dot>{verdict}</Badge>
 }
+
+
+// ─── ConfirmDialog ────────────────────────────────────────────────────────────
+export function ConfirmDialog({
+  open, title, description, confirmLabel = 'Confirm', variant = 'danger',
+  loading, onConfirm, onCancel,
+}: {
+  open: boolean
+  title: string
+  description: string
+  confirmLabel?: string
+  variant?: 'danger' | 'warning'
+  loading?: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  if (!open) return null
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onCancel} />
+      <div className="relative bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+          <p className="text-sm text-gray-500 mt-1.5">{description}</p>
+        </div>
+        <div className="flex justify-end gap-3 pt-2">
+          <Button variant="secondary" onClick={onCancel} disabled={loading}>Cancel</Button>
+          <Button
+            onClick={onConfirm}
+            loading={loading}
+            className={variant === 'danger' ? '!bg-red-600 hover:!bg-red-700 focus:!ring-red-500' : '!bg-amber-500 hover:!bg-amber-600 focus:!ring-amber-400'}
+          >
+            {confirmLabel}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}

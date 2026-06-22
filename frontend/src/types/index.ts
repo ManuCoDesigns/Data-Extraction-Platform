@@ -24,6 +24,7 @@ export interface Project {
   owner_id: string
   submission_destinations: string[]
   created_at: string
+  updated_at: string
   member_count?: number
   job_count?: number
 }
@@ -41,9 +42,11 @@ export interface Schema {
   id: string
   project_id: string
   name: string
+  description?: string
   current_version: number
   is_archived: boolean
   created_at: string
+  updated_at?: string
 }
 
 export interface SchemaVersion {

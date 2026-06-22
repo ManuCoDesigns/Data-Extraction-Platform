@@ -107,3 +107,43 @@ def archive_schema(
     db.add(AuditLog(user_id=current_user.id, action=AuditAction.SCHEMA_ARCHIVED, after_value={"schema_id": schema_id}))
     db.commit()
     return {"message": "Schema archived"}
+
+
+@router.patch("/{schema_id}")
+def update_schema(
+    schema_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("org_admin", "project_admin")),
+):
+    schema = db.query(Schema).filter(Schema.id == schema_id).first()
+    if not schema:
+        raise HTTPException(status_code=404, detail="Schema not found")
+    if "name" in payload:
+        schema.name = payload["name"]
+    if "description" in payload:
+        schema.description = payload.get("description")
+    db.commit()
+    return {"id": schema.id, "name": schema.name}
+
+
+@router.delete("/{schema_id}", status_code=204)
+def delete_schema(
+    schema_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("org_admin", "project_admin")),
+):
+    """Hard-delete a schema. Blocked if any extraction jobs reference it."""
+    from app.models.all_models import ExtractionJob
+    schema = db.query(Schema).filter(Schema.id == schema_id).first()
+    if not schema:
+        raise HTTPException(status_code=404, detail="Schema not found")
+    job_count = db.query(ExtractionJob).filter(ExtractionJob.schema_id == schema_id).count()
+    if job_count > 0:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot delete — {job_count} extraction job(s) reference this schema. Archive it instead."
+        )
+    db.query(SchemaVersion).filter(SchemaVersion.schema_id == schema_id).delete()
+    db.delete(schema)
+    db.commit()

@@ -188,3 +188,23 @@ def remove_member(
         raise HTTPException(status_code=404, detail="Member not found")
     db.delete(member)
     db.commit()
+
+
+@router.delete("/{project_id}", status_code=204)
+def delete_project(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_roles("org_admin")),
+):
+    """Soft-delete a project. Only org admins can delete projects."""
+    from datetime import datetime, timezone
+    project = db.query(Project).filter(Project.id == project_id, Project.deleted_at == None).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    project.deleted_at = datetime.now(timezone.utc)
+    db.add(AuditLog(
+        user_id=current_user.id, project_id=project_id,
+        action=AuditAction.PROJECT_DELETED,
+        before_value={"name": project.name},
+    ))
+    db.commit()

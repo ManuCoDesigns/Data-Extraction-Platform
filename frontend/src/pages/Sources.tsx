@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   Plus, Globe, Database, LayoutGrid, Table as TableIcon,
-  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles
+  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
-import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, cn, toast } from '@/components/ui'
+import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
 import { formatDistanceToNow } from 'date-fns'
@@ -58,6 +58,8 @@ export function SourcesPage() {
   const [mineOnly, setMineOnly] = useState(false)
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [deleteSource, setDeleteSource] = useState<Source | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const [form, setForm] = useState({
     name: '', description: '', website_url: '', schema_id: '', project_id: projectId ?? '',
     assigned_extractor_id: '', assigned_reviewer_id: '',
@@ -88,6 +90,19 @@ export function SourcesPage() {
     if (mineOnly && s.assigned_extractor_id !== user?.id && s.assigned_reviewer_id !== user?.id) return false
     return true
   })
+
+  const handleDeleteSource = async () => {
+    if (!deleteSource) return
+    setDeleting(true)
+    try {
+      await sourcesApi.delete(deleteSource.id)
+      toast.success('Source deleted')
+      setDeleteSource(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Cannot delete this source')
+    } finally { setDeleting(false) }
+  }
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -301,9 +316,16 @@ export function SourcesPage() {
                     {formatDistanceToNow(new Date(s.updated_at), { addSuffix: true })}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link to={`/projects/${s.project_id}/sources/${s.id}`} className="text-brand-600 hover:text-brand-700 text-xs font-medium">
-                      Open →
-                    </Link>
+                    <div className="flex items-center gap-2 justify-end">
+                      <Link to={`/projects/${s.project_id}/sources/${s.id}`} className="text-brand-600 hover:text-brand-700 text-xs font-medium">
+                        Open →
+                      </Link>
+                      {canManage && (
+                        <button onClick={() => setDeleteSource(s)} className="p-1 text-gray-300 hover:text-red-500 transition">
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -351,6 +373,17 @@ export function SourcesPage() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={!!deleteSource}
+        title="Delete Source"
+        description={`"${deleteSource?.name}" and all its records will be permanently deleted. Approved sources cannot be deleted.`}
+        confirmLabel="Delete Source"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDeleteSource}
+        onCancel={() => setDeleteSource(null)}
+      />
     </div>
   )
 }

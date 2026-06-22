@@ -215,3 +215,27 @@ def get_job_history(job_id: str, db: Session = Depends(get_db), current_user: Us
             exited_at=h.exited_at, triggered_by=h.triggered_by, error=h.error,
         ) for h in history
     ]
+
+
+@router.delete("/{job_id}", status_code=204)
+def delete_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a job and all its records. Only allowed when job is not actively processing."""
+    from app.models.all_models import ExtractedRecord
+    job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).first()
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    user_roles = {r.role.value for r in current_user.roles}
+    if "org_admin" not in user_roles:
+        if not any(m.user_id == current_user.id for m in job.project.members):
+            raise HTTPException(status_code=403, detail="Access denied")
+    active = {"queued", "parsing", "extracting", "llm_review"}
+    if job.status.value in active:
+        raise HTTPException(status_code=422, detail=f"Cannot delete a job that is currently {job.status.value}")
+    db.query(ExtractedRecord).filter(ExtractedRecord.job_id == job_id).delete()
+    db.query(JobStateHistory).filter(JobStateHistory.job_id == job_id).delete()
+    db.delete(job)
+    db.commit()

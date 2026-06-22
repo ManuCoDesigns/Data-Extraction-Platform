@@ -201,3 +201,79 @@ def mark_read(
         n.is_read = True
         db.commit()
     return {"ok": True}
+
+
+@stats_router.get("/sources-summary")
+def sources_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns source counts by status + recent activity for the dashboard.
+    Scoped by role: org_admins see everything, others see their accessible projects.
+    """
+    from app.models.all_models import Source, SourceStatus, ProjectMember
+    from sqlalchemy import func
+
+    user_roles = {r.role.value for r in current_user.roles}
+    is_admin = "org_admin" in user_roles
+
+    q = db.query(Source)
+    if not is_admin:
+        accessible = [m.project_id for m in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()]
+        if not accessible:
+            return {"by_status": {}, "total": 0, "approved_this_week": 0, "recent": []}
+        q = q.filter(Source.project_id.in_(accessible))
+
+    sources = q.all()
+    total = len(sources)
+
+    by_status: dict[str, int] = {}
+    for s in sources:
+        key = s.status.value
+        by_status[key] = by_status.get(key, 0) + 1
+
+    from datetime import datetime, timezone, timedelta
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    approved_this_week = sum(
+        1 for s in sources
+        if s.status == SourceStatus.APPROVED and s.approved_at and s.approved_at >= week_ago
+    )
+
+    # My assigned sources (needs action)
+    my_extracting = [s for s in sources if s.assigned_extractor_id == current_user.id and s.status.value in ("extracting", "needs_fixes", "changes_requested")]
+    my_reviewing = [s for s in sources if s.assigned_reviewer_id == current_user.id and s.status.value in ("ready_for_review", "in_review")]
+
+    def _src(s: Source) -> dict:
+        return {
+            "id": s.id, "name": s.name, "project_id": s.project_id,
+            "status": s.status.value, "total_records": s.total_records,
+            "valid_records": s.valid_records, "invalid_records": s.invalid_records,
+            "approved_records": s.approved_records, "updated_at": s.updated_at,
+        }
+
+    # Recent activity = last 10 updated sources
+    recent = sorted(sources, key=lambda s: s.updated_at or s.created_at, reverse=True)[:10]
+
+    return {
+        "by_status": by_status,
+        "total": total,
+        "approved_this_week": approved_this_week,
+        "my_extracting": [_src(s) for s in my_extracting[:5]],
+        "my_reviewing": [_src(s) for s in my_reviewing[:5]],
+        "recent": [_src(s) for s in recent],
+    }
+
+
+@notifications_router.post("/read-all")
+def mark_all_read(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    from app.models.all_models import Notification
+    db.query(Notification).filter(
+        Notification.user_id == current_user.id,
+        Notification.is_read == False,
+    ).update({"is_read": True})
+    db.commit()
+    return {"ok": True}

@@ -74,3 +74,44 @@ export function canReviewProject(globalRoles: string[], userId: string, members:
   if (globalRoles.includes('org_admin') || globalRoles.includes('qa_lead')) return true
   return members.some(m => m.user_id === userId && (m.role === 'project_admin' || m.role === 'reviewer'))
 }
+
+// ─── Role display metadata ────────────────────────────────────────────────────
+// Use these everywhere in the UI instead of hardcoded strings, so renaming a
+// role in future only requires changing it here.
+
+export const ROLE_META: Record<string, { label: string; description: string; color: string }> = {
+  org_admin: {
+    label: 'Admin',
+    description: 'Full access — manages users, projects, schemas, and can download exports.',
+    color: 'red',
+  },
+  project_admin: {
+    label: 'Project Admin',
+    description: 'Manages one project — assigns extractors and reviewers, sees project stats.',
+    color: 'amber',
+  },
+  qa_lead: {
+    label: 'QA Lead',
+    description: 'Cross-project review access — can approve or reject records in any project.',
+    color: 'blue',
+  },
+  pipeline_operator: {
+    label: 'Extractor',
+    description: 'Uploads source files and fixes validation errors on assigned sources.',
+    color: 'green',
+  },
+  reviewer: {
+    label: 'Reviewer',
+    description: 'Reviews extracted records against the source website on assigned sources.',
+    color: 'purple',
+  },
+  read_only: {
+    label: 'Read Only',
+    description: 'Can view projects and sources but cannot make any changes.',
+    color: 'gray',
+  },
+}
+
+export function getRoleLabel(role: string): string {
+  return ROLE_META[role]?.label ?? role
+}

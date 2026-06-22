@@ -295,6 +295,7 @@ class SourceUploadSummary(BaseModel):
     valid_rows: int
     invalid_rows: int
     job_id: str
+    extraction_method: str = "structured"  # "structured" | "llm"
 
 
 class SourceRecordFix(BaseModel):

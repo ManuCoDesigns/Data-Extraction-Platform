@@ -1,137 +1,210 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Plus, FolderKanban, Users, Briefcase } from 'lucide-react'
+import { Plus, Search, FolderKanban, Trash2, Edit3, Users, Database, ChevronRight } from 'lucide-react'
 import { projectsApi } from '@/api/client'
 import type { Project } from '@/types'
-import {
-  Button, Card, Badge, Modal, Input, EmptyState, Spinner
-} from '@/components/ui'
+import { Button, Card, Badge, Modal, Input, Textarea, EmptyState, Spinner, ConfirmDialog, cn, toast } from '@/components/ui'
+import { useCapability } from '@/lib/permissions'
 import { formatDistanceToNow } from 'date-fns'
-
-const STATUS_COLOR: Record<string, 'green' | 'amber' | 'gray' | 'blue'> = {
-  active: 'green', paused: 'amber', archived: 'gray', template: 'blue',
-}
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
   const [showCreate, setShowCreate] = useState(false)
-  const [creating, setCreating] = useState(false)
+  const [editProject, setEditProject] = useState<Project | null>(null)
+  const [deleteProject, setDeleteProject] = useState<Project | null>(null)
   const [form, setForm] = useState({ name: '', description: '' })
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+  const canManage = useCapability('manage_projects')
 
   const load = () =>
-    projectsApi.list().then(r => setProjects(r.items)).finally(() => setLoading(false))
+    projectsApi.list().then(r => {
+      setProjects(r.items || r)
+      setTotal(r.total || (r.items || r).length)
+    }).finally(() => setLoading(false))
 
   useEffect(() => { load() }, [])
 
-  const createProject = async (e: React.FormEvent) => {
+  const filtered = projects.filter(p =>
+    p.name.toLowerCase().includes(search.toLowerCase()) ||
+    (p.description || '').toLowerCase().includes(search.toLowerCase())
+  )
+
+  const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault()
-    setCreating(true)
+    if (!form.name.trim()) return
+    setSaving(true)
     try {
-      await projectsApi.create(form)
+      await projectsApi.create({ name: form.name, description: form.description || undefined })
+      toast.success('Project created')
       setShowCreate(false)
       setForm({ name: '', description: '' })
       load()
-    } finally {
-      setCreating(false)
-    }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to create project')
+    } finally { setSaving(false) }
   }
+
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editProject || !form.name.trim()) return
+    setSaving(true)
+    try {
+      await projectsApi.update(editProject.id, { name: form.name, description: form.description || undefined })
+      toast.success('Project updated')
+      setEditProject(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to update project')
+    } finally { setSaving(false) }
+  }
+
+  const handleDelete = async () => {
+    if (!deleteProject) return
+    setDeleting(true)
+    try {
+      await projectsApi.delete(deleteProject.id)
+      toast.success('Project deleted')
+      setDeleteProject(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete project')
+    } finally { setDeleting(false) }
+  }
+
+  const openEdit = (p: Project) => {
+    setEditProject(p)
+    setForm({ name: p.name, description: p.description || '' })
+  }
+
+  if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
 
   return (
     <div className="p-8 space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Projects</h1>
-          <p className="mt-1 text-sm text-gray-500">
-            Each project is an isolated extraction workspace with its own schemas and team.
-          </p>
+          <p className="text-sm text-gray-500 mt-1">{total} project{total !== 1 ? 's' : ''}</p>
         </div>
-        <Button onClick={() => setShowCreate(true)}>
-          <Plus className="w-4 h-4" /> New Project
-        </Button>
+        {canManage && (
+          <Button onClick={() => { setForm({ name: '', description: '' }); setShowCreate(true) }}>
+            <Plus className="w-4 h-4" /> New Project
+          </Button>
+        )}
       </div>
 
-      {/* Grid */}
-      {loading ? (
-        <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
-      ) : projects.length === 0 ? (
+      <div className="relative max-w-sm">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+        <input
+          type="text" placeholder="Search projects…" value={search} onChange={e => setSearch(e.target.value)}
+          className="w-full pl-9 pr-4 py-2 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand-500"
+        />
+      </div>
+
+      {filtered.length === 0 ? (
         <EmptyState
-          title="No projects yet"
-          description="Create your first project to start extracting data."
-          action={
-            <Button onClick={() => setShowCreate(true)}>
-              <Plus className="w-4 h-4" /> Create Project
-            </Button>
-          }
+          title={search ? 'No projects match your search' : 'No projects yet'}
+          description={canManage ? 'Create your first project to start organizing your extraction work.' : 'No projects available.'}
+          action={canManage && !search ? <Button onClick={() => setShowCreate(true)}><Plus className="w-4 h-4" /> New Project</Button> : undefined}
         />
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {projects.map(project => (
-            <Link key={project.id} to={`/projects/${project.id}`}>
-              <Card className="p-6 hover:shadow-md hover:border-brand-200 transition-all cursor-pointer h-full flex flex-col">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="w-10 h-10 rounded-xl bg-brand-50 flex items-center justify-center">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {filtered.map(p => (
+            <Card key={p.id} hover className="p-5 flex flex-col gap-4">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-9 h-9 rounded-xl bg-brand-50 flex items-center justify-center shrink-0">
                     <FolderKanban className="w-5 h-5 text-brand-600" />
                   </div>
-                  <Badge variant={STATUS_COLOR[project.status] ?? 'gray'}>
-                    {project.status}
-                  </Badge>
+                  <div className="min-w-0">
+                    <p className="font-semibold text-gray-900 truncate">{p.name}</p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Updated {formatDistanceToNow(new Date(p.updated_at), { addSuffix: true })}
+                    </p>
+                  </div>
                 </div>
-                <h3 className="font-semibold text-gray-900">{project.name}</h3>
-                {project.description && (
-                  <p className="text-sm text-gray-500 mt-1 line-clamp-2 flex-1">
-                    {project.description}
-                  </p>
+                <Badge variant={p.status === 'active' ? 'green' : 'gray'} className="shrink-0">{p.status}</Badge>
+              </div>
+
+              {p.description && (
+                <p className="text-sm text-gray-500 line-clamp-2">{p.description}</p>
+              )}
+
+              <div className="flex items-center justify-between pt-2 border-t border-gray-50">
+                <div className="flex items-center gap-3">
+                  <Link
+                    to={`/projects/${p.id}/sources`}
+                    className="flex items-center gap-1.5 text-xs text-brand-600 hover:text-brand-700 font-medium"
+                  >
+                    <Database className="w-3.5 h-3.5" /> Sources
+                  </Link>
+                  <Link
+                    to={`/projects/${p.id}`}
+                    className="flex items-center gap-1.5 text-xs text-gray-500 hover:text-gray-700"
+                  >
+                    <ChevronRight className="w-3.5 h-3.5" /> Details
+                  </Link>
+                </div>
+                {canManage && (
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => openEdit(p)} className="p-1.5 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100 transition">
+                      <Edit3 className="w-3.5 h-3.5" />
+                    </button>
+                    <button onClick={() => setDeleteProject(p)} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg hover:bg-red-50 transition">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 )}
-                <div className="flex items-center gap-4 mt-4 pt-4 border-t border-gray-100">
-                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                    <Briefcase className="w-3.5 h-3.5" />
-                    {project.job_count ?? 0} jobs
-                  </div>
-                  <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                    <Users className="w-3.5 h-3.5" />
-                    {project.member_count ?? 0} members
-                  </div>
-                  <div className="ml-auto text-xs text-gray-400">
-                    {formatDistanceToNow(new Date(project.created_at), { addSuffix: true })}
-                  </div>
-                </div>
-              </Card>
-            </Link>
+              </div>
+            </Card>
           ))}
         </div>
       )}
 
       {/* Create modal */}
       <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New Project">
-        <form onSubmit={createProject} className="space-y-4">
-          <Input
-            label="Project name"
-            value={form.name}
-            onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-            placeholder="BGS DMQ 2020"
-            required
-            autoFocus
-          />
-          <div className="space-y-1">
-            <label className="block text-sm font-medium text-gray-700">Description (optional)</label>
-            <textarea
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 resize-none"
-              rows={3}
-              value={form.description}
-              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-              placeholder="What data are you extracting?"
-            />
-          </div>
+        <form onSubmit={handleCreate} className="space-y-4">
+          <Input label="Project name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+            placeholder="e.g. BGS Supplier Data 2025" required autoFocus />
+          <Textarea label="Description" rows={2} value={form.description}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+            placeholder="What is this project for?" />
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" type="button" onClick={() => setShowCreate(false)}>
-              Cancel
+            <Button variant="secondary" type="button" onClick={() => setShowCreate(false)}>Cancel</Button>
+            <Button type="submit" loading={saving} disabled={!form.name.trim()}>
+              <Plus className="w-4 h-4" /> Create Project
             </Button>
-            <Button type="submit" loading={creating}>Create Project</Button>
           </div>
         </form>
       </Modal>
+
+      {/* Edit modal */}
+      <Modal open={!!editProject} onClose={() => setEditProject(null)} title="Edit Project">
+        <form onSubmit={handleEdit} className="space-y-4">
+          <Input label="Project name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required autoFocus />
+          <Textarea label="Description" rows={2} value={form.description}
+            onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" type="button" onClick={() => setEditProject(null)}>Cancel</Button>
+            <Button type="submit" loading={saving} disabled={!form.name.trim()}>Save Changes</Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete confirm */}
+      <ConfirmDialog
+        open={!!deleteProject}
+        title="Delete Project"
+        description={`"${deleteProject?.name}" and all its sources, jobs, records, and resources will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete Project"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteProject(null)}
+      />
     </div>
   )
 }

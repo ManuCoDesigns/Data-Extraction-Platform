@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
-  Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon, Clock
+  Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon, Clock, Brain, Trash2
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
-import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, cn, toast } from '@/components/ui'
+import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { format, formatDistanceToNow } from 'date-fns'
 
@@ -25,6 +25,7 @@ type Tab = 'records' | 'details'
 
 export function SourceDetailPage() {
   const { projectId, sourceId } = useParams<{ projectId: string; sourceId: string }>()
+  const navigate = useNavigate()
   const { user } = useAuthStore()
   const [project, setProject] = useState<Project | null>(null)
   const [source, setSource] = useState<Source | null>(null)
@@ -41,6 +42,9 @@ export function SourceDetailPage() {
   const [editRecord, setEditRecord] = useState<any | null>(null)
   const [editFields, setEditFields] = useState<Record<string, string>>({})
   const [savingEdit, setSavingEdit] = useState(false)
+  const [deleteSourceConfirm, setDeleteSourceConfirm] = useState(false)
+  const [deleteRecord, setDeleteRecord] = useState<any | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const load = () => {
     if (!projectId || !sourceId) return
@@ -66,7 +70,8 @@ export function SourceDetailPage() {
       const fd = new FormData()
       fd.append('file', file)
       const summary = await sourcesApi.upload(sourceId, fd)
-      toast.success(`Uploaded: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+      const method = summary.extraction_method === 'llm' ? 'AI extraction' : 'schema mapping'
+      toast.success(`Done via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
       setShowUpload(false)
       setFile(null)
       load()
@@ -141,6 +146,33 @@ export function SourceDetailPage() {
     }
   }
 
+  const handleDeleteSource = async () => {
+    if (!sourceId || !projectId) return
+    setDeleting(true)
+    try {
+      await sourcesApi.delete(sourceId)
+      toast.success('Source deleted')
+      navigate(`/projects/${projectId}/sources`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Cannot delete this source')
+      setDeleting(false)
+      setDeleteSourceConfirm(false)
+    }
+  }
+
+  const handleDeleteRecord = async () => {
+    if (!deleteRecord || !sourceId) return
+    setDeleting(true)
+    try {
+      await sourcesApi.deleteRecord(sourceId, deleteRecord.id)
+      toast.success('Record deleted')
+      setDeleteRecord(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete record')
+    } finally { setDeleting(false) }
+  }
+
   if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
   if (!source) return <EmptyState title="Source not found" />
 
@@ -184,6 +216,12 @@ export function SourceDetailPage() {
           {source.status === 'approved' && isAdmin && (
             <Button size="sm" onClick={handleExport}>
               <Download className="w-3.5 h-3.5" /> Export Package
+            </Button>
+          )}
+          {isAdmin && source.status !== 'approved' && (
+            <Button variant="secondary" size="sm" onClick={() => setDeleteSourceConfirm(true)}
+              className="!text-red-600 !border-red-200 hover:!bg-red-50">
+              <Trash2 className="w-3.5 h-3.5" /> Delete
             </Button>
           )}
         </div>
@@ -326,6 +364,11 @@ export function SourceDetailPage() {
                                   </button>
                                 </>
                               )}
+                              {isExtractor && (
+                                <button onClick={() => setDeleteRecord(r)} className="p-1 text-gray-300 hover:text-red-500 transition">
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
                             </div>
                           </td>
                         </tr>
@@ -382,17 +425,36 @@ export function SourceDetailPage() {
               file ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
               uploading && 'opacity-60 cursor-not-allowed')}
           >
-            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.json" className="hidden" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.json,.pdf,.txt" className="hidden" onChange={e => setFile(e.target.files?.[0] ?? null)} />
             <Upload className="w-6 h-6 mx-auto text-gray-400 mb-2" />
             {file ? (
-              <div><p className="text-sm font-medium text-brand-700">{file.name}</p><p className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</p></div>
+              <div>
+                <p className="text-sm font-medium text-brand-700">{file.name}</p>
+                <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
+              </div>
             ) : (
-              <div><p className="text-sm text-gray-600 font-medium">Drop a file or click to browse</p><p className="text-xs text-gray-400 mt-1">CSV, XLSX, or JSON</p></div>
+              <div>
+                <p className="text-sm text-gray-600 font-medium">Drop a file or click to browse</p>
+                <p className="text-xs text-gray-400 mt-1">CSV, XLSX, JSON — or PDF/TXT for automatic AI extraction</p>
+              </div>
             )}
           </div>
+          {file && /\.(pdf|txt)$/i.test(file.name) && (
+            <div className="flex items-start gap-2 bg-purple-50 border border-purple-200 rounded-xl p-3">
+              <Brain className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+              <p className="text-xs text-purple-700">
+                <strong>AI extraction</strong> — Claude will read this document and extract structured records matching the schema automatically. This takes 10–30 seconds.
+              </p>
+            </div>
+          )}
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" type="button" onClick={() => setShowUpload(false)} disabled={uploading}>Cancel</Button>
-            <Button type="submit" loading={uploading} disabled={!file}><Upload className="w-4 h-4" /> Upload & Validate</Button>
+            <Button type="submit" loading={uploading} disabled={!file}>
+              {uploading
+                ? (file && /\.(pdf|txt)$/i.test(file.name) ? 'AI extracting…' : 'Uploading…')
+                : <><Upload className="w-4 h-4" /> Upload & Validate</>
+              }
+            </Button>
           </div>
         </form>
       </Modal>
@@ -420,6 +482,27 @@ export function SourceDetailPage() {
           </div>
         )}
       </Modal>
+
+      <ConfirmDialog
+        open={deleteSourceConfirm}
+        title="Delete Source"
+        description={`"${source.name}" and all its records will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete Source"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDeleteSource}
+        onCancel={() => setDeleteSourceConfirm(false)}
+      />
+      <ConfirmDialog
+        open={!!deleteRecord}
+        title="Delete Record"
+        description="This record will be permanently deleted from the source."
+        confirmLabel="Delete Record"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDeleteRecord}
+        onCancel={() => setDeleteRecord(null)}
+      />
     </div>
   )
 }
