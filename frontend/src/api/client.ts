@@ -14,9 +14,19 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config
+
+    // Don't retry the refresh call itself — that causes infinite loops
+    if (original?.url?.includes('/auth/refresh')) {
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      window.location.href = '/login'
+      return Promise.reject(error)
+    }
+
     if (error.response?.status === 401 && !original._retry) {
       original._retry = true
       const refresh = localStorage.getItem('refresh_token')
+
       if (refresh) {
         try {
           const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refresh_token: refresh })
@@ -25,12 +35,19 @@ api.interceptors.response.use(
           original.headers.Authorization = `Bearer ${data.access_token}`
           return api(original)
         } catch {
+          // Refresh failed — session is dead, send to login
           localStorage.removeItem('access_token')
           localStorage.removeItem('refresh_token')
           window.location.href = '/login'
+          return Promise.reject(error)
         }
+      } else {
+        // No refresh token at all
+        localStorage.removeItem('access_token')
+        window.location.href = '/login'
       }
     }
+
     return Promise.reject(error)
   }
 )

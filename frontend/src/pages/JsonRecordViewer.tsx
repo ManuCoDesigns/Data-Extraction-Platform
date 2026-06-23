@@ -240,6 +240,13 @@ export function JsonRecordViewer({
     setRejectNote('')
   }, [record.id])
 
+  // Close on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [onClose])
+
   const validationMap = Object.fromEntries(
     (record.validation_errors || []).map(e => [e.field, e])
   )
@@ -369,8 +376,15 @@ export function JsonRecordViewer({
           >next →</button>
         </div>
 
-        <button onClick={onClose} style={{ padding: 6, borderRadius: 6, border: 'none', background: 'transparent', color: 'var(--color-text-tertiary)', cursor: 'pointer', display: 'flex' }}>
-          <X size={16} />
+        <button onClick={onClose} style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          padding: '6px 12px', borderRadius: 8,
+          border: '1px solid var(--color-border-secondary)',
+          background: 'var(--color-background-secondary)',
+          color: 'var(--color-text-secondary)',
+          cursor: 'pointer', fontSize: 13, fontFamily: 'var(--font-sans)',
+        }}>
+          <X size={14} /> Close
         </button>
       </div>
 

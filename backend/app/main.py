@@ -55,7 +55,7 @@ async def cors_middleware(request: Request, call_next):
     origin = request.headers.get("origin", "")
     allowed = is_origin_allowed(origin)
 
-    # Handle preflight
+    # Handle preflight — always return 204 for allowed origins
     if request.method == "OPTIONS":
         if allowed:
             return Response(
@@ -64,7 +64,7 @@ async def cors_middleware(request: Request, call_next):
                     "Access-Control-Allow-Origin": origin,
                     "Access-Control-Allow-Credentials": "true",
                     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-                    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
+                    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Requested-With",
                     "Access-Control-Max-Age": "86400",
                 },
             )
@@ -72,11 +72,13 @@ async def cors_middleware(request: Request, call_next):
 
     response = await call_next(request)
 
+    # Add CORS headers to ALL responses (including 401/500) so browsers
+    # show the real HTTP error instead of a misleading CORS block
     if allowed:
         response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept"
+        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept, X-Requested-With"
 
     return response
 
