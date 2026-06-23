@@ -6,10 +6,10 @@ import {
   FileText, Upload, Eye, RefreshCw, Zap
 } from 'lucide-react'
 import { statsApi, sourcesApi } from '@/api/client'
-import { StatCard, Card, Badge, Spinner, Skeleton, cn } from '@/components/ui'
+import { StatCard, Card, Badge, Spinner, Skeleton, cn, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
-import { formatDistanceToNow, format } from 'date-fns'
+import { format } from 'date-fns'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, Cell
@@ -186,7 +186,7 @@ function AdminDashboard() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-gray-900 group-hover:text-brand-700 truncate">{s.name}</p>
-                    <p className="text-xs text-gray-400">{formatDistanceToNow(new Date(s.updated_at), { addSuffix: true })}</p>
+                    <p className="text-xs text-gray-400">{safeFromNow(s.updated_at)}</p>
                   </div>
                 </div>
                 <div className="flex items-center gap-3 shrink-0 ml-4">

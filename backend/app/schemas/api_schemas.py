@@ -299,6 +299,8 @@ class SourceUploadSummary(BaseModel):
     invalid_rows: int
     job_id: str
     extraction_method: str = "structured"  # "structured" | "llm"
+    files_processed: int = 1              # how many files were found (> 1 for ZIP)
+    file_breakdown: list = []             # [{filename, rows, valid, invalid}] for ZIP uploads
 
 
 class SourceRecordFix(BaseModel):

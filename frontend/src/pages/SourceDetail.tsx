@@ -8,7 +8,7 @@ import {
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
-import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast } from '@/components/ui'
+import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { format, formatDistanceToNow } from 'date-fns'
 
@@ -82,8 +82,10 @@ export function SourceDetailPage() {
       const fd = new FormData()
       fd.append('file', file)
       const summary = await sourcesApi.upload(sourceId, fd)
-      const method = summary.extraction_method === 'llm' ? 'AI extraction' : 'schema mapping'
-      toast.success(`Done via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+      const isZip = file.name.toLowerCase().endsWith('.zip')
+      const isAI = summary.extraction_method === 'llm'
+      const method = isAI ? 'AI extraction' : isZip ? `${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from ZIP` : 'schema mapping'
+      toast.success(`Uploaded via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
       setShowUpload(false)
       setFile(null)
       load()
@@ -333,7 +335,7 @@ export function SourceDetailPage() {
           </div>
           <div className="flex items-center gap-1.5 text-xs text-gray-400 ml-auto">
             <Clock className="w-3.5 h-3.5" />
-            Updated {formatDistanceToNow(new Date(source.updated_at), { addSuffix: true })}
+            Updated {safeFromNow(source.updated_at)}
           </div>
         </div>
       </Card>
@@ -556,7 +558,7 @@ export function SourceDetailPage() {
               { label: 'Schema', value: source.schema_name },
               { label: 'Description', value: source.description || '(none)' },
               { label: 'Website', value: source.website_url || '(none)' },
-              { label: 'Created', value: format(new Date(source.created_at), 'MMM d, yyyy HH:mm') },
+              { label: 'Created', value: safeFormat(source.created_at, 'MMM d, yyyy HH:mm') },
               { label: 'Extraction started', value: source.extraction_started_at ? format(new Date(source.extraction_started_at), 'MMM d, HH:mm') : '—' },
               { label: 'Extraction completed', value: source.extraction_completed_at ? format(new Date(source.extraction_completed_at), 'MMM d, HH:mm') : '—' },
               { label: 'Review started', value: source.review_started_at ? format(new Date(source.review_started_at), 'MMM d, HH:mm') : '—' },
@@ -578,46 +580,85 @@ export function SourceDetailPage() {
       )}
 
       {/* Upload modal */}
-      <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Upload extracted rows as CSV, Excel, or JSON — each row will be validated against this source's schema.">
+      <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Upload extracted data to this source — individual files or a ZIP bundle.">
         <form onSubmit={handleUpload} className="space-y-4">
           {source.total_records > 0 && (
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
               Re-uploading replaces all {source.total_records} existing records in this source.
             </div>
           )}
+
+          {/* File type legend */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            {[
+              { icon: '🗂️', label: 'ZIP of JSONs', desc: 'Bundle from extractor script — all files processed at once' },
+              { icon: '📄', label: 'JSON / CSV / Excel', desc: 'Single structured file with multiple records' },
+              { icon: '📋', label: 'PDF / TXT', desc: 'Raw document — AI extracts records automatically' },
+            ].map(({ icon, label, desc }) => (
+              <div key={label} className="flex items-start gap-2 p-2.5 bg-gray-50 rounded-lg border border-gray-100">
+                <span className="text-base leading-none mt-0.5">{icon}</span>
+                <div>
+                  <p className="font-medium text-gray-700">{label}</p>
+                  <p className="text-gray-400 leading-relaxed mt-0.5">{desc}</p>
+                </div>
+              </div>
+            ))}
+            <div className="flex items-start gap-2 p-2.5 bg-brand-50 rounded-lg border border-brand-100">
+              <span className="text-base leading-none mt-0.5">⚡</span>
+              <div>
+                <p className="font-medium text-brand-700">Auto-Scrape</p>
+                <p className="text-brand-500 leading-relaxed mt-0.5">Use the scrape button to pull directly from the source URL</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Drop zone */}
           <div
             onClick={() => !uploading && fileRef.current?.click()}
-            className={cn('border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition',
+            className={cn(
+              'border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition',
               file ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
-              uploading && 'opacity-60 cursor-not-allowed')}
+              uploading && 'opacity-60 cursor-not-allowed'
+            )}
           >
-            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.json,.pdf,.txt" className="hidden" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,.xlsx,.xls,.json,.pdf,.txt,.zip"
+              className="hidden"
+              onChange={e => setFile(e.target.files?.[0] ?? null)}
+            />
             <Upload className="w-6 h-6 mx-auto text-gray-400 mb-2" />
             {file ? (
               <div>
-                <p className="text-sm font-medium text-brand-700">{file.name}</p>
-                <p className="text-xs text-gray-500">{(file.size / 1024).toFixed(1)} KB</p>
+                <p className="text-sm font-semibold text-brand-700">{file.name}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{(file.size / 1024).toFixed(1)} KB</p>
+                {file.name.toLowerCase().endsWith('.zip') && (
+                  <p className="text-xs text-brand-600 mt-1.5 font-medium">ZIP detected — all JSON/CSV/Excel files inside will be processed</p>
+                )}
               </div>
             ) : (
               <div>
                 <p className="text-sm text-gray-600 font-medium">Drop a file or click to browse</p>
-                <p className="text-xs text-gray-400 mt-1">CSV, XLSX, JSON — or PDF/TXT for automatic AI extraction</p>
+                <p className="text-xs text-gray-400 mt-1">ZIP · JSON · CSV · Excel · PDF · TXT</p>
               </div>
             )}
           </div>
+
           {file && /\.(pdf|txt)$/i.test(file.name) && (
             <div className="flex items-start gap-2 bg-purple-50 border border-purple-200 rounded-xl p-3">
               <Brain className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
               <p className="text-xs text-purple-700">
-                <strong>AI extraction</strong> — Claude will read this document and extract structured records matching the schema automatically. This takes 10–30 seconds.
+                <strong>AI extraction</strong> — Claude will read this document and extract records matching the schema. Takes 10–30 seconds.
               </p>
             </div>
           )}
+
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" type="button" onClick={() => setShowUpload(false)} disabled={uploading}>Cancel</Button>
             <Button type="submit" loading={uploading} disabled={!file}>
               {uploading
-                ? (file && /\.(pdf|txt)$/i.test(file.name) ? 'AI extracting…' : 'Uploading…')
+                ? (file?.name.toLowerCase().endsWith('.zip') ? 'Processing ZIP…' : file && /\.(pdf|txt)$/i.test(file.name) ? 'AI extracting…' : 'Uploading…')
                 : <><Upload className="w-4 h-4" /> Upload & Validate</>
               }
             </Button>

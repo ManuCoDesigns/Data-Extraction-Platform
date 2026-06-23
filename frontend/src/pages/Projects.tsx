@@ -3,9 +3,8 @@ import { Link } from 'react-router-dom'
 import { Plus, Search, FolderKanban, Trash2, Edit3, Users, Database, ChevronRight } from 'lucide-react'
 import { projectsApi } from '@/api/client'
 import type { Project } from '@/types'
-import { Button, Card, Badge, Modal, Input, Textarea, EmptyState, Spinner, ConfirmDialog, cn, toast } from '@/components/ui'
+import { Button, Card, Badge, Modal, Input, Textarea, EmptyState, Spinner, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useCapability } from '@/lib/permissions'
-import { formatDistanceToNow } from 'date-fns'
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -122,7 +121,7 @@ export function ProjectsPage() {
                   <div className="min-w-0">
                     <p className="font-semibold text-gray-900 truncate">{p.name}</p>
                     <p className="text-xs text-gray-400 mt-0.5">
-                      Updated {formatDistanceToNow(new Date(p.updated_at), { addSuffix: true })}
+                      Updated {safeFromNow(p.updated_at)}
                     </p>
                   </div>
                 </div>

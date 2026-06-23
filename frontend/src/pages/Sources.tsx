@@ -6,10 +6,9 @@ import {
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
-import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast } from '@/components/ui'
+import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
-import { formatDistanceToNow } from 'date-fns'
 
 const STATUS_META: Record<SourceStatus, { label: string; color: 'gray' | 'amber' | 'red' | 'blue' | 'purple' | 'green' | 'indigo' }> = {
   not_started:       { label: 'Not Started',       color: 'gray' },
@@ -313,7 +312,7 @@ export function SourcesPage() {
                     <span className="text-gray-700">{s.total_records}</span>
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-400 hidden lg:table-cell">
-                    {formatDistanceToNow(new Date(s.updated_at), { addSuffix: true })}
+                    {safeFromNow(s.updated_at)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center gap-2 justify-end">
@@ -421,7 +420,7 @@ function SourceCard({ source, projectId, projectName }: { source: Source; projec
           ) : (
             <span className="text-xs text-gray-300 flex items-center gap-1"><UserIcon className="w-3 h-3" /> Unassigned</span>
           )}
-          <span className="text-xs text-gray-300">{formatDistanceToNow(new Date(source.updated_at))}</span>
+          <span className="text-xs text-gray-300">{safeFromNow(source.updated_at, false)}</span>
         </div>
       </Card>
     </Link>

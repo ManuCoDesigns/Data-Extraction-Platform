@@ -3,9 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { Plus, Layers, Archive, Trash2, Edit3, ChevronDown, ChevronRight, Eye, Code } from 'lucide-react'
 import { schemasApi, projectsApi } from '@/api/client'
 import type { Schema, Project } from '@/types'
-import { Button, Card, Badge, Modal, Input, Textarea, EmptyState, Spinner, ConfirmDialog, cn, toast } from '@/components/ui'
+import { Button, Card, Badge, Modal, Input, Textarea, EmptyState, Spinner, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useCapability } from '@/lib/permissions'
-import { formatDistanceToNow } from 'date-fns'
 
 export function SchemasPage() {
   const [searchParams] = useSearchParams()
@@ -292,7 +291,7 @@ function SchemaVersionsPanel({ schemaId, canManage }: { schemaId: string; canMan
               <span className="text-sm font-medium text-gray-800">v{v.version}</span>
               {v.is_locked && <Badge variant="amber">Locked</Badge>}
               <span className="text-xs text-gray-400 ml-auto">
-                {formatDistanceToNow(new Date(v.created_at), { addSuffix: true })}
+                {safeFromNow(v.created_at)}
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-1 font-mono truncate">

@@ -362,3 +362,23 @@ export function ConfirmDialog({
     </div>
   )
 }
+
+
+// ─── Safe date formatters ─────────────────────────────────────────────────────
+// date-fns throws RangeError if given an invalid date (null, undefined, "").
+// These helpers guard every call site so a missing date just renders "—".
+import { formatDistanceToNow as _fdtn, format as _fmt } from 'date-fns'
+
+export function safeFromNow(value: string | null | undefined, suffix = true): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return '—'
+  return _fdtn(d, { addSuffix: suffix })
+}
+
+export function safeFormat(value: string | null | undefined, pattern: string): string {
+  if (!value) return '—'
+  const d = new Date(value)
+  if (isNaN(d.getTime())) return '—'
+  return _fmt(d, pattern)
+}

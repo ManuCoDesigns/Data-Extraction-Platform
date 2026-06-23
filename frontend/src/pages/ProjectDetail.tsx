@@ -11,9 +11,8 @@ import { useAuthStore } from '@/store/auth'
 import { isProjectAdmin, canReviewProject } from '@/lib/permissions'
 import {
   Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState,
-  Spinner, Avatar, cn, toast, JobStatusBadge,
+  Spinner, Avatar, cn, toast, JobStatusBadge, safeFromNow, safeFormat,
 } from '@/components/ui'
-import { formatDistanceToNow, format } from 'date-fns'
 
 type Tab = 'overview' | 'resources' | 'jobs' | 'submissions' | 'members'
 
@@ -129,7 +128,7 @@ export function ProjectDetailPage() {
           {[
             { label: 'Project ID', value: project.id },
             { label: 'Status', value: project.status },
-            { label: 'Created', value: formatDistanceToNow(new Date(project.created_at), { addSuffix: true }) },
+            { label: 'Created', value: safeFromNow(project.created_at) },
           ].map(({ label, value }) => (
             <div key={label} className="flex justify-between text-sm">
               <span className="text-gray-500">{label}</span>
@@ -271,7 +270,7 @@ function ResourcesTab({ projectId, resources, isAdmin, onChange }: {
                       <Download className="w-3.5 h-3.5" /> Download
                     </button>
                   ) : (
-                    <span className="text-xs text-gray-400">{formatDistanceToNow(new Date(r.created_at), { addSuffix: true })}</span>
+                    <span className="text-xs text-gray-400">{safeFromNow(r.created_at)}</span>
                   )}
                   {isAdmin && (
                     <button onClick={() => handleDelete(r.id)} className="text-gray-400 hover:text-red-600 transition">
@@ -409,7 +408,7 @@ function SubmissionsTab({ projectId, submissions, members, currentUserId, canRev
                 </div>
                 <p className="text-xs text-gray-400 mt-0.5">
                   {view === 'queue' && `${nameFor(s.user_id)} · `}
-                  {s.file_name} · {formatDistanceToNow(new Date(s.submitted_at), { addSuffix: true })}
+                  {s.file_name} · {safeFromNow(s.submitted_at)}
                 </p>
                 {s.note && <p className="text-xs text-gray-500 mt-1">{s.note}</p>}
                 {s.review_notes && (
@@ -687,7 +686,7 @@ function JobsTab({ projectId, jobs, schemas, canUpload, onChange }: {
                     <span className="text-emerald-700 font-medium">{job.total_approved}</span>
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-400 hidden md:table-cell">
-                    {formatDistanceToNow(new Date(job.created_at), { addSuffix: true })}
+                    {safeFromNow(job.created_at)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <Link

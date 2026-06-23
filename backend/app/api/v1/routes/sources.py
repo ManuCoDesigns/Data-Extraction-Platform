@@ -37,7 +37,7 @@ from app.services.schema_validator import validate_record, map_row_to_fields
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
-ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt"}
+ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
 # Extensions that go through AI extraction (not mechanical row mapping)
 AI_EXTRACTION_EXTENSIONS = {".pdf", ".txt"}
 
@@ -342,12 +342,29 @@ async def upload_to_source(
         if not rows:
             raise HTTPException(status_code=422, detail="AI extraction found no records in the document. Check that the document matches the schema and try again.")
         extraction_method = "llm"
+        file_breakdown: list[dict] = []
+        files_processed = 1
+
+    # ── Route: ZIP archive with multiple JSON/CSV/Excel files ────────────────
+    elif ext == ".zip":
+        rows, file_breakdown = _parse_zip(content)
+        if not rows:
+            skipped = [f for f in file_breakdown if f.get("error")]
+            detail = f"No records found in ZIP. {len(file_breakdown)} file(s) checked."
+            if skipped:
+                detail += f" Errors: {'; '.join(f['filename'] + ': ' + f['error'] for f in skipped[:3])}"
+            raise HTTPException(status_code=422, detail=detail)
+        extraction_method = "structured"
+        files_processed = len([f for f in file_breakdown if not f.get("error")])
+
     else:
         # ── Route: mechanical row mapping (CSV / Excel / JSON) ─────────────────
         rows = _parse_rows(content, ext, file.filename or "")
         if not rows:
             raise HTTPException(status_code=422, detail="No rows found in the uploaded file.")
         extraction_method = "structured"
+        file_breakdown = []
+        files_processed = 1
 
     # Clear any previous records for this source (re-upload replaces everything)
     old_job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
@@ -415,6 +432,9 @@ async def upload_to_source(
     return SourceUploadSummary(
         total_rows=len(rows), valid_rows=valid_count,
         invalid_rows=invalid_count, job_id=job.id,
+        extraction_method=extraction_method,
+        files_processed=files_processed,
+        file_breakdown=file_breakdown,
     )
 
 
@@ -540,12 +560,68 @@ def _parse_rows(content: bytes, ext: str, filename: str) -> list[dict]:
         data = json.loads(content.decode("utf-8"))
         if isinstance(data, list):
             return data
-        for key in ("items", "records", "data", "rows"):
+        for key in ("items", "records", "data", "rows", "suppliers", "materials"):
             if isinstance(data, dict) and key in data and isinstance(data[key], list):
                 return data[key]
         if isinstance(data, dict):
             return [data]
     return []
+
+
+def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
+    """
+    Parse a ZIP archive containing JSON files (or CSV/Excel files).
+    Returns (rows, file_breakdown) where file_breakdown is a list of
+    {filename, rows, skipped_reason} dicts for the UI summary.
+    """
+    import zipfile as zf_mod
+    import os as _os
+
+    all_rows: list[dict] = []
+    breakdown: list[dict] = []
+    SUPPORTED = {".json", ".csv", ".xlsx", ".xls"}
+    SKIP_PREFIXES = ("__MACOSX", ".", "_")
+
+    def is_skippable(name: str) -> bool:
+        parts = name.split("/")
+        return any(p.startswith(SKIP_PREFIXES) for p in parts if p)
+
+    def parse_member(fname: str, data: bytes) -> tuple[list[dict], str | None]:
+        ext = _os.path.splitext(fname)[1].lower()
+        if ext not in SUPPORTED:
+            return [], f"unsupported type {ext}"
+        try:
+            rows = _parse_rows(data, ext, fname)
+            return rows, None
+        except Exception as e:
+            return [], str(e)[:120]
+
+    with zf_mod.ZipFile(io.BytesIO(content)) as zf:
+        names = [n for n in zf.namelist() if not is_skippable(n) and not n.endswith("/")]
+        for name in names:
+            fname = name.split("/")[-1]  # just the filename
+            ext = _os.path.splitext(fname)[1].lower()
+            if ext == ".zip":
+                # One level of nesting — unzip inner ZIP and process its members
+                inner_content = zf.read(name)
+                try:
+                    with zf_mod.ZipFile(io.BytesIO(inner_content)) as inner_zf:
+                        for inner_name in inner_zf.namelist():
+                            if is_skippable(inner_name) or inner_name.endswith("/"):
+                                continue
+                            inner_fname = inner_name.split("/")[-1]
+                            rows, err = parse_member(inner_fname, inner_zf.read(inner_name))
+                            breakdown.append({"filename": f"{fname}/{inner_fname}", "rows": len(rows), "error": err})
+                            all_rows.extend(rows)
+                except Exception as e:
+                    breakdown.append({"filename": fname, "rows": 0, "error": f"inner ZIP error: {str(e)[:80]}"})
+            elif ext in SUPPORTED:
+                rows, err = parse_member(fname, zf.read(name))
+                breakdown.append({"filename": fname, "rows": len(rows), "error": err})
+                all_rows.extend(rows)
+            # else: skip silently (images, READMEs, etc.)
+
+    return all_rows, breakdown
 
 
 # ─── Records (fix + review) ──────────────────────────────────────────────────
