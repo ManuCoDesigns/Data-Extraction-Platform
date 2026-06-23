@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, Link, useNavigate } from 'react-router-dom'
+import { JsonRecordViewer } from './JsonRecordViewer'
 import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
-  Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon, Clock, Brain, Trash2
+  Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
+  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -45,6 +47,15 @@ export function SourceDetailPage() {
   const [deleteSourceConfirm, setDeleteSourceConfirm] = useState(false)
   const [deleteRecord, setDeleteRecord] = useState<any | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // New capabilities
+  const [schemaDefinition, setSchemaDefinition] = useState<any>(null)
+  const [showSchemaPanel, setShowSchemaPanel] = useState(false)
+  const [scraping, setScraping] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const [verifyResult, setVerifyResult] = useState<any>(null)
+  const [showVerifyResult, setShowVerifyResult] = useState(false)
+  // JSON Record Viewer
+  const [activeRecordIndex, setActiveRecordIndex] = useState<number | null>(null)
 
   const load = () => {
     if (!projectId || !sourceId) return
@@ -53,6 +64,7 @@ export function SourceDetailPage() {
       sourcesApi.get(sourceId).then(setSource),
       sourcesApi.records(sourceId, { validity: validityFilter || undefined, page_size: 200 }).then((r: any) => setRecords(r.items)),
       projectsApi.listMembers(projectId).then((m: any) => setMembers(m.map((x: any) => ({ id: x.user_id, full_name: x.full_name, email: x.email })))),
+      sourcesApi.schema(sourceId).then(setSchemaDefinition).catch(() => {}),
     ]).finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [projectId, sourceId, validityFilter])
@@ -101,6 +113,18 @@ export function SourceDetailPage() {
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Review action failed')
     }
+  }
+
+  const handleFixRecord = async (recordId: string, fields: Record<string, unknown>) => {
+    if (!sourceId) return
+    await sourcesApi.fixRecord(sourceId, recordId, fields)
+    load()
+  }
+
+  const handleReviewRecord = async (recordId: string, action: 'approve' | 'reject', note?: string) => {
+    if (!sourceId) return
+    await sourcesApi.reviewRecord(sourceId, recordId, action, note)
+    load()
   }
 
   const openEdit = (record: any) => {
@@ -173,6 +197,33 @@ export function SourceDetailPage() {
     } finally { setDeleting(false) }
   }
 
+  const handleScrape = async () => {
+    if (!sourceId) return
+    setScraping(true)
+    try {
+      const summary = await sourcesApi.scrape(sourceId)
+      toast.success(`Scraped: ${summary.valid_rows} records extracted, ${summary.invalid_rows} need fixes`)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Scraping failed — check the website URL is accessible')
+    } finally { setScraping(false) }
+  }
+
+  const handleVerify = async () => {
+    if (!sourceId) return
+    setVerifying(true)
+    setVerifyResult(null)
+    try {
+      const result = await sourcesApi.verify(sourceId)
+      setVerifyResult(result)
+      setShowVerifyResult(true)
+      toast.success(`Verification complete — ${result.verified} pass, ${result.flagged} flagged`)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Verification failed')
+    } finally { setVerifying(false) }
+  }
+
   if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
   if (!source) return <EmptyState title="Source not found" />
 
@@ -206,6 +257,19 @@ export function SourceDetailPage() {
           {isExtractor && source.status !== 'approved' && (
             <Button variant="secondary" size="sm" onClick={() => setShowUpload(true)}>
               <Upload className="w-3.5 h-3.5" /> Upload Data
+            </Button>
+          )}
+          {isExtractor && source.website_url && source.status !== 'approved' && (
+            <Button variant="secondary" size="sm" onClick={handleScrape} loading={scraping}>
+              <Search className="w-3.5 h-3.5" />
+              {scraping ? 'Scraping…' : 'Auto-Scrape Website'}
+            </Button>
+          )}
+          {isReviewer && records.length > 0 && source.status !== 'not_started' && (
+            <Button variant="secondary" size="sm" onClick={handleVerify} loading={verifying}
+              className={verifyResult ? '!border-emerald-300 !text-emerald-700' : ''}>
+              <Shield className="w-3.5 h-3.5" />
+              {verifying ? 'Verifying…' : 'LLM Verify vs Website'}
             </Button>
           )}
           {canApproveSource && (
@@ -288,22 +352,114 @@ export function SourceDetailPage() {
 
       {tab === 'records' && (
         <div className="space-y-4">
+          {/* Verify result banner */}
+          {showVerifyResult && verifyResult && (
+            <div className={cn(
+              'border rounded-xl p-4 flex items-start justify-between gap-4',
+              verifyResult.flagged > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'
+            )}>
+              <div className="flex items-start gap-3">
+                <Shield className={cn('w-4 h-4 mt-0.5 shrink-0', verifyResult.flagged > 0 ? 'text-amber-600' : 'text-emerald-600')} />
+                <div>
+                  <p className={cn('text-sm font-semibold', verifyResult.flagged > 0 ? 'text-amber-800' : 'text-emerald-800')}>
+                    LLM Website Verification Complete
+                  </p>
+                  <p className="text-xs mt-1 text-gray-600">{verifyResult.message}</p>
+                  <div className="flex gap-4 mt-2 text-xs">
+                    <span className="text-emerald-700 font-medium">✓ {verifyResult.verified} verified</span>
+                    <span className="text-amber-600 font-medium">⚠ {verifyResult.flagged} flagged</span>
+                    {verifyResult.truncated && <span className="text-gray-400">· Page was large, truncated to 80k chars</span>}
+                  </div>
+                </div>
+              </div>
+              <button onClick={() => setShowVerifyResult(false)} className="text-gray-400 hover:text-gray-600 text-xs">✕</button>
+            </div>
+          )}
+
           <div className="flex items-center gap-2 flex-wrap">
             {['', 'valid', 'invalid'].map(v => (
               <button key={v} onClick={() => setValidityFilter(v)}
                 className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition',
-                  validityFilter === v ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')}
+                  validityFilter === v ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                )}
               >
                 {v === '' ? 'All' : v === 'valid' ? 'Schema-valid' : 'Needs fixes'}
               </button>
             ))}
+            {schemaDefinition?.fields?.length > 0 && (
+              <button
+                onClick={() => setShowSchemaPanel(p => !p)}
+                className={cn('ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition',
+                  showSchemaPanel ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                )}
+              >
+                <Info className="w-3.5 h-3.5" /> Schema Reference
+              </button>
+            )}
           </div>
+
+          <div className={cn('flex gap-4', showSchemaPanel ? 'items-start' : '')}>
+            {/* Schema reference panel */}
+            {showSchemaPanel && schemaDefinition && (
+              <div className="w-72 shrink-0">
+                <Card className="p-4 sticky top-4">
+                  <div className="flex items-center justify-between mb-3">
+                    <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                      {schemaDefinition.name || 'Schema'} Fields
+                    </h4>
+                    <button onClick={() => setShowSchemaPanel(false)} className="text-gray-400 hover:text-gray-600">
+                      <XCircle className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                  {schemaDefinition.extraction_instructions && (
+                    <div className="mb-3 p-2 bg-brand-50 rounded-lg text-xs text-brand-700 leading-relaxed">
+                      {schemaDefinition.extraction_instructions}
+                    </div>
+                  )}
+                  <div className="space-y-2 max-h-[60vh] overflow-y-auto scrollbar-thin">
+                    {(schemaDefinition.fields || []).map((f: any) => (
+                      <div key={f.name} className={cn(
+                        'p-2.5 rounded-lg border text-xs',
+                        'fixed_value' in f ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200'
+                      )}>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono font-semibold text-gray-800">{f.name}</span>
+                          <span className="text-gray-400">{f.type || 'string'}</span>
+                          {f.required && <span className="text-red-500 font-medium">required</span>}
+                          {'fixed_value' in f && <span className="text-blue-500">fixed: {String(f.fixed_value)}</span>}
+                        </div>
+                        {f.description && <p className="text-gray-500 mt-1 leading-relaxed">{f.description}</p>}
+                        {f.enum?.length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {f.enum.map((v: string) => (
+                              <span key={v} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{v}</span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* Records table */}
+            <div className="flex-1 min-w-0">
 
           {records.length === 0 ? (
             <EmptyState
               title="No records yet"
-              description={isExtractor ? 'Upload a CSV, Excel, or JSON file to get started.' : 'Waiting for the extractor to upload data.'}
-              action={isExtractor ? <Button onClick={() => setShowUpload(true)}><Upload className="w-4 h-4" /> Upload Data</Button> : undefined}
+              description={isExtractor ? 'Upload a file or use Auto-Scrape Website to extract records.' : 'Waiting for the extractor to upload data.'}
+              action={isExtractor ? (
+                <div className="flex gap-2 flex-wrap justify-center">
+                  <Button onClick={() => setShowUpload(true)}><Upload className="w-4 h-4" /> Upload File</Button>
+                  {source.website_url && (
+                    <Button variant="secondary" onClick={handleScrape} loading={scraping}>
+                      <Search className="w-4 h-4" /> Auto-Scrape Website
+                    </Button>
+                  )}
+                </div>
+              ) : undefined}
             />
           ) : (
             <Card className="overflow-hidden">
@@ -312,18 +468,23 @@ export function SourceDetailPage() {
                   <thead>
                     <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase tracking-wide">
                       <th className="text-left px-5 py-3 font-medium">Record</th>
-                      <th className="text-left px-4 py-3 font-medium">Validation</th>
+                      <th className="text-left px-4 py-3 font-medium">Schema</th>
+                      <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Web Check</th>
                       <th className="text-left px-4 py-3 font-medium">Review</th>
                       <th className="px-4 py-3" />
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {records.map(r => {
+                    {records.map((r, idx) => {
                       const primaryName = r.extracted_fields?.company_name || r.extracted_fields?.material_name || r.canonical_name || r.id.slice(0, 8)
+                      const webFlagCount = (r.web_check_flags || []).length
                       return (
-                        <tr key={r.id} className="hover:bg-gray-50/60 transition">
+                        <tr key={r.id}
+                          className="hover:bg-gray-50/60 transition cursor-pointer"
+                          onClick={() => setActiveRecordIndex(idx)}
+                        >
                           <td className="px-5 py-3">
-                            <p className="font-medium text-gray-900 truncate max-w-[220px]">{primaryName}</p>
+                            <p className="font-medium text-gray-900 truncate max-w-[180px]">{primaryName}</p>
                             <p className="text-xs text-gray-400">{Object.keys(r.extracted_fields || {}).length} fields</p>
                           </td>
                           <td className="px-4 py-3">
@@ -340,32 +501,35 @@ export function SourceDetailPage() {
                               </div>
                             )}
                           </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            {r.web_verified === null || r.web_verified === undefined ? (
+                              <span className="text-xs text-gray-300">Not run</span>
+                            ) : r.web_verified ? (
+                              <Badge variant="green"><CheckCircle className="w-3 h-3" /> Verified</Badge>
+                            ) : (
+                              <div>
+                                <Badge variant="red"><AlertCircle className="w-3 h-3" /> {webFlagCount} issue{webFlagCount !== 1 ? 's' : ''}</Badge>
+                                {r.web_check_summary && (
+                                  <p className="text-xs text-gray-500 mt-0.5 max-w-[160px] truncate">{r.web_check_summary}</p>
+                                )}
+                                {(r.web_check_flags || []).slice(0, 2).map((f: any, i: number) => (
+                                  <p key={i} className="text-xs text-red-600 mt-0.5">
+                                    <span className="font-mono">{f.field}</span>: {f.issue}
+                                    {f.suggested_value && <span className="text-green-600"> → {f.suggested_value}</span>}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </td>
                           <td className="px-4 py-3">
                             <ReviewBadge status={r.review_status} />
-                            {r.review_note && <p className="text-xs text-gray-400 mt-0.5 max-w-[180px] truncate">"{r.review_note}"</p>}
+                            {r.review_note && <p className="text-xs text-gray-400 mt-0.5 max-w-[160px] truncate">"{r.review_note}"</p>}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center gap-2 justify-end">
+                              <span className="text-xs text-brand-600 font-medium">Open →</span>
                               {isExtractor && (
-                                <button onClick={() => openEdit(r)} className="text-xs text-gray-500 hover:text-brand-600 flex items-center gap-1">
-                                  <Edit3 className="w-3 h-3" /> Edit
-                                </button>
-                              )}
-                              {isReviewer && r.is_schema_valid && r.review_status !== 'approved' && (
-                                <>
-                                  <button onClick={() => handleReview(r.id, 'approve')} className="text-xs text-emerald-600 hover:text-emerald-700 font-medium">
-                                    Approve
-                                  </button>
-                                  <button onClick={() => {
-                                    const note = prompt('Reason for sending back (optional):')
-                                    handleReview(r.id, 'reject', note || undefined)
-                                  }} className="text-xs text-red-500 hover:text-red-600 font-medium">
-                                    Send back
-                                  </button>
-                                </>
-                              )}
-                              {isExtractor && (
-                                <button onClick={() => setDeleteRecord(r)} className="p-1 text-gray-300 hover:text-red-500 transition">
+                                <button onClick={e => { e.stopPropagation(); setDeleteRecord(r) }} className="p-1 text-gray-300 hover:text-red-500 transition">
                                   <Trash2 className="w-3 h-3" />
                                 </button>
                               )}
@@ -379,6 +543,8 @@ export function SourceDetailPage() {
               </div>
             </Card>
           )}
+            </div>{/* end flex-1 records table */}
+          </div>{/* end schema panel + records flex row */}
         </div>
       )}
 
@@ -503,6 +669,25 @@ export function SourceDetailPage() {
         onConfirm={handleDeleteRecord}
         onCancel={() => setDeleteRecord(null)}
       />
+
+      {/* Full-screen JSON Record Viewer */}
+      {activeRecordIndex !== null && records[activeRecordIndex] && (
+        <JsonRecordViewer
+          record={records[activeRecordIndex]}
+          allRecords={records}
+          currentIndex={activeRecordIndex}
+          schemaFields={schemaDefinition?.fields ?? []}
+          extractionInstructions={schemaDefinition?.extraction_instructions}
+          schemaName={schemaDefinition?.name}
+          sourceWebsiteUrl={source.website_url}
+          isExtractor={isExtractor}
+          isReviewer={isReviewer}
+          onFix={handleFixRecord}
+          onReview={handleReviewRecord}
+          onNavigate={setActiveRecordIndex}
+          onClose={() => { setActiveRecordIndex(null); load() }}
+        />
+      )}
     </div>
   )
 }

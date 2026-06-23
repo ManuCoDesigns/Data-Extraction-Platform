@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Link as LinkIcon, BookOpen, ClipboardList,
@@ -597,7 +597,7 @@ function MembersTab({ projectId, members, onChange }: {
 }
 
 // ─── Jobs tab ────────────────────────────────────────────────────────────────
-import { useRef } from 'react'
+
 
 function JobsTab({ projectId, jobs, schemas, canUpload, onChange }: {
   projectId: string; jobs: Job[]; schemas: Schema[]

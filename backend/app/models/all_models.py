@@ -437,6 +437,10 @@ class ExtractedRecord(Base):
     llm_field_flags = Column(JSON, default=list)
     llm_reason = Column(Text, nullable=True)
     llm_skipped = Column(Boolean, default=False)
+    # Web verification — cross-check against live source website (Phase 3 LLM stage)
+    web_verified = Column(Boolean, nullable=True)        # None = not run, True = pass, False = issues found
+    web_check_flags = Column(JSON, default=list)         # [{field, issue, suggested_value, confidence}]
+    web_check_summary = Column(Text, nullable=True)      # one-line summary from Claude
     extracted_fields = Column(JSON, nullable=False, default=dict)
     raw_text = Column(Text, nullable=False)
     is_submitted = Column(Boolean, default=False)

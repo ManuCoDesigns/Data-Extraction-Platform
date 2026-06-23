@@ -114,6 +114,8 @@ export interface ExtractedRecord {
   schema_version: number
   extraction_confidence: ExtractionConfidence
   pipeline_warnings: unknown[]
+  is_schema_valid: boolean
+  validation_errors: { field: string; error: string }[]
   review_status: ReviewStatus
   review_note?: string
   reviewed_by?: string
@@ -123,6 +125,9 @@ export interface ExtractedRecord {
   llm_field_flags: LLMFieldFlag[]
   llm_reason?: string
   llm_skipped: boolean
+  web_verified?: boolean | null
+  web_check_flags: { field: string; issue: string; suggested_value?: string; confidence?: number }[]
+  web_check_summary?: string
   extracted_fields: Record<string, unknown>
   raw_text: string
   is_submitted: boolean

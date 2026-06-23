@@ -111,6 +111,9 @@ def _serialize_record(r: ExtractedRecord) -> RecordOut:
         llm_verdict=r.llm_verdict.value if r.llm_verdict else None,
         llm_confidence=r.llm_confidence, llm_field_flags=r.llm_field_flags or [],
         llm_reason=r.llm_reason, llm_skipped=r.llm_skipped,
+        web_verified=r.web_verified,
+        web_check_flags=r.web_check_flags or [],
+        web_check_summary=r.web_check_summary,
         extracted_fields=r.extracted_fields or {}, raw_text=r.raw_text or "",
         is_submitted=r.is_submitted, canonical_name=r.canonical_name,
         created_at=r.created_at,
@@ -881,3 +884,339 @@ def delete_source_record(
     db.flush()
     _recompute_counts(source, db)
     db.commit()
+
+
+# ─── Capability 1: Scrape website → extract records via AI ──────────────────
+
+@router.post("/{source_id}/scrape", response_model=SourceUploadSummary)
+async def scrape_source_website(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Fetches the source's website_url, extracts readable text, then runs the
+    same AI extraction pipeline as PDF/TXT uploads. Records are created and
+    validated against the schema automatically.
+
+    This is the 'auto-scrape' capability — point the source at a URL and let
+    Claude pull the structured records directly.
+    """
+    source = _get_source_or_404(source_id, db)
+    if not _is_assigned_extractor(current_user, source):
+        raise HTTPException(status_code=403, detail="Only the assigned extractor or admin can scrape this source")
+
+    if not source.website_url:
+        raise HTTPException(status_code=422, detail="This source has no website URL set. Edit the source to add one first.")
+
+    schema_ver = db.query(SchemaVersion).filter(
+        SchemaVersion.schema_id == source.schema_id
+    ).order_by(SchemaVersion.version.desc()).first()
+    if not schema_ver:
+        raise HTTPException(status_code=422, detail="This source's schema has no field definitions yet.")
+
+    # Fetch the website
+    from app.services.web_scraper import fetch_url_text
+    try:
+        web_text, meta = await fetch_url_text(source.website_url)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch {source.website_url}: {str(e)}")
+
+    if not web_text.strip():
+        raise HTTPException(status_code=422, detail="The page returned no readable text. It may require JavaScript or a login.")
+
+    # Run AI extraction on the fetched text
+    schema_fields = schema_ver.definition.get("fields", [])
+    try:
+        rows = await _extract_with_llm(web_text.encode("utf-8"), ".txt", schema_ver.definition, source)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"AI extraction failed: {str(e)}")
+
+    if not rows:
+        raise HTTPException(status_code=422, detail="AI found no records matching the schema on this page. The page structure may not match the schema, or the content is behind a login.")
+
+    # Clear previous records and create new job
+    old_job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
+    if old_job_ids:
+        db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(old_job_ids)).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(ExtractionJob.id.in_(old_job_ids)).delete(synchronize_session=False)
+
+    job = ExtractionJob(
+        project_id=source.project_id, source_id=source_id,
+        schema_id=source.schema_id, schema_version=schema_ver.version,
+        name=f"{source.name} — web scrape {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
+        source_file_name=source.website_url[:255], source_file_size_bytes=len(web_text),
+        source_type=FileSourceType.CSV, status=JobStatus.READY_FOR_REVIEW,
+        total_raw_records=len(rows), total_extracted=len(rows),
+        created_by=current_user.id,
+    )
+    db.add(job)
+    db.flush()
+
+    valid_count = 0
+    for row in rows:
+        mapped = {k: v for k, v in row.items() if k != "_raw_text"}
+        is_valid, errors = validate_record(mapped, schema_fields)
+        if is_valid:
+            valid_count += 1
+        record = ExtractedRecord(
+            job_id=job.id, schema_version=schema_ver.version,
+            extraction_confidence=ExtractionConfidence.HIGH if is_valid else ExtractionConfidence.FLAGGED,
+            is_schema_valid=is_valid, validation_errors=errors,
+            review_status=ReviewStatus.PENDING,
+            extracted_fields=mapped,
+            raw_text=f"[Scraped from {source.website_url}]\n\n{web_text[:2000]}",
+            canonical_name=str(mapped.get("canonical_name") or mapped.get("company_name") or mapped.get("material_name") or "")[:512] or None,
+        )
+        db.add(record)
+
+    invalid_count = len(rows) - valid_count
+    source.status = SourceStatus.NEEDS_FIXES if invalid_count > 0 else SourceStatus.READY_FOR_REVIEW
+    if not source.extraction_started_at:
+        source.extraction_started_at = datetime.now(timezone.utc)
+    if invalid_count == 0:
+        source.extraction_completed_at = datetime.now(timezone.utc)
+
+    db.flush()
+    _recompute_counts(source, db)
+    db.add(AuditLog(
+        user_id=current_user.id, project_id=source.project_id,
+        action=AuditAction.SOURCE_DATA_UPLOADED,
+        after_value={"method": "web_scrape", "url": source.website_url, "rows": len(rows), "valid": valid_count},
+    ))
+    db.commit()
+
+    return SourceUploadSummary(
+        total_rows=len(rows), valid_rows=valid_count,
+        invalid_rows=invalid_count, job_id=job.id,
+        extraction_method="llm",
+    )
+
+
+# ─── Capability 2: LLM verification — cross-check records against live website ─
+
+@router.post("/{source_id}/verify")
+async def llm_verify_source(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Runs the LLM verification stage:
+      1. Fetches the live source website
+      2. Batches all extracted records (20 at a time)
+      3. Claude cross-checks each record's field values against the actual page content
+      4. Stores per-record web_check_flags with specific field issues and suggested corrections
+      5. Returns a summary of what passed, what was flagged, and what to fix
+
+    This is Raghu's 'LLM scrapes the source website and cross-checks' stage.
+    After this, the reviewer can see exactly which field values are contested
+    and what the website actually says.
+    """
+    source = _get_source_or_404(source_id, db)
+    if not _is_assigned_reviewer(current_user, source):
+        raise HTTPException(status_code=403, detail="Only the assigned reviewer or admin can run LLM verification")
+
+    if not source.website_url:
+        raise HTTPException(status_code=422, detail="No website URL — cannot verify without a source to check against.")
+
+    schema_ver = db.query(SchemaVersion).filter(
+        SchemaVersion.schema_id == source.schema_id
+    ).order_by(SchemaVersion.version.desc()).first()
+
+    records = db.query(ExtractedRecord).join(ExtractionJob).filter(
+        ExtractionJob.source_id == source_id,
+    ).all()
+
+    if not records:
+        raise HTTPException(status_code=422, detail="No records to verify.")
+
+    # Fetch the live website
+    from app.services.web_scraper import fetch_url_text
+    try:
+        web_text, meta = await fetch_url_text(source.website_url)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch source website: {str(e)}")
+
+    if not web_text.strip():
+        raise HTTPException(status_code=422, detail="The source website returned no readable text — may require JavaScript or login.")
+
+    schema_definition = schema_ver.definition if schema_ver else {}
+    fields_def = schema_definition.get("fields", [])
+    field_context = [
+        {
+            "name": f["name"],
+            "type": f.get("type", "string"),
+            "required": f.get("required", False),
+            "description": f.get("description", ""),
+            "enum": f.get("enum", []),
+        }
+        for f in fields_def if "fixed_value" not in f
+    ]
+    extraction_instructions = schema_definition.get("extraction_instructions", "")
+
+    # Process in batches of 20 to stay within Claude's context window
+    import anthropic
+    from app.core.config import settings
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+
+    BATCH_SIZE = 20
+    total = len(records)
+    verified_count = 0
+    flagged_count = 0
+    error_count = 0
+
+    system_prompt = f"""You are a data quality verifier for a structured data extraction system.
+
+Your job: cross-check extracted records against the actual text from the source website and flag any discrepancies.
+
+Schema: {schema_definition.get('name', 'Data Schema')}
+{f'Extraction rules: {extraction_instructions}' if extraction_instructions else ''}
+
+Schema fields to verify:
+{json.dumps(field_context, indent=2)}
+
+The source website text will be provided. For each record, check whether its field values are:
+1. Supported by the website content (PASS)
+2. Inconsistent or likely wrong (FLAG with specific correction)
+3. Unverifiable from this page (SKIP - note it cannot be confirmed)
+
+Respond ONLY with valid JSON. No markdown, no preamble.
+
+Required format:
+{{
+  "results": [
+    {{
+      "record_id": "<id>",
+      "verdict": "PASS" | "FLAG" | "SKIP",
+      "summary": "<one sentence>",
+      "flags": [
+        {{
+          "field": "<field_name>",
+          "issue": "<what's wrong>",
+          "suggested_value": "<what the website says it should be>",
+          "confidence": 0.0-1.0
+        }}
+      ]
+    }}
+  ]
+}}"""
+
+    for batch_start in range(0, total, BATCH_SIZE):
+        batch = records[batch_start: batch_start + BATCH_SIZE]
+
+        records_payload = [
+            {"record_id": r.id, "fields": r.extracted_fields}
+            for r in batch
+        ]
+
+        user_content = json.dumps({
+            "website_text": web_text[:50000],
+            "records_to_verify": records_payload,
+        }, ensure_ascii=False, default=str)
+
+        try:
+            response = client.messages.create(
+                model=settings.LLM_MODEL,
+                max_tokens=4000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_content}],
+            )
+            raw = response.content[0].text if response.content else ""
+
+            # Strip markdown fences if present
+            import re as _re
+            clean = raw.strip()
+            if clean.startswith("```"):
+                clean = _re.sub(r"^```(?:json)?\s*", "", clean)
+                clean = _re.sub(r"\s*```$", "", clean)
+
+            result = json.loads(clean.strip())
+            batch_results = {r["record_id"]: r for r in result.get("results", [])}
+
+        except Exception as e:
+            # If a batch fails, mark those records as unverified
+            for r in batch:
+                r.web_verified = None
+                r.web_check_summary = f"Verification error: {str(e)[:200]}"
+            error_count += len(batch)
+            db.flush()
+            continue
+
+        # Store results on each record
+        for record in batch:
+            rec_result = batch_results.get(record.id, {})
+            verdict = rec_result.get("verdict", "SKIP")
+            flags = rec_result.get("flags", [])
+            summary = rec_result.get("summary", "")
+
+            record.web_verified = (verdict == "PASS")
+            record.web_check_flags = flags
+            record.web_check_summary = summary
+
+            if verdict == "PASS":
+                verified_count += 1
+            elif verdict == "FLAG":
+                flagged_count += 1
+            else:
+                error_count += 1
+
+        db.flush()
+
+    # Advance source status to llm_verification to reflect this stage ran
+    source.status = SourceStatus.LLM_VERIFICATION
+    db.add(AuditLog(
+        user_id=current_user.id, project_id=source.project_id,
+        action=AuditAction.SOURCE_STATUS_CHANGED,
+        before_value={}, after_value={"status": "llm_verification", "verified": verified_count, "flagged": flagged_count},
+    ))
+    db.commit()
+
+    return {
+        "total_records": total,
+        "verified": verified_count,
+        "flagged": flagged_count,
+        "unverifiable": error_count,
+        "website_url": source.website_url,
+        "website_chars_read": meta.get("char_count", 0),
+        "truncated": meta.get("truncated", False),
+        "message": (
+            f"Verification complete — {verified_count} records match the source website, "
+            f"{flagged_count} have field-level issues to review."
+        ),
+    }
+
+
+# ─── Capability 3: Schema definition endpoint (for review panel) ─────────────
+
+@router.get("/{source_id}/schema")
+def get_source_schema(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the full schema definition for this source — used by the review UI
+    to show field descriptions, types, and allowed values alongside each record.
+    """
+    source = _get_source_or_404(source_id, db)
+    if not _can_access(current_user, source.project):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    schema_ver = db.query(SchemaVersion).filter(
+        SchemaVersion.schema_id == source.schema_id
+    ).order_by(SchemaVersion.version.desc()).first()
+
+    if not schema_ver:
+        return {"fields": [], "name": "", "extraction_instructions": ""}
+
+    return {
+        "name": source.schema.name if source.schema else "",
+        "version": schema_ver.version,
+        "definition": schema_ver.definition,
+        "fields": schema_ver.definition.get("fields", []),
+        "extraction_instructions": schema_ver.definition.get("extraction_instructions", ""),
+        "grouping_key": schema_ver.definition.get("grouping_key", ""),
+    }

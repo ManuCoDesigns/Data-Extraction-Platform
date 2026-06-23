@@ -1,6 +1,6 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
   LayoutDashboard, FolderKanban, Briefcase, Database, Layers,
   Users, Bell, LogOut, ChevronRight, Settings,
@@ -19,6 +19,19 @@ export function AppLayout() {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [showNotif, setShowNotif] = useState(false)
   const [collapsed, setCollapsed] = useState(false)
+  const notifRef = useRef<HTMLDivElement>(null)
+
+  // Close notification dropdown when clicking anywhere outside it
+  useEffect(() => {
+    if (!showNotif) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) {
+        setShowNotif(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showNotif])
 
   // Capabilities
   const canManageUsers    = useCapability('manage_users')
@@ -184,7 +197,7 @@ export function AppLayout() {
           {/* Right actions */}
           <div className="flex items-center gap-2">
             {/* Notifications bell */}
-            <div className="relative">
+            <div className="relative" ref={notifRef}>
               <button
                 onClick={() => setShowNotif(v => !v)}
                 className="relative p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-xl transition"

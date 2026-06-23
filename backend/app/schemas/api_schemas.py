@@ -183,6 +183,9 @@ class RecordOut(BaseModel):
     llm_field_flags: list
     llm_reason: Optional[str]
     llm_skipped: bool
+    web_verified: Optional[bool] = None
+    web_check_flags: list = []
+    web_check_summary: Optional[str] = None
     extracted_fields: dict[str, Any]
     raw_text: str
     is_submitted: bool
