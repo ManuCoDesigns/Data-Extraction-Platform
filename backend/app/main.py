@@ -1,35 +1,11 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
 from contextlib import asynccontextmanager
-import re
 from app.core.config import settings
-from app.api.v1.routes import auth, users, projects, jobs, records, schemas, submission, project_resources, work_submissions, sources
-
-
-# ─── CORS origin matching ─────────────────────────────────────────────────────
-# Supports exact origins from CORS_ORIGINS env var PLUS wildcard patterns for
-# Vercel preview URLs (*.vercel.app) so we never have to update env vars when
-# Vercel generates a new per-deployment preview URL.
-
-CORS_WILDCARD_PATTERNS = [
-    r"https://.*\.vercel\.app$",          # all Vercel preview/prod deployments
-    r"http://localhost:\d+$",             # local dev on any port
-    r"http://127\.0\.0\.1:\d+$",         # local dev alternate
-]
-
-
-def is_origin_allowed(origin: str) -> bool:
-    if not origin:
-        return False
-    # Exact match against configured origins
-    if origin in settings.CORS_ORIGINS:
-        return True
-    # Wildcard pattern match
-    for pattern in CORS_WILDCARD_PATTERNS:
-        if re.match(pattern, origin):
-            return True
-    return False
+from app.api.v1.routes import (
+    auth, users, projects, jobs, records, schemas,
+    submission, project_resources, work_submissions, sources,
+)
 
 
 @asynccontextmanager
@@ -49,52 +25,51 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ─── CORS ─────────────────────────────────────────────────────────────────────
+# Using FastAPI's built-in CORSMiddleware (Starlette) rather than a custom
+# @app.middleware("http"). The built-in one runs at the ASGI level — it wraps
+# every response INCLUDING unhandled exceptions and 4xx/5xx errors, so the
+# browser always sees the correct CORS headers and gets the real error code
+# instead of a misleading "No Access-Control-Allow-Origin" block.
+#
+# allow_origin_regex covers:
+#   - https://*.vercel.app   (all Vercel preview + production URLs)
+#   - http://localhost:*     (local dev, any port)
+#   - http://127.0.0.1:*    (local dev alternate)
+#
+# Explicit origins from env var CORS_ORIGINS are merged in as well so you can
+# always add custom domains without touching this file.
 
-@app.middleware("http")
-async def cors_middleware(request: Request, call_next):
-    origin = request.headers.get("origin", "")
-    allowed = is_origin_allowed(origin)
+_explicit_origins = [o.strip() for o in (settings.CORS_ORIGINS or []) if o.strip()]
 
-    # Handle preflight — always return 204 for allowed origins
-    if request.method == "OPTIONS":
-        if allowed:
-            return Response(
-                status_code=204,
-                headers={
-                    "Access-Control-Allow-Origin": origin,
-                    "Access-Control-Allow-Credentials": "true",
-                    "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-                    "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-Requested-With",
-                    "Access-Control-Max-Age": "86400",
-                },
-            )
-        return Response(status_code=403)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_explicit_origins,
+    allow_origin_regex=(
+        r"https://.*\.vercel\.app"
+        r"|http://localhost:\d+"
+        r"|http://127\.0\.0\.1:\d+"
+    ),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept", "X-Requested-With"],
+    max_age=86400,
+)
 
-    response = await call_next(request)
-
-    # Add CORS headers to ALL responses (including 401/500) so browsers
-    # show the real HTTP error instead of a misleading CORS block
-    if allowed:
-        response.headers["Access-Control-Allow-Origin"] = origin
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Authorization, Content-Type, Accept, X-Requested-With"
-
-    return response
-
+# ─── Routes ───────────────────────────────────────────────────────────────────
 PREFIX = settings.API_V1_STR
-app.include_router(auth.router,       prefix=PREFIX)
-app.include_router(users.router,      prefix=PREFIX)
-app.include_router(projects.router,   prefix=PREFIX)
-app.include_router(jobs.router,       prefix=PREFIX)
-app.include_router(records.router,    prefix=PREFIX)
-app.include_router(schemas.router,    prefix=PREFIX)
-app.include_router(submission.router, prefix=PREFIX)
-app.include_router(submission.stats_router,         prefix=PREFIX)
-app.include_router(submission.notifications_router, prefix=PREFIX)
-app.include_router(project_resources.router,        prefix=PREFIX)
-app.include_router(work_submissions.router,         prefix=PREFIX)
-app.include_router(sources.router,                  prefix=PREFIX)
+app.include_router(auth.router,                             prefix=PREFIX)
+app.include_router(users.router,                            prefix=PREFIX)
+app.include_router(projects.router,                         prefix=PREFIX)
+app.include_router(jobs.router,                             prefix=PREFIX)
+app.include_router(records.router,                          prefix=PREFIX)
+app.include_router(schemas.router,                          prefix=PREFIX)
+app.include_router(submission.router,                       prefix=PREFIX)
+app.include_router(submission.stats_router,                 prefix=PREFIX)
+app.include_router(submission.notifications_router,         prefix=PREFIX)
+app.include_router(project_resources.router,                prefix=PREFIX)
+app.include_router(work_submissions.router,                 prefix=PREFIX)
+app.include_router(sources.router,                          prefix=PREFIX)
 
 
 @app.get("/health")

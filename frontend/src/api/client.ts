@@ -10,45 +10,84 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+// ─── Token refresh queue ─────────────────────────────────────────────────────
+// When the access token expires, multiple concurrent requests all get 401.
+// Without a queue, each one would try to refresh — causing race conditions and
+// repeated refresh calls that invalidate each other.
+// Solution: the first 401 starts the refresh, all others wait in a queue.
+// When refresh succeeds, every queued request gets the new token and retries.
+
+let isRefreshing = false
+let refreshQueue: Array<(token: string) => void> = []
+
+function processQueue(newToken: string | null, error: unknown = null) {
+  refreshQueue.forEach(resolve => {
+    if (newToken) resolve(newToken)
+  })
+  refreshQueue = []
+}
+
+function redirectToLogin() {
+  localStorage.removeItem('access_token')
+  localStorage.removeItem('refresh_token')
+  if (!window.location.pathname.includes('/login')) {
+    window.location.href = '/login'
+  }
+}
+
 api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const original = error.config
 
-    // Don't retry the refresh call itself — that causes infinite loops
-    if (original?.url?.includes('/auth/refresh')) {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      window.location.href = '/login'
+    // Don't retry non-401 errors or requests that already retried
+    if (!error.response || error.response.status !== 401 || original._retry) {
       return Promise.reject(error)
     }
 
-    if (error.response?.status === 401 && !original._retry) {
-      original._retry = true
-      const refresh = localStorage.getItem('refresh_token')
-
-      if (refresh) {
-        try {
-          const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refresh_token: refresh })
-          localStorage.setItem('access_token', data.access_token)
-          localStorage.setItem('refresh_token', data.refresh_token)
-          original.headers.Authorization = `Bearer ${data.access_token}`
-          return api(original)
-        } catch {
-          // Refresh failed — session is dead, send to login
-          localStorage.removeItem('access_token')
-          localStorage.removeItem('refresh_token')
-          window.location.href = '/login'
-          return Promise.reject(error)
-        }
-      } else {
-        // No refresh token at all
-        localStorage.removeItem('access_token')
-        window.location.href = '/login'
-      }
+    // Don't retry the refresh endpoint itself
+    if (original.url?.includes('/auth/refresh') || original.url?.includes('/auth/login')) {
+      redirectToLogin()
+      return Promise.reject(error)
     }
 
-    return Promise.reject(error)
+    // If already refreshing — queue this request and wait
+    if (isRefreshing) {
+      return new Promise((resolve, reject) => {
+        refreshQueue.push((newToken: string) => {
+          original.headers.Authorization = `Bearer ${newToken}`
+          original._retry = true
+          resolve(api(original))
+        })
+      })
+    }
+
+    // Start refresh
+    original._retry = true
+    isRefreshing = true
+
+    const refreshToken = localStorage.getItem('refresh_token')
+    if (!refreshToken) {
+      redirectToLogin()
+      return Promise.reject(error)
+    }
+
+    try {
+      const { data } = await axios.post(`${BASE_URL}/auth/refresh`, { refresh_token: refreshToken })
+      const newToken = data.access_token
+      localStorage.setItem('access_token', newToken)
+      localStorage.setItem('refresh_token', data.refresh_token)
+      api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`
+      processQueue(newToken)
+      original.headers.Authorization = `Bearer ${newToken}`
+      return api(original)
+    } catch (refreshError) {
+      processQueue(null, refreshError)
+      redirectToLogin()
+      return Promise.reject(refreshError)
+    } finally {
+      isRefreshing = false
+    }
   }
 )
 
