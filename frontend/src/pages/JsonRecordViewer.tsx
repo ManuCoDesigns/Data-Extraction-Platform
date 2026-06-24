@@ -502,7 +502,7 @@ export function JsonRecordViewer({
     ?? { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' }
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 100, background: 'var(--color-background-tertiary)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', zIndex: 9999, background: 'var(--color-background-primary)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* ── Top bar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'var(--color-background-primary)', borderBottom: '0.5px solid var(--color-border-tertiary)', flexShrink: 0 }}>
         <button onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, border: 'none', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: 13 }}>
