@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { JsonRecordViewer } from './JsonRecordViewer'
 import {
@@ -734,7 +735,7 @@ export function SourceDetailPage() {
       />
 
       {/* Full-screen JSON Record Viewer */}
-      {activeRecordIndex !== null && records[activeRecordIndex] && (
+      {activeRecordIndex !== null && records[activeRecordIndex] && createPortal(
         <JsonRecordViewer
           record={records[activeRecordIndex]}
           allRecords={records}
@@ -749,7 +750,8 @@ export function SourceDetailPage() {
           onReview={handleReviewRecord}
           onNavigate={setActiveRecordIndex}
           onClose={() => { setActiveRecordIndex(null); load() }}
-        />
+        />,
+        document.body
       )}
     </div>
   )
