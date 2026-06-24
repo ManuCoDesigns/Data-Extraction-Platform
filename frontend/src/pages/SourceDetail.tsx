@@ -469,7 +469,9 @@ export function SourceDetailPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase tracking-wide">
-                      <th className="text-left px-5 py-3 font-medium">Record</th>
+                      <th className="text-left px-5 py-3 font-medium">Company</th>
+                      <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Sites</th>
+                      <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Products</th>
                       <th className="text-left px-4 py-3 font-medium">Schema</th>
                       <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Web Check</th>
                       <th className="text-left px-4 py-3 font-medium">Review</th>
@@ -478,7 +480,12 @@ export function SourceDetailPage() {
                   </thead>
                   <tbody className="divide-y divide-gray-50">
                     {records.map((r, idx) => {
-                      const primaryName = r.extracted_fields?.company_name || r.extracted_fields?.material_name || r.canonical_name || r.id.slice(0, 8)
+                      const ef = r.extracted_fields || {}
+                      const primaryName = String(ef.company_name || ef.material_name || r.canonical_name || r.id.slice(0, 8))
+                      const sector = ef.industry_sector as string | undefined
+                      const tier = ef.supply_chain_tier as number | undefined
+                      const sites = Array.isArray(ef.manufacturing_sites) ? ef.manufacturing_sites.length : 0
+                      const products = Array.isArray(ef.products_offered) ? ef.products_offered.length : 0
                       const webFlagCount = (r.web_check_flags || []).length
                       return (
                         <tr key={r.id}
@@ -486,8 +493,23 @@ export function SourceDetailPage() {
                           onClick={() => setActiveRecordIndex(idx)}
                         >
                           <td className="px-5 py-3">
-                            <p className="font-medium text-gray-900 truncate max-w-[180px]">{primaryName}</p>
-                            <p className="text-xs text-gray-400">{Object.keys(r.extracted_fields || {}).length} fields</p>
+                            <p className="font-semibold text-gray-900 truncate max-w-[200px]">{primaryName}</p>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              {sector && <span className="text-xs text-gray-400">{sector}</span>}
+                              {tier && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-1.5 rounded">tier {tier}</span>}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            {sites > 0
+                              ? <span className="text-sm font-medium text-gray-700">🏭 {sites} site{sites !== 1 ? 's' : ''}</span>
+                              : <span className="text-xs text-gray-300">—</span>
+                            }
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            {products > 0
+                              ? <span className="text-sm font-medium text-gray-700">📦 {products} product{products !== 1 ? 's' : ''}</span>
+                              : <span className="text-xs text-gray-300">—</span>
+                            }
                           </td>
                           <td className="px-4 py-3">
                             {r.is_schema_valid ? (

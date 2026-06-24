@@ -525,16 +525,21 @@ CRITICAL — NESTED OBJECT STRUCTURE:
 Array fields must contain OBJECTS, not plain strings. Use these exact structures:
 
 manufacturing_sites must be an array of objects:
-  {{"location": "Site Name (Grid Ref or Lat/Long)", "country": "Country name", "site_type": "mine|quarry|pit|refinery|smelter|processing plant|handling site|wharf|recycling facility|peat workings", "raw": "verbatim source text about this site"}}
+  {{"location": "Site Name (Grid Ref or Lat/Long)", "country": "Country name", "site_type": "mine|quarry|pit|refinery|smelter|processing plant|handling site|wharf|recycling facility|peat workings|exploration site|laboratory", "raw": "verbatim source text about this site — include ownership %, production figures, URLs"}}
 
 products_offered must be an array of objects:
-  {{"product_name": "Product Name", "grade": "Grade or variant", "product_id": "SITE_PRODUCT_GRADE", "category": "COMMODITY CATEGORY", "source_url": "{source.website_url or ''}", "datasheet_url": null, "cross_graph_material_id": null}}
+  {{"product_name": "Product Name", "grade": "Grade or variant e.g. Battery-grade", "product_id": "SITE_PRODUCT_GRADE", "category": "COMMODITY CATEGORY", "source_url": "{source.website_url or ''}", "datasheet_url": null, "cross_graph_material_id": null}}
 
 sources must be an array of objects:
-  {{"source_name": "Publication or website name", "source_url": "https://...", "doi": null, "tier": "tier1|tier2|tier3"}}
+  {{"source_name": "Publication or page name", "source_url": "https://...", "doi": null, "tier": "tier1|tier2|tier3"}}
 
-data_completeness_flags must be this exact object (not null):
+data_completeness_flags must be this exact object (never null):
   {{"review_score": "manual_only", "defect_rate_ppm": "manual_only", "on_time_delivery_rate": "manual_only", "pricing": "api_only", "inventory_levels": "api_only"}}
+
+extras must be an array with ONE object containing any data that doesn't fit above fields:
+  [{{"office_address_1": "...", "office_address_2": "...", "any_other_key": "value"}}]
+  Use this for: multiple office addresses, contact details per region, licence numbers,
+  JV ownership details, regulatory references — anything structured but not fitting BGS fields.
 
 jv_stakes (if present) must be an array of objects:
   {{"site_name": "Site name", "ownership_pct": 44.0, "jv_partners": ["Partner Name"], "country": "Country", "commodity": "Commodity"}}
@@ -547,13 +552,13 @@ RULES:
 2. If a field is not in the document, set it to null or [] (not a plain string).
 3. Return ONLY a JSON array. No preamble, no explanation, no markdown code fences.
 4. Each element of the array is one record with exactly the field names above.
-5. NEVER put plain strings inside manufacturing_sites, products_offered, or sources arrays.
+5. NEVER put plain strings inside manufacturing_sites, products_offered, sources, or extras arrays.
 
 Example of CORRECT manufacturing_sites:
-"manufacturing_sites": [{{"location": "Greenbushes Mine (116.07°E, 33.86°S)", "country": "Australia", "site_type": "mine", "raw": "Greenbushes Lithium Operation, Western Australia. Hard-rock spodumene mine. Operated by Talison Lithium."}}]
+"manufacturing_sites": [{{"location": "Kamoa-Kakula Copper Complex", "country": "Democratic Republic of Congo", "site_type": "mine", "raw": "Kamoa-Kakula, DRC. Ivanhoe 39.6% | Zijin 39.6% | DRC Govt 20%. Largest undeveloped high-grade copper deposit in the world."}}]
 
 Example of WRONG manufacturing_sites (never do this):
-"manufacturing_sites": ["Greenbushes Mine, Western Australia"]"""
+"manufacturing_sites": ["Kamoa-Kakula, Democratic Republic of Congo"]"""
 
     user_message = f"""Extract all records from this document:
 

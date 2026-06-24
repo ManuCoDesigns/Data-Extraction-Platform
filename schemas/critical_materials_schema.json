@@ -87,7 +87,7 @@
       "name": "manufacturing_sites",
       "type": "array",
       "required": true,
-      "description": "ONE entry per physical site. Each: {location:'Site Name (GridRef or Lat/Long)', country, site_type:'quarry|mine|pit|oil well|gas well|brine well|handling site|wharf|processing plant|spoil heap|recycling facility|peat workings', raw:'verbatim source text'}"
+      "description": "ONE entry per physical site. Each: {location: 'Site Name, Region/Country', country: 'Country name', site_type: 'mine|quarry|pit|oil well|gas well|brine well|handling site|wharf|processing plant|spoil heap|recycling facility|peat workings|exploration site|refinery|smelter|laboratory', raw: 'verbatim source text about this site including URLs, ownership %, production figures'}"
     },
     {
       "name": "products_offered",
@@ -225,6 +225,14 @@
       "type": "string",
       "required": false,
       "description": "URL to investor relations page.",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "extras",
+      "type": "array",
+      "required": false,
+      "description": "Catch-all array for structured data that doesn't fit any BGS base field. Each entry is a free-form object. Use this for: multiple office addresses (office_address_1, office_address_2...), contact details per region, licence numbers, specific JV ownership details per site, regulatory references, or any other structured data found on the website. Example: [{\"office_address_1\": \"889 Harbourside Drive, Vancouver\", \"office_address_2\": \"82 Maude Street, Sandton\"}]",
       "extras": true,
       "extras_source": "company-website"
     }

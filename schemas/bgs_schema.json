@@ -86,7 +86,7 @@
       "name": "manufacturing_sites",
       "type": "array",
       "required": true,
-      "description": "ONE entry per physical site. Each: {location:'Site Name (GridRef or Lat/Long)', country, site_type:'quarry|mine|pit|oil well|gas well|brine well|handling site|wharf|processing plant|spoil heap|recycling facility|peat workings', raw:'verbatim source text'}"
+      "description": "ONE entry per physical mine/quarry/pit. Each: {location: 'Site Name (OS Grid Ref)', country: 'England|Scotland|Wales|Northern Ireland|Channel Islands|Isle of Man', site_type: 'quarry|mine|pit|oil well|gas well|brine well|handling site|wharf|processing plant|spoil heap|recycling facility|peat workings|exploration site|refinery|smelter|laboratory', raw: 'verbatim DMQ site entry text'}"
     },
     {
       "name": "products_offered",

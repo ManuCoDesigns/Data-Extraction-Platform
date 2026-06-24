@@ -221,6 +221,172 @@ function FieldRow({
   )
 }
 
+// ── Complex field keys — shown as review cards, not in the JSON editor ────────
+const COMPLEX_KEYS = [
+  'manufacturing_sites', 'products_offered', 'sources', 'extras',
+  'jv_stakes', 'annual_production', 'data_completeness_flags',
+  'certification_references', 'regulation_references',
+]
+
+const SITE_TYPE_ICON: Record<string, string> = {
+  mine: '⛏️', quarry: '🪨', pit: '🕳️', refinery: '🏭', smelter: '🔥',
+  'processing plant': '⚙️', wharf: '⚓', 'handling site': '📦',
+  'recycling facility': '♻️', 'exploration site': '🔍', laboratory: '🧪',
+  'peat workings': '🌿', 'spoil heap': '🗑️',
+}
+
+function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, unknown>; extrasSource?: string }) {
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({
+    manufacturing_sites: true,
+    products_offered: true,
+    sources: true,
+  })
+  const toggle = (k: string) => setExpanded(p => ({ ...p, [k]: !p[k] }))
+
+  const sites = (fields.manufacturing_sites as any[]) || []
+  const products = (fields.products_offered as any[]) || []
+  const sources = (fields.sources as any[]) || []
+  const extras = (fields.extras as any[]) || []
+  const jvStakes = (fields.jv_stakes as any[]) || []
+  const annualProd = (fields.annual_production as any[]) || []
+
+  const Section = ({ label, count, icon, k, children }: { label: string; count: number; icon: string; k: string; children: React.ReactNode }) => {
+    if (!count) return null
+    return (
+      <div style={{ borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
+        <button
+          onClick={() => toggle(k)}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+        >
+          <span style={{ fontSize: 14 }}>{icon}</span>
+          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-primary)', flex: 1 }}>{label}</span>
+          <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)', background: 'var(--color-background-tertiary)', padding: '1px 7px', borderRadius: 10 }}>{count}</span>
+          <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)' }}>{expanded[k] ? '▲' : '▼'}</span>
+        </button>
+        {expanded[k] && <div style={{ padding: '0 12px 12px' }}>{children}</div>}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {/* Manufacturing Sites */}
+      <Section label="Manufacturing Sites" count={sites.length} icon="🏭" k="manufacturing_sites">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {sites.map((s: any, i: number) => (
+            <div key={i} style={{ border: '0.5px solid var(--color-border-secondary)', borderRadius: 10, overflow: 'hidden', background: 'var(--color-background-primary)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--color-background-secondary)' }}>
+                <span style={{ fontSize: 16 }}>{SITE_TYPE_ICON[s.site_type] || '📍'}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', margin: 0 }} className="truncate">{s.location}</p>
+                  <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                    <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>📌 {s.country}</span>
+                    <span style={{ fontSize: 11, padding: '0 6px', borderRadius: 4, background: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe' }}>{s.site_type}</span>
+                  </div>
+                </div>
+              </div>
+              {s.raw && (
+                <div style={{ padding: '8px 12px' }}>
+                  <p style={{ fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.6, margin: 0, fontFamily: 'var(--font-mono)' }}>{s.raw}</p>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* Products Offered */}
+      <Section label="Products Offered" count={products.length} icon="📦" k="products_offered">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {products.map((p: any, i: number) => (
+            <div key={i} style={{ border: '0.5px solid var(--color-border-secondary)', borderRadius: 8, padding: '8px 12px', background: 'var(--color-background-primary)', minWidth: 180, flex: '1 1 180px' }}>
+              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', margin: '0 0 4px' }}>{p.product_name}</p>
+              {p.grade && <p style={{ fontSize: 11, color: '#059669', margin: '0 0 4px', fontStyle: 'italic' }}>{p.grade}</p>}
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d' }}>{p.category}</span>
+                {p.product_id && <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-mono)' }}>{p.product_id}</span>}
+              </div>
+              {p.source_url && (
+                <a href={p.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: '#3b82f6', display: 'block', marginTop: 4, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  🔗 {p.source_url.replace(/^https?:\/\//, '')}
+                </a>
+              )}
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* JV Stakes */}
+      <Section label="JV Stakes" count={jvStakes.length} icon="🤝" k="jv_stakes">
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {jvStakes.map((j: any, i: number) => (
+            <div key={i} style={{ border: '0.5px solid var(--color-border-secondary)', borderRadius: 8, padding: '8px 12px', background: 'var(--color-background-primary)', flex: '1 1 200px' }}>
+              <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 4px', color: 'var(--color-text-primary)' }}>{j.site_name}</p>
+              <p style={{ fontSize: 12, color: '#7c3aed', margin: '0 0 4px', fontWeight: 500 }}>{j.ownership_pct}% ownership</p>
+              <p style={{ fontSize: 11, color: 'var(--color-text-secondary)', margin: 0 }}>{j.country} · {j.commodity}</p>
+              {j.jv_partners?.length > 0 && <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>Partners: {j.jv_partners.join(', ')}</p>}
+            </div>
+          ))}
+        </div>
+      </Section>
+
+      {/* Annual Production */}
+      <Section label="Annual Production" count={annualProd.length} icon="📊" k="annual_production">
+        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+          <thead>
+            <tr style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}>
+              {['Commodity','Volume','Unit','Year','Notes'].map(h => (
+                <th key={h} style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, color: 'var(--color-text-tertiary)', fontWeight: 500 }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {annualProd.map((r: any, i: number) => (
+              <tr key={i} style={{ borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
+                <td style={{ padding: '6px 8px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.commodity}</td>
+                <td style={{ padding: '6px 8px', color: '#059669', fontFamily: 'var(--font-mono)' }}>{r.volume}</td>
+                <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)' }}>{r.unit}</td>
+                <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)' }}>{r.year}</td>
+                <td style={{ padding: '6px 8px', color: 'var(--color-text-tertiary)', fontSize: 11 }}>{r.notes}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Section>
+
+      {/* Extras */}
+      <Section label={`Extras${extrasSource ? ` · ${extrasSource}` : ''}`} count={extras.length} icon="✨" k="extras">
+        {extras.map((obj: any, i: number) => (
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {Object.entries(obj).map(([k, v]) => (
+              <div key={k} style={{ display: 'flex', gap: 8, padding: '6px 10px', background: 'var(--color-background-primary)', borderRadius: 8, border: '0.5px solid var(--color-border-secondary)' }}>
+                <span style={{ fontSize: 11, fontWeight: 600, color: '#7c3aed', minWidth: 120, flexShrink: 0, fontFamily: 'var(--font-mono)' }}>{k}</span>
+                <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>{String(v)}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </Section>
+
+      {/* Sources */}
+      <Section label="Sources" count={sources.length} icon="📚" k="sources">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {sources.map((s: any, i: number) => (
+            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 12px', background: 'var(--color-background-primary)', borderRadius: 8, border: '0.5px solid var(--color-border-secondary)' }}>
+              <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: s.tier === 'tier1' ? '#ecfdf5' : s.tier === 'tier2' ? '#eff6ff' : '#fafafa', color: s.tier === 'tier1' ? '#059669' : s.tier === 'tier2' ? '#3b82f6' : '#6b7280', border: `1px solid ${s.tier === 'tier1' ? '#6ee7b7' : s.tier === 'tier2' ? '#bfdbfe' : '#e5e7eb'}`, flexShrink: 0, marginTop: 2 }}>{s.tier}</span>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-text-primary)', margin: '0 0 2px' }}>{s.source_name}</p>
+                {s.source_url && <a href={s.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#3b82f6', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.source_url}</a>}
+                {s.doi && <p style={{ fontSize: 10, color: 'var(--color-text-tertiary)', margin: '2px 0 0' }}>DOI: {s.doi}</p>}
+              </div>
+            </div>
+          ))}
+        </div>
+      </Section>
+    </div>
+  )
+}
+
 // ── Main viewer ───────────────────────────────────────────────────────────────
 export function JsonRecordViewer({
   record, allRecords, currentIndex, schemaFields,
@@ -426,7 +592,7 @@ export function JsonRecordViewer({
             </button>
           </div>
 
-          {/* JSON body */}
+          {/* JSON body - scalar fields only */}
           <div style={{ flex: 1, overflow: 'auto', background: '#1e1e2e', padding: '16px 12px', fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.8 }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).querySelectorAll('.edit-btn').forEach((b: any) => { b.style.opacity = '1' }) }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).querySelectorAll('.edit-btn').forEach((b: any) => { b.style.opacity = '0' }) }}
@@ -436,7 +602,8 @@ export function JsonRecordViewer({
               <span style={{ color: C.brace }}>{'{'}</span>
             </div>
 
-            {fieldKeys.map((key, i) => {
+            {/* Scalar fields — editable in VS Code view */}
+            {fieldKeys.filter(key => !COMPLEX_KEYS.includes(key)).map((key, i) => {
               const isFixed = schemaFields.find(f => f.name === key && 'fixed_value' in f) !== undefined
               const isExtra = extrasFields.includes(key)
               return (
@@ -459,10 +626,33 @@ export function JsonRecordViewer({
               )
             })}
 
+            {/* Show complex fields collapsed as reference */}
+            {COMPLEX_KEYS.filter(k => fields[k] !== undefined).map((key, i) => {
+              const v = fields[key]
+              const count = Array.isArray(v) ? v.length : typeof v === 'object' && v ? Object.keys(v).length : 0
+              return (
+                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 4, opacity: 0.6 }}>
+                  <span style={{ color: '#808080', minWidth: 28, textAlign: 'right', fontSize: 11, userSelect: 'none' }}>↓</span>
+                  <span style={{ paddingLeft: 16 }}>
+                    <span style={{ color: C.key }}>"{key}"</span>
+                    <span style={{ color: C.brace }}>: </span>
+                    <span style={{ color: '#808080', fontSize: 11 }}>
+                      {Array.isArray(v) ? `[…${count} items — see cards below]` : `{…${count} keys — see cards below}`}
+                    </span>
+                  </span>
+                </div>
+              )
+            })}
+
             <div style={{ display: 'flex', alignItems: 'center' }}>
-              <span style={{ color: '#808080', minWidth: 28, textAlign: 'right', fontSize: 11, userSelect: 'none', paddingRight: 12 }}>{fieldKeys.length + 2}</span>
+              <span style={{ color: '#808080', minWidth: 28, textAlign: 'right', fontSize: 11, userSelect: 'none', paddingRight: 12 }}>{'}'}</span>
               <span style={{ color: C.brace }}>{'}'}</span>
             </div>
+          </div>
+
+          {/* Review cards for complex fields */}
+          <div style={{ background: 'var(--color-background-secondary)', borderTop: '0.5px solid rgba(255,255,255,0.08)', overflow: 'auto', maxHeight: '45%', flexShrink: 0 }}>
+            <ComplexFieldsPanel fields={fields} extrasSource={extrasSource} />
           </div>
 
           {/* Legend */}
