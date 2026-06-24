@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { JsonRecordViewer } from './JsonRecordViewer'
 import {
@@ -229,24 +230,27 @@ export function SourceDetailPage() {
   if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
   if (!source) return <EmptyState title="Source not found" />
 
-  // ── If a record is open, render ONLY the viewer — full page, no layout behind it ──
+  // ── If a record is open, portal the viewer to <body> so app shell can't clip it ──
   if (activeRecordIndex !== null && records[activeRecordIndex]) {
-    return (
-      <JsonRecordViewer
-        record={records[activeRecordIndex]}
-        allRecords={records}
-        currentIndex={activeRecordIndex}
-        schemaFields={schemaDefinition?.fields ?? []}
-        extractionInstructions={schemaDefinition?.extraction_instructions}
-        schemaName={schemaDefinition?.name}
-        sourceWebsiteUrl={source.website_url}
-        isExtractor={isExtractor}
-        isReviewer={isReviewer}
-        onFix={handleFixRecord}
-        onReview={handleReviewRecord}
-        onNavigate={setActiveRecordIndex}
-        onClose={() => { setActiveRecordIndex(null); load() }}
-      />
+    return createPortal(
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, overflow: 'hidden' }}>
+        <JsonRecordViewer
+          record={records[activeRecordIndex]}
+          allRecords={records}
+          currentIndex={activeRecordIndex}
+          schemaFields={schemaDefinition?.fields ?? []}
+          extractionInstructions={schemaDefinition?.extraction_instructions}
+          schemaName={schemaDefinition?.name}
+          sourceWebsiteUrl={source.website_url}
+          isExtractor={isExtractor}
+          isReviewer={isReviewer}
+          onFix={handleFixRecord}
+          onReview={handleReviewRecord}
+          onNavigate={setActiveRecordIndex}
+          onClose={() => { setActiveRecordIndex(null); load() }}
+        />
+      </div>,
+      document.body
     )
   }
 
@@ -317,57 +321,63 @@ export function SourceDetailPage() {
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Total', value: source.total_records, color: 'text-gray-900' },
-          { label: 'Valid', value: source.valid_records, color: 'text-emerald-700' },
-          { label: 'Needs Fix', value: source.invalid_records, color: 'text-amber-600' },
-          { label: 'Approved', value: source.approved_records, color: 'text-brand-700' },
-        ].map(({ label, value, color }) => (
-          <Card key={label} className="p-4 text-center">
-            <p className={`text-2xl font-bold ${color}`}>{value}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{label}</p>
-          </Card>
+          { label: 'Total Records', value: source.total_records, icon: '📋', top: '#6366f1', bg: '#eef2ff', val: '#4338ca' },
+          { label: 'Schema Valid', value: source.valid_records, icon: '✅', top: '#10b981', bg: '#ecfdf5', val: '#065f46' },
+          { label: 'Needs Fixes', value: source.invalid_records, icon: '⚠️', top: '#f59e0b', bg: '#fffbeb', val: '#92400e' },
+          { label: 'Approved', value: source.approved_records, icon: '🎯', top: '#3b82f6', bg: '#eff6ff', val: '#1d4ed8' },
+        ].map(({ label, value, icon, top, bg, val }) => (
+          <div key={label} style={{ background: bg, borderRadius: 14, borderTop: `3px solid ${top}`, padding: '16px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 20 }}>{icon}</span>
+              <span style={{ fontSize: 28, fontWeight: 800, color: val, lineHeight: 1 }}>{value}</span>
+            </div>
+            <p style={{ fontSize: 11, fontWeight: 600, color: val, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>{label}</p>
+            {source.total_records > 0 && (
+              <div style={{ marginTop: 8, background: 'rgba(255,255,255,0.6)', borderRadius: 99, height: 4, overflow: 'hidden' }}>
+                <div style={{ background: top, height: '100%', borderRadius: 99, width: `${Math.min(100, Math.round((value / source.total_records) * 100))}%`, transition: 'width 0.6s ease' }} />
+              </div>
+            )}
+          </div>
         ))}
       </div>
 
       {/* Team assignment row */}
-      <Card className="p-4">
-        <div className="flex items-center gap-6 flex-wrap">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 font-medium">Extractor:</span>
-            {isAdmin ? (
-              <Select value={source.assigned_extractor_id ?? ''} onChange={e => handleAssign('assigned_extractor_id', e.target.value)} className="!py-1 !text-xs w-40">
-                <option value="">Unassigned</option>
-                {members.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
-              </Select>
-            ) : (
-              <span className="text-sm font-medium text-gray-800">{source.assigned_extractor_name ?? 'Unassigned'}</span>
-            )}
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+        {[
+          { role: 'Extractor', emoji: '⛏️', field: 'assigned_extractor_id' as const, name: source.assigned_extractor_name, id: source.assigned_extractor_id },
+          { role: 'Reviewer', emoji: '🔍', field: 'assigned_reviewer_id' as const, name: source.assigned_reviewer_name, id: source.assigned_reviewer_id },
+        ].map(({ role, emoji, field, name, id }) => (
+          <div key={role} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>{emoji}</div>
+            <div>
+              <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 2px' }}>{role}</p>
+              {isAdmin ? (
+                <Select value={id ?? ''} onChange={e => handleAssign(field, e.target.value)} className="!py-0.5 !text-xs !h-7 w-36">
+                  <option value="">Unassigned</option>
+                  {members.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
+                </Select>
+              ) : (
+                <p style={{ fontSize: 13, fontWeight: 600, color: name ? '#0f172a' : '#94a3b8', margin: 0 }}>{name ?? 'Unassigned'}</p>
+              )}
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-gray-400 font-medium">Reviewer:</span>
-            {isAdmin ? (
-              <Select value={source.assigned_reviewer_id ?? ''} onChange={e => handleAssign('assigned_reviewer_id', e.target.value)} className="!py-1 !text-xs w-40">
-                <option value="">Unassigned</option>
-                {members.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
-              </Select>
-            ) : (
-              <span className="text-sm font-medium text-gray-800">{source.assigned_reviewer_name ?? 'Unassigned'}</span>
-            )}
-          </div>
-          <div className="flex items-center gap-1.5 text-xs text-gray-400 ml-auto">
-            <Clock className="w-3.5 h-3.5" />
-            Updated {safeFromNow(source.updated_at)}
-          </div>
+        ))}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#94a3b8' }}>
+          <Clock className="w-3 h-3" />
+          Updated {safeFromNow(source.updated_at)}
         </div>
-      </Card>
+      </div>
 
       {/* Tabs */}
-      <div className="border-b border-gray-200 flex gap-6">
+      <div style={{ display: 'flex', gap: 4, padding: '4px', background: '#f1f5f9', borderRadius: 12, alignSelf: 'flex-start' }}>
         {(['records', 'details'] as Tab[]).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={cn('pb-3 text-sm font-medium border-b-2 transition capitalize',
-              tab === t ? 'border-brand-600 text-brand-700' : 'border-transparent text-gray-500 hover:text-gray-700')}
-          >
+          <button key={t} onClick={() => setTab(t)} style={{
+            padding: '7px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
+            fontSize: 13, fontWeight: 600, transition: 'all 0.15s',
+            background: tab === t ? '#fff' : 'transparent',
+            color: tab === t ? '#1d4ed8' : '#64748b',
+            boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
+          }}>
             {t === 'records' ? `Records (${records.length})` : 'Details & Notes'}
           </button>
         ))}
@@ -489,14 +499,13 @@ export function SourceDetailPage() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase tracking-wide">
-                      <th className="text-left px-5 py-3 font-medium">Company</th>
-                      <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Sites</th>
-                      <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Products</th>
-                      <th className="text-left px-4 py-3 font-medium">Schema</th>
-                      <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Web Check</th>
-                      <th className="text-left px-4 py-3 font-medium">Review</th>
-                      <th className="px-4 py-3" />
+                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                      {['Company','Sites','Products','Schema','Web Check','Review',''].map((h, i) => (
+                        <th key={h+i} style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+                          className={i > 0 && i < 5 && i !== 3 ? 'hidden md:table-cell' : ''}>
+                          {h}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -510,7 +519,11 @@ export function SourceDetailPage() {
                       const webFlagCount = (r.web_check_flags || []).length
                       return (
                         <tr key={r.id}
-                          className="hover:bg-gray-50/60 transition cursor-pointer"
+                          style={{
+                            borderLeft: `3px solid ${r.review_status === 'approved' ? '#10b981' : r.review_status === 'rejected' ? '#ef4444' : r.is_schema_valid ? '#6366f1' : '#f59e0b'}`,
+                            cursor: 'pointer', transition: 'background 0.1s',
+                          }}
+                          className="hover:bg-slate-50 transition"
                           onClick={() => setActiveRecordIndex(idx)}
                         >
                           <td className="px-5 py-3">
@@ -572,7 +585,11 @@ export function SourceDetailPage() {
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center gap-2 justify-end">
-                              <span className="text-xs text-brand-600 font-medium">Open →</span>
+                              <span style={{
+                                fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 20,
+                                background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe',
+                                whiteSpace: 'nowrap',
+                              }}>Open →</span>
                               {isExtractor && (
                                 <button onClick={e => { e.stopPropagation(); setDeleteRecord(r) }} className="p-1 text-gray-300 hover:text-red-500 transition">
                                   <Trash2 className="w-3 h-3" />
