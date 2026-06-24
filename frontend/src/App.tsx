@@ -7,6 +7,7 @@ import { ProjectsPage } from '@/pages/Projects'
 import { ProjectDetailPage } from '@/pages/ProjectDetail'
 import { SourcesPage } from '@/pages/Sources'
 import { SourceDetailPage } from '@/pages/SourceDetail'
+import { HelpPage } from '@/pages/Help'
 import { JobsPage } from '@/pages/Jobs'
 import { JobDetailPage } from '@/pages/JobDetail'
 import { ReviewPage } from '@/pages/Review'
@@ -142,6 +143,11 @@ export function App() {
           <Route
             path="settings"
             element={<SettingsPage />}
+          />
+
+          <Route
+            path="help"
+            element={<HelpPage />}
           />
 
           <Route

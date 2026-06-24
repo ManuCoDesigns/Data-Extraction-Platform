@@ -8,7 +8,7 @@ import {
 import { projectsApi, resourcesApi, workSubmissionsApi, usersApi, jobsApi, schemasApi } from '@/api/client'
 import type { Project, ProjectMember, ProjectResource, ProjectSubmission, ResourceType, User, Job, Schema } from '@/types'
 import { useAuthStore } from '@/store/auth'
-import { isProjectAdmin, canReviewProject } from '@/lib/permissions'
+import { isProjectAdmin, canReviewProject, getRoleLabel } from '@/lib/permissions'
 import {
   Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState,
   Spinner, Avatar, cn, toast, JobStatusBadge, safeFromNow, safeFormat,
@@ -583,7 +583,7 @@ function MembersTab({ projectId, members, onChange }: {
             {availableUsers.map(u => <option key={u.id} value={u.id}>{u.full_name} ({u.email})</option>)}
           </Select>
           <Select label="Project role" value={role} onChange={e => setRole(e.target.value)}>
-            {PROJECT_ROLES.map(r => <option key={r} value={r}>{r.replace(/_/g, ' ')}</option>)}
+            {PROJECT_ROLES.map(r => <option key={r} value={r}>{getRoleLabel(r)}</option>)}
           </Select>
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" type="button" onClick={() => setShowAdd(false)}>Cancel</Button>

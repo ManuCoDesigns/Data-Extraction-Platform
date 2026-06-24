@@ -35,6 +35,8 @@ interface JsonRecordViewerProps {
   extractionInstructions?: string
   schemaName?: string
   sourceWebsiteUrl?: string
+  extrasFields?: string[]
+  extrasSource?: string
   isExtractor: boolean
   isReviewer: boolean
   onFix: (recordId: string, fields: Record<string, unknown>) => Promise<void>
@@ -78,7 +80,7 @@ function renderValueInline(v: unknown): JSX.Element {
 function FieldRow({
   fieldKey, value, lineNum, schemaField,
   validationError, webFlag, isEditing,
-  onStartEdit, onSaveEdit, canEdit, isFixed,
+  onStartEdit, onSaveEdit, canEdit, isFixed, isExtra, extrasSource,
 }: {
   fieldKey: string
   value: unknown
@@ -91,6 +93,8 @@ function FieldRow({
   onSaveEdit: (newVal: unknown) => void
   canEdit: boolean
   isFixed: boolean
+  isExtra?: boolean
+  extrasSource?: string
 }) {
   const [draft, setDraft] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
@@ -139,6 +143,11 @@ function FieldRow({
         </span>
         <span style={{ paddingLeft: 16, display: 'flex', alignItems: 'center', gap: 0, flex: 1, minWidth: 0 }}>
           <span style={{ color: C.key }}>&quot;{fieldKey}&quot;</span>
+          {isExtra && (
+            <span style={{ fontSize: 9, padding: '0px 5px', borderRadius: 3, background: 'rgba(139,92,246,0.25)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.4)', marginLeft: 6, flexShrink: 0 }}>
+              {extrasSource || 'extras'}
+            </span>
+          )}
           <span style={{ color: C.brace }}>: </span>
           {isEditing ? (
             <span style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1 }}>
@@ -216,6 +225,7 @@ function FieldRow({
 export function JsonRecordViewer({
   record, allRecords, currentIndex, schemaFields,
   extractionInstructions, schemaName, sourceWebsiteUrl,
+  extrasFields = [], extrasSource,
   isExtractor, isReviewer,
   onFix, onReview, onNavigate, onClose,
 }: JsonRecordViewerProps) {
@@ -396,6 +406,11 @@ export function JsonRecordViewer({
           {/* JSON toolbar */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: '#1e1e2e', borderBottom: '0.5px solid rgba(255,255,255,0.08)', flexShrink: 0 }}>
             <span style={{ fontSize: 11, color: '#808080', fontFamily: 'var(--font-mono)' }}>extracted_record.json</span>
+            {extrasFields.length > 0 && (
+              <span style={{ fontSize: 10, padding: '1px 7px', borderRadius: 4, background: 'rgba(139,92,246,0.2)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.3)', marginLeft: 8 }}>
+                +{extrasFields.length} extras · {extrasSource || 'custom'}
+              </span>
+            )}
             <div style={{ flex: 1 }} />
             {hasChanges && (
               <span style={{ fontSize: 11, color: '#f59e0b', background: 'rgba(245,158,11,0.15)', padding: '1px 8px', borderRadius: 4, border: '1px solid rgba(245,158,11,0.3)' }}>
@@ -423,6 +438,7 @@ export function JsonRecordViewer({
 
             {fieldKeys.map((key, i) => {
               const isFixed = schemaFields.find(f => f.name === key && 'fixed_value' in f) !== undefined
+              const isExtra = extrasFields.includes(key)
               return (
                 <FieldRow
                   key={key}
@@ -437,6 +453,8 @@ export function JsonRecordViewer({
                   onSaveEdit={(v) => handleFieldSave(key, v)}
                   canEdit={isExtractor || isReviewer}
                   isFixed={isFixed}
+                  isExtra={isExtra}
+                  extrasSource={extrasSource}
                 />
               )
             })}

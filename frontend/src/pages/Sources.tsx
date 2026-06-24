@@ -50,6 +50,18 @@ export function SourcesPage() {
   const [sources, setSources] = useState<Source[]>([])
   const [schemas, setSchemas] = useState<Schema[]>([])
   const [members, setMembers] = useState<User[]>([])
+  const [schemasLoading, setSchemasLoading] = useState(false)
+
+  const loadSchemasAndMembers = (pid: string) => {
+    if (!pid) { setSchemas([]); setMembers([]); return }
+    setSchemasLoading(true)
+    Promise.all([
+      schemasApi.list(pid).then((r: any) => setSchemas(Array.isArray(r) ? r : [])),
+      projectsApi.listMembers(pid).then((m: any) =>
+        setMembers(m.map((x: any) => ({ id: x.user_id, full_name: x.full_name, email: x.email })))
+      ),
+    ]).catch(() => {}).finally(() => setSchemasLoading(false))
+  }
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'simple' | 'kanban' | 'table'>('simple')
   const [search, setSearch] = useState('')
@@ -75,12 +87,10 @@ export function SourcesPage() {
   }
   useEffect(() => { load() }, [projectId])
 
-  // Load schema/member options for the create form, scoped to the chosen project
+  // Load schemas + members whenever the target project changes
   useEffect(() => {
-    const targetProjectId = isGlobal ? form.project_id : projectId
-    if (!targetProjectId) { setSchemas([]); setMembers([]); return }
-    schemasApi.list(targetProjectId).then((r: any) => setSchemas(Array.isArray(r) ? r : [])).catch(() => setSchemas([]))
-    projectsApi.listMembers(targetProjectId).then((m: any) => setMembers(m.map((x: any) => ({ id: x.user_id, full_name: x.full_name, email: x.email })))).catch(() => setMembers([]))
+    const pid = isGlobal ? form.project_id : projectId
+    loadSchemasAndMembers(pid || '')
   }, [form.project_id, projectId])
 
   const filtered = sources.filter(s => {
@@ -148,7 +158,11 @@ export function SourcesPage() {
           </p>
         </div>
         {canManage && (
-          <Button onClick={() => setShowCreate(true)}>
+          <Button onClick={() => {
+              setForm({ name: '', description: '', website_url: '', schema_id: '', project_id: projectId ?? '', assigned_extractor_id: '', assigned_reviewer_id: '' })
+              loadSchemasAndMembers(projectId ?? form.project_id ?? '')
+              setShowCreate(true)
+            }}>
             <Plus className="w-4 h-4" /> New Source
           </Button>
         )}
@@ -349,11 +363,18 @@ export function SourcesPage() {
           <Input label="Source website" value={form.website_url} onChange={e => setForm(f => ({ ...f, website_url: e.target.value }))}
             placeholder="https://example.com/dataset" />
           <Select label="Schema" value={form.schema_id} onChange={e => setForm(f => ({ ...f, schema_id: e.target.value }))} required disabled={isGlobal && !form.project_id}>
-            <option value="">{isGlobal && !form.project_id ? 'Select a project first' : 'Select a schema…'}</option>
-            {schemas.filter(s => !s.is_archived).map(s => (
+            <option value="">
+              {schemasLoading ? 'Loading schemas…' : isGlobal && !form.project_id ? 'Select a project first' : schemas.length === 0 ? 'No schemas found — create one first' : 'Select a schema…'}
+            </option>
+            {schemas.map(s => (
               <option key={s.id} value={s.id}>{s.name} (v{s.current_version})</option>
             ))}
           </Select>
+          {!schemasLoading && schemas.length === 0 && (isGlobal ? !!form.project_id : true) && (
+            <p className="text-xs text-amber-600 -mt-2">
+              ⚠ No schemas found for this project. <a href={`/schemas?project_id=${isGlobal ? form.project_id : projectId}`} className="underline">Create a schema first</a>.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-4">
             <Select label="Assign extractor" value={form.assigned_extractor_id} onChange={e => setForm(f => ({ ...f, assigned_extractor_id: e.target.value }))}>
               <option value="">Unassigned</option>

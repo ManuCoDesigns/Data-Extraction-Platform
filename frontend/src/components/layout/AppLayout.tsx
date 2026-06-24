@@ -3,7 +3,7 @@ import { useAuthStore } from '@/store/auth'
 import { useEffect, useState, useRef } from 'react'
 import {
   LayoutDashboard, FolderKanban, Briefcase, Database, Layers,
-  Users, Bell, LogOut, ChevronRight, Settings,
+  Users, Bell, LogOut, ChevronRight, Settings, BookOpen,
   BarChart3, Shield, Zap, Upload, ClipboardCheck
 } from 'lucide-react'
 import { cn, Avatar, Badge, ToastContainer } from '@/components/ui'
@@ -73,6 +73,7 @@ export function AppLayout() {
 
   const adminNav = [
     { to: '/admin/users', icon: Users,    label: 'Users',    show: canManageUsers },
+    { to: '/help',         icon: BookOpen,  label: 'Help & Guide', show: true },
     { to: '/settings',    icon: Settings, label: 'Settings', show: canManageUsers },
   ].filter(n => n.show)
 

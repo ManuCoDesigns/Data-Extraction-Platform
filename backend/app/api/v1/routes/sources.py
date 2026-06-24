@@ -396,7 +396,17 @@ async def upload_to_source(
             # LLM already returns schema-shaped dicts — just validate
             mapped = {k: v for k, v in row.items() if k != "_raw_text"}
             raw_text = row.get("_raw_text", json.dumps(row, ensure_ascii=False, default=str))
+        elif ext in (".json", ".zip"):
+            # JSON files are already structured — use fields as-is, don't remap.
+            # Only apply fixed_value fields from the schema on top.
+            mapped = {k: v for k, v in row.items()}
+            for field_def in schema_fields:
+                if "fixed_value" in field_def:
+                    mapped[field_def["name"]] = field_def["fixed_value"]
+            raw_text = json.dumps(row, ensure_ascii=False, default=str)
         else:
+            # CSV / Excel — column headers may differ from schema field names,
+            # so use map_row_to_fields to normalise them.
             mapped = map_row_to_fields(row, schema_fields)
             raw_text = json.dumps(row, ensure_ascii=False, default=str)
 
@@ -420,14 +430,24 @@ async def upload_to_source(
     if invalid_count == 0:
         source.extraction_completed_at = datetime.now(timezone.utc)
 
-    db.flush()
-    _recompute_counts(source, db)
-    db.add(AuditLog(
-        user_id=current_user.id, project_id=source.project_id,
-        action=AuditAction.SOURCE_DATA_UPLOADED,
-        after_value={"file": file.filename, "method": extraction_method, "rows": len(rows), "valid": valid_count, "invalid": invalid_count},
-    ))
-    db.commit()
+    try:
+        db.flush()
+        _recompute_counts(source, db)
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id,
+            action=AuditAction.SOURCE_DATA_UPLOADED,
+            after_value={"file": file.filename, "method": extraction_method, "rows": len(rows), "valid": valid_count, "invalid": invalid_count},
+        ))
+        db.commit()
+    except Exception as db_err:
+        db.rollback()
+        import traceback
+        raise HTTPException(
+            status_code=500,
+            detail=f"DB error saving records: {type(db_err).__name__}: {str(db_err)[:500]}. "
+                   f"This usually means a database migration hasn't run. "
+                   f"Check /health/db for missing columns. Traceback: {traceback.format_exc()[-800:]}"
+        )
 
     return SourceUploadSummary(
         total_rows=len(rows), valid_rows=valid_count,
@@ -1288,11 +1308,22 @@ def get_source_schema(
     if not schema_ver:
         return {"fields": [], "name": "", "extraction_instructions": ""}
 
+    defn = schema_ver.definition or {}
+    fields = defn.get("fields", [])
+    extras_fields = [f["name"] for f in fields if f.get("extras")]
+    extras_source = next((f.get("extras_source") for f in fields if f.get("extras") and f.get("extras_source")), None)
+
     return {
         "name": source.schema.name if source.schema else "",
         "version": schema_ver.version,
-        "definition": schema_ver.definition,
-        "fields": schema_ver.definition.get("fields", []),
-        "extraction_instructions": schema_ver.definition.get("extraction_instructions", ""),
-        "grouping_key": schema_ver.definition.get("grouping_key", ""),
+        "definition": defn,
+        "fields": fields,
+        "extraction_instructions": defn.get("extraction_instructions", ""),
+        "grouping_key": defn.get("grouping_key", ""),
+        "source_website": defn.get("source_website", ""),
+        "base_schema": defn.get("base_schema", ""),
+        # Extras metadata for the UI
+        "has_extras": len(extras_fields) > 0,
+        "extras_fields": extras_fields,
+        "extras_source": extras_source,
     }

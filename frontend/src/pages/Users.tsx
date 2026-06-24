@@ -2,9 +2,8 @@ import { useEffect, useState } from 'react'
 import { Plus, Search, Trash2, Edit3, UserCheck, UserX, Info } from 'lucide-react'
 import { usersApi } from '@/api/client'
 import type { User } from '@/types'
-import { Button, Card, Badge, Modal, Input, Select, EmptyState, Spinner, ConfirmDialog, Avatar, cn, toast } from '@/components/ui'
+import { Button, Card, Badge, Modal, Input, EmptyState, Spinner, ConfirmDialog, Avatar, cn, toast, safeFromNow } from '@/components/ui'
 import { ROLE_META, getRoleLabel } from '@/lib/permissions'
-import { formatDistanceToNow } from 'date-fns'
 
 const ROLES = ['org_admin', 'project_admin', 'qa_lead', 'pipeline_operator', 'reviewer', 'read_only']
 
@@ -30,7 +29,21 @@ export function UsersPage() {
   const [deleting, setDeleting] = useState(false)
   const [showRoleInfo, setShowRoleInfo] = useState(false)
 
-  const load = () => usersApi.list().then(setUsers).finally(() => setLoading(false))
+  const load = () => {
+    setLoading(true)
+    usersApi.list()
+      .then((data: any) => {
+        // Backend returns PaginatedResponse {items:[...]} — handle both shapes
+        const list = Array.isArray(data) ? data : Array.isArray(data?.items) ? data.items : []
+        setUsers(list)
+      })
+      .catch((err: any) => {
+        toast.error('Failed to load users: ' + (err?.response?.data?.detail || err?.message || 'Unknown error'))
+        setUsers([])
+      })
+      .finally(() => setLoading(false))
+  }
+
   useEffect(() => { load() }, [])
 
   const filtered = users.filter(u => {
@@ -204,7 +217,7 @@ export function UsersPage() {
                         : <Badge variant="gray"><UserX className="w-3 h-3" /> Inactive</Badge>}
                     </td>
                     <td className="px-4 py-3.5 text-xs text-gray-400 hidden lg:table-cell">
-                      {u.created_at ? formatDistanceToNow(new Date(u.created_at), { addSuffix: true }) : '—'}
+                      {safeFromNow(u.created_at)}
                     </td>
                     <td className="px-4 py-3.5">
                       <div className="flex items-center gap-1 justify-end">

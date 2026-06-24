@@ -42,10 +42,22 @@ def upgrade():
     op.create_index('ix_sources_status', 'sources', ['status'])
 
     op.add_column('extraction_jobs', sa.Column('source_id', sa.String(36), sa.ForeignKey('sources.id', ondelete='CASCADE'), nullable=True))
-    op.create_index('ix_extraction_jobs_source_id', 'extraction_jobs', ['source_id'])
+    try:
+        op.create_index('ix_extraction_jobs_source_id', 'extraction_jobs', ['source_id'])
+    except Exception:
+        pass
 
-    op.add_column('extracted_records', sa.Column('is_schema_valid', sa.Boolean, server_default='true', nullable=False))
-    op.add_column('extracted_records', sa.Column('validation_errors', sa.JSON, server_default='[]'))
+    conn = op.get_bind()
+    from sqlalchemy import text
+
+    def col_exists(table, col):
+        r = conn.execute(text(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table}' AND column_name='{col}'"))
+        return r.fetchone() is not None
+
+    if not col_exists('extracted_records', 'is_schema_valid'):
+        op.add_column('extracted_records', sa.Column('is_schema_valid', sa.Boolean, server_default='true', nullable=False))
+    if not col_exists('extracted_records', 'validation_errors'):
+        op.add_column('extracted_records', sa.Column('validation_errors', sa.JSON, server_default='[]'))
 
 
 def downgrade():

@@ -426,8 +426,8 @@ class ExtractedRecord(Base):
     extraction_confidence = Column(SAEnum(ExtractionConfidence), nullable=False)
     pipeline_warnings = Column(JSON, default=list)
     # Schema validation — structural conformance, separate from LLM content checks
-    is_schema_valid = Column(Boolean, default=True, nullable=False)
-    validation_errors = Column(JSON, default=list)  # [{field, error}]
+    is_schema_valid = Column(Boolean, server_default='true', default=True, nullable=False)
+    validation_errors = Column(JSON, server_default='[]', default=list)
     review_status = Column(SAEnum(ReviewStatus), default=ReviewStatus.PENDING, nullable=False)
     review_note = Column(Text, nullable=True)
     reviewed_by = Column(String(36), ForeignKey("users.id"), nullable=True)
@@ -438,9 +438,9 @@ class ExtractedRecord(Base):
     llm_reason = Column(Text, nullable=True)
     llm_skipped = Column(Boolean, default=False)
     # Web verification — cross-check against live source website (Phase 3 LLM stage)
-    web_verified = Column(Boolean, nullable=True)        # None = not run, True = pass, False = issues found
-    web_check_flags = Column(JSON, default=list)         # [{field, issue, suggested_value, confidence}]
-    web_check_summary = Column(Text, nullable=True)      # one-line summary from Claude
+    web_verified = Column(Boolean, nullable=True)
+    web_check_flags = Column(JSON, server_default='[]', default=list)
+    web_check_summary = Column(Text, nullable=True)
     extracted_fields = Column(JSON, nullable=False, default=dict)
     raw_text = Column(Text, nullable=False)
     is_submitted = Column(Boolean, default=False)
