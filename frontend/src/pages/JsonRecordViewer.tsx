@@ -47,13 +47,13 @@ interface JsonRecordViewerProps {
 
 // ── VS Code colour palette ────────────────────────────────────────────────────
 const C = {
-  key: '#569cd6',
-  str: '#6a9955',
-  num: '#b5cea8',
-  bool: '#569cd6',
-  null: '#808080',
-  brace: 'var(--color-text-secondary)',
-  punct: 'var(--color-text-tertiary)',
+  key:    '#569cd6',
+  str:    '#6a9955',
+  num:    '#b5cea8',
+  bool:   '#569cd6',
+  null:   '#808080',
+  brace:  'var(--color-text-secondary)',
+  punct:  'var(--color-text-tertiary)',
 }
 
 function JsonToken({ type, value }: { type: keyof typeof C; value: string }) {
@@ -61,10 +61,10 @@ function JsonToken({ type, value }: { type: keyof typeof C; value: string }) {
 }
 
 function renderValueInline(v: unknown): JSX.Element {
-  if (v === null) return <JsonToken type="null" value="null" />
-  if (typeof v === 'boolean') return <JsonToken type="bool" value={String(v)} />
-  if (typeof v === 'number') return <JsonToken type="num" value={String(v)} />
-  if (typeof v === 'string') return <JsonToken type="str" value={JSON.stringify(v)} />
+  if (v === null)      return <JsonToken type="null"  value="null" />
+  if (typeof v === 'boolean') return <JsonToken type="bool"  value={String(v)} />
+  if (typeof v === 'number')  return <JsonToken type="num"   value={String(v)} />
+  if (typeof v === 'string')  return <JsonToken type="str"   value={JSON.stringify(v)} />
   if (Array.isArray(v)) {
     if (v.length === 0) return <><JsonToken type="brace" value="[" /><JsonToken type="brace" value="]" /></>
     return <JsonToken type="brace" value={`[…${v.length}]`} />
@@ -124,16 +124,16 @@ function FieldRow({
   const rowBg = validationError
     ? 'rgba(239,68,68,0.06)'
     : webFlag
-      ? 'rgba(245,158,11,0.06)'
-      : 'transparent'
+    ? 'rgba(245,158,11,0.06)'
+    : 'transparent'
 
   const borderLeft = validationError
     ? '2px solid #ef4444'
     : webFlag
-      ? '2px solid #f59e0b'
-      : isFixed
-        ? '2px solid #10b981'
-        : '2px solid transparent'
+    ? '2px solid #f59e0b'
+    : isFixed
+    ? '2px solid #10b981'
+    : '2px solid transparent'
 
   return (
     <div style={{ background: rowBg, borderLeft, paddingLeft: 8, marginLeft: -10, transition: 'background 0.15s' }}>
@@ -221,7 +221,80 @@ function FieldRow({
   )
 }
 
-// ── Complex field keys — shown as review cards, not in the JSON editor ────────
+// ── JsonTree — recursive in-place JSON renderer (VS Code dark theme) ─────────
+function JsonTree({ value, depth = 0 }: { value: unknown; depth?: number }) {
+  const [collapsed, setCollapsed] = useState(depth >= 2)
+  const C2 = { str: '#ce9178', num: '#b5cea8', bool: '#569cd6', nil: '#808080', key: '#9cdcfe', brace: '#ffd700', bracket: '#da70d6' }
+
+  if (value === null) return <span style={{ color: C2.nil }}>null</span>
+  if (typeof value === 'boolean') return <span style={{ color: C2.bool }}>{String(value)}</span>
+  if (typeof value === 'number') return <span style={{ color: C2.num }}>{value}</span>
+  if (typeof value === 'string') {
+    const display = value.length > 300 ? value.slice(0, 300) + '…' : value
+    return <span style={{ color: C2.str }}>"{display}"</span>
+  }
+
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span style={{ color: C2.nil }}>[]</span>
+    if (collapsed) {
+      return (
+        <button onClick={() => setCollapsed(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C2.bracket, fontSize: 12, padding: '0 4px' }}>
+          [{value.length}] ▶
+        </button>
+      )
+    }
+    return (
+      <span>
+        <button onClick={() => setCollapsed(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C2.bracket, fontSize: 12, padding: '0 2px' }}>▼</button>
+        <span style={{ color: C2.bracket }}>[</span>
+        <div style={{ paddingLeft: 20 }}>
+          {value.map((item, idx) => (
+            <div key={idx} style={{ display: 'flex', gap: 4, alignItems: 'baseline' }}>
+              <span style={{ color: '#555', fontSize: 10, minWidth: 20, textAlign: 'right', flexShrink: 0 }}>{idx}</span>
+              <span style={{ color: '#808080' }}>:</span>
+              <JsonTree value={item} depth={depth + 1} />
+              {idx < value.length - 1 && <span style={{ color: '#808080' }}>,</span>}
+            </div>
+          ))}
+        </div>
+        <span style={{ color: C2.bracket }}>]</span>
+      </span>
+    )
+  }
+
+  if (typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+    if (entries.length === 0) return <span style={{ color: C2.nil }}>{'{}'}</span>
+    if (collapsed) {
+      return (
+        <button onClick={() => setCollapsed(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C2.brace, fontSize: 12, padding: '0 4px' }}>
+          {'{…'}{entries.length} keys{'}'} ▶
+        </button>
+      )
+    }
+    return (
+      <span>
+        <button onClick={() => setCollapsed(true)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: C2.brace, fontSize: 12, padding: '0 2px' }}>▼</button>
+        <span style={{ color: C2.brace }}>{'{'}</span>
+        <div style={{ paddingLeft: 20 }}>
+          {entries.map(([k, v], idx) => (
+            <div key={k} style={{ display: 'flex', gap: 4, alignItems: 'baseline', flexWrap: 'wrap' }}>
+              <span style={{ color: C2.key }}>"{k}"</span>
+              <span style={{ color: '#808080' }}>:</span>
+              <JsonTree value={v} depth={depth + 1} />
+              {idx < entries.length - 1 && <span style={{ color: '#808080' }}>,</span>}
+            </div>
+          ))}
+        </div>
+        <span style={{ color: C2.brace }}>{'}'}</span>
+      </span>
+    )
+  }
+
+  return <span style={{ color: C2.str }}>{String(value)}</span>
+}
+
+// ── Complex field keys — shown as review cards below the JSON panel ────────────
 const COMPLEX_KEYS = [
   'manufacturing_sites', 'products_offered', 'sources', 'extras',
   'jv_stakes', 'annual_production',
@@ -236,18 +309,18 @@ const SITE_TYPE_ICON: Record<string, string> = {
 
 // Site type colour mapping for left border accents
 const SITE_COLORS: Record<string, { border: string; bg: string; badge: string; text: string }> = {
-  mine: { border: '#3b82f6', bg: '#eff6ff', badge: '#dbeafe', text: '#1d4ed8' },
-  quarry: { border: '#6366f1', bg: '#eef2ff', badge: '#e0e7ff', text: '#4338ca' },
-  pit: { border: '#8b5cf6', bg: '#f5f3ff', badge: '#ede9fe', text: '#6d28d9' },
-  refinery: { border: '#f59e0b', bg: '#fffbeb', badge: '#fef3c7', text: '#b45309' },
-  smelter: { border: '#ef4444', bg: '#fef2f2', badge: '#fee2e2', text: '#b91c1c' },
+  mine:               { border: '#3b82f6', bg: '#eff6ff', badge: '#dbeafe', text: '#1d4ed8' },
+  quarry:             { border: '#6366f1', bg: '#eef2ff', badge: '#e0e7ff', text: '#4338ca' },
+  pit:                { border: '#8b5cf6', bg: '#f5f3ff', badge: '#ede9fe', text: '#6d28d9' },
+  refinery:           { border: '#f59e0b', bg: '#fffbeb', badge: '#fef3c7', text: '#b45309' },
+  smelter:            { border: '#ef4444', bg: '#fef2f2', badge: '#fee2e2', text: '#b91c1c' },
   'processing plant': { border: '#f97316', bg: '#fff7ed', badge: '#ffedd5', text: '#c2410c' },
   'exploration site': { border: '#10b981', bg: '#ecfdf5', badge: '#d1fae5', text: '#065f46' },
-  wharf: { border: '#06b6d4', bg: '#ecfeff', badge: '#cffafe', text: '#0e7490' },
-  'handling site': { border: '#64748b', bg: '#f8fafc', badge: '#f1f5f9', text: '#475569' },
-  laboratory: { border: '#a855f7', bg: '#faf5ff', badge: '#f3e8ff', text: '#7e22ce' },
-  'recycling facility': { border: '#84cc16', bg: '#f7fee7', badge: '#ecfccb', text: '#3f6212' },
-  'peat workings': { border: '#92400e', bg: '#fef3c7', badge: '#fde68a', text: '#78350f' },
+  wharf:              { border: '#06b6d4', bg: '#ecfeff', badge: '#cffafe', text: '#0e7490' },
+  'handling site':    { border: '#64748b', bg: '#f8fafc', badge: '#f1f5f9', text: '#475569' },
+  laboratory:         { border: '#a855f7', bg: '#faf5ff', badge: '#f3e8ff', text: '#7e22ce' },
+  'recycling facility':{ border: '#84cc16', bg: '#f7fee7', badge: '#ecfccb', text: '#3f6212' },
+  'peat workings':    { border: '#92400e', bg: '#fef3c7', badge: '#fde68a', text: '#78350f' },
 }
 const DEFAULT_SITE_COLOR = { border: '#94a3b8', bg: '#f8fafc', badge: '#f1f5f9', text: '#475569' }
 
@@ -372,47 +445,46 @@ function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, u
               )
             }
             return (
-              <div key={i} style={{
-                background: '#fff', borderRadius: 10,
-                border: '1px solid #d1fae5',
-                borderTop: '3px solid #10b981',
-                padding: '12px 14px',
-                boxShadow: '0 1px 3px rgba(16,185,129,0.08)',
-              }}>
-                <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>{p.product_name}</p>
-                {p.grade && (
-                  <p style={{
-                    fontSize: 11, color: '#059669', margin: '0 0 8px',
-                    fontStyle: 'italic', fontWeight: 500,
-                  }}>{p.grade}</p>
+            <div key={i} style={{
+              background: '#fff', borderRadius: 10,
+              border: '1px solid #d1fae5',
+              borderTop: '3px solid #10b981',
+              padding: '12px 14px',
+              boxShadow: '0 1px 3px rgba(16,185,129,0.08)',
+            }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>{p.product_name}</p>
+              {p.grade && (
+                <p style={{
+                  fontSize: 11, color: '#059669', margin: '0 0 8px',
+                  fontStyle: 'italic', fontWeight: 500,
+                }}>{p.grade}</p>
+              )}
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: p.source_url ? 6 : 0 }}>
+                {p.category && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+                    background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d',
+                  }}>{p.category}</span>
                 )}
-                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: p.source_url ? 6 : 0 }}>
-                  {p.category && (
-                    <span style={{
-                      fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-                      background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d',
-                    }}>{p.category}</span>
-                  )}
-                  {p.product_id && (
-                    <span style={{
-                      fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                      background: '#f1f5f9', color: '#64748b',
-                      fontFamily: 'var(--font-mono)',
-                    }}>{p.product_id}</span>
-                  )}
-                </div>
-                {p.source_url && (
-                  <a href={p.source_url} target="_blank" rel="noreferrer" style={{
-                    fontSize: 10.5, color: '#3b82f6', textDecoration: 'none',
-                    display: 'flex', alignItems: 'center', gap: 3,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    🔗 {p.source_url.replace(/^https?:\/\//, '')}
-                  </a>
+                {p.product_id && (
+                  <span style={{
+                    fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                    background: '#f1f5f9', color: '#64748b',
+                    fontFamily: 'var(--font-mono)',
+                  }}>{p.product_id}</span>
                 )}
               </div>
-            )
-          })}
+              {p.source_url && (
+                <a href={p.source_url} target="_blank" rel="noreferrer" style={{
+                  fontSize: 10.5, color: '#3b82f6', textDecoration: 'none',
+                  display: 'flex', alignItems: 'center', gap: 3,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
+                  🔗 {p.source_url.replace(/^https?:\/\//, '')}
+                </a>
+              )}
+            </div>
+          )})}
         </div>
       </Section>
 
@@ -452,7 +524,7 @@ function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, u
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ background: '#fffbeb', borderBottom: '2px solid #fde68a' }}>
-                {['Commodity', 'Volume', 'Unit', 'Year', 'Notes'].map(h => (
+                {['Commodity','Volume','Unit','Year','Notes'].map(h => (
                   <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11, color: '#92400e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr>
@@ -514,8 +586,8 @@ function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, u
             const tierColor = s.tier === 'tier1'
               ? { bg: '#ecfdf5', text: '#065f46', border: '#6ee7b7', label: 'Official' }
               : s.tier === 'tier2'
-                ? { bg: '#eff6ff', text: '#1e40af', border: '#93c5fd', label: 'Company' }
-                : { bg: '#f8fafc', text: '#475569', border: '#cbd5e1', label: 'Web' }
+              ? { bg: '#eff6ff', text: '#1e40af', border: '#93c5fd', label: 'Company' }
+              : { bg: '#f8fafc', text: '#475569', border: '#cbd5e1', label: 'Web' }
             return (
               <div key={i} style={{
                 background: '#fff', borderRadius: 10,
@@ -664,12 +736,12 @@ export function JsonRecordViewer({
   )
 
   const statusColor = ({
-    approved: { bg: '#ecfdf5', text: '#059669', border: '#6ee7b7' },
-    rejected: { bg: '#fef2f2', text: '#dc2626', border: '#fca5a5' },
-    pending: { bg: '#f0f9ff', text: '#0284c7', border: '#7dd3fc' },
+    approved:    { bg: '#ecfdf5', text: '#059669', border: '#6ee7b7' },
+    rejected:    { bg: '#fef2f2', text: '#dc2626', border: '#fca5a5' },
+    pending:     { bg: '#f0f9ff', text: '#0284c7', border: '#7dd3fc' },
     quarantined: { bg: '#fff7ed', text: '#ea580c', border: '#fdba74' },
-    escalated: { bg: '#faf5ff', text: '#7c3aed', border: '#c4b5fd' },
-    skipped: { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
+    escalated:   { bg: '#faf5ff', text: '#7c3aed', border: '#c4b5fd' },
+    skipped:     { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
   } as Record<string, { bg: string; text: string; border: string }>)[record.review_status]
     ?? { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' }
 
@@ -764,7 +836,7 @@ export function JsonRecordViewer({
             </button>
           </div>
 
-          {/* JSON body - scalar fields only */}
+          {/* JSON body — ALL fields rendered, complex values expanded in-place */}
           <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#1e1e2e', padding: '16px 12px', fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.8 }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).querySelectorAll('.edit-btn').forEach((b: any) => { b.style.opacity = '1' }) }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).querySelectorAll('.edit-btn').forEach((b: any) => { b.style.opacity = '0' }) }}
@@ -774,50 +846,52 @@ export function JsonRecordViewer({
               <span style={{ color: C.brace }}>{'{'}</span>
             </div>
 
-            {/* Scalar fields — editable in VS Code view */}
-            {fieldKeys.filter(key => !COMPLEX_KEYS.includes(key)).map((key, i) => {
+            {fieldKeys.map((key, i) => {
+              const v = fields[key]
+              const isScalar = v === null || typeof v !== 'object'
               const isFixed = schemaFields.find(f => f.name === key && 'fixed_value' in f) !== undefined
               const isExtra = extrasFields.includes(key)
-              return (
-                <FieldRow
-                  key={key}
-                  fieldKey={key}
-                  value={fields[key]}
-                  lineNum={i + 2}
-                  schemaField={schemaFields.find(f => f.name === key)}
-                  validationError={validationMap[key]}
-                  webFlag={webFlagMap[key]}
-                  isEditing={editingKey === key}
-                  onStartEdit={() => { setEditingKey(key); setActiveSchemaField(key) }}
-                  onSaveEdit={(v) => handleFieldSave(key, v)}
-                  canEdit={isExtractor || isReviewer}
-                  isFixed={isFixed}
-                  isExtra={isExtra}
-                  extrasSource={extrasSource}
-                />
-              )
-            })}
 
-            {/* Show complex fields collapsed as reference */}
-            {COMPLEX_KEYS.filter(k => {
-              const v = fields[k]
-              if (v === undefined || v === null) return false
-              if (Array.isArray(v)) return v.length > 0
-              if (typeof v === 'object') return Object.keys(v as object).length > 0
-              return false
-            }).map((key, i) => {
-              const v = fields[key]
-              const count = Array.isArray(v) ? v.length : typeof v === 'object' && v ? Object.keys(v).length : 0
+              // Scalar fields → editable FieldRow (unchanged)
+              if (isScalar) {
+                return (
+                  <FieldRow
+                    key={key}
+                    fieldKey={key}
+                    value={v}
+                    lineNum={i + 2}
+                    schemaField={schemaFields.find(f => f.name === key)}
+                    validationError={validationMap[key]}
+                    webFlag={webFlagMap[key]}
+                    isEditing={editingKey === key}
+                    onStartEdit={() => { setEditingKey(key); setActiveSchemaField(key) }}
+                    onSaveEdit={(nv) => handleFieldSave(key, nv)}
+                    canEdit={isExtractor || isReviewer}
+                    isFixed={isFixed}
+                    isExtra={isExtra}
+                    extrasSource={extrasSource}
+                  />
+                )
+              }
+
+              // Complex fields (arrays / objects) → inline expanded JSON tree
               return (
-                <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 4, opacity: 0.6 }}>
-                  <span style={{ color: '#808080', minWidth: 28, textAlign: 'right', fontSize: 11, userSelect: 'none' }}>↓</span>
-                  <span style={{ paddingLeft: 16 }}>
-                    <span style={{ color: C.key }}>"{key}"</span>
-                    <span style={{ color: C.brace }}>: </span>
-                    <span style={{ color: '#808080', fontSize: 11 }}>
-                      {Array.isArray(v) ? `[…${count} items — see cards below]` : `{…${count} keys — see cards below}`}
+                <div key={key} style={{ paddingLeft: 4, marginBottom: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 0 }}>
+                    <span style={{ color: '#808080', minWidth: 28, textAlign: 'right', fontSize: 11, userSelect: 'none', paddingRight: 12, flexShrink: 0 }}>{i + 2}</span>
+                    <span style={{ paddingLeft: 16 }}>
+                      {isExtra && (
+                        <span style={{ fontSize: 9, padding: '0px 5px', borderRadius: 3, background: 'rgba(139,92,246,0.25)', color: '#a78bfa', border: '1px solid rgba(139,92,246,0.4)', marginRight: 6 }}>
+                          {extrasSource || 'extras'}
+                        </span>
+                      )}
+                      <span style={{ color: C.key }}>"{key}"</span>
+                      <span style={{ color: C.brace }}>: </span>
                     </span>
-                  </span>
+                  </div>
+                  <div style={{ paddingLeft: 44 }}>
+                    <JsonTree value={v} depth={0} />
+                  </div>
                 </div>
               )
             })}
@@ -828,8 +902,8 @@ export function JsonRecordViewer({
             </div>
           </div>
 
-          {/* Review cards for complex fields */}
-          <div style={{ background: 'var(--color-background-secondary)', borderTop: '0.5px solid rgba(255,255,255,0.08)', overflow: 'auto', maxHeight: 260, flexShrink: 0 }}>
+          {/* Rich review cards — visual layer on top of the raw JSON above */}
+          <div style={{ background: '#f8fafc', borderTop: '2px solid #e2e8f0', overflow: 'auto', maxHeight: 280, flexShrink: 0 }}>
             <ComplexFieldsPanel fields={fields} extrasSource={extrasSource} />
           </div>
 
