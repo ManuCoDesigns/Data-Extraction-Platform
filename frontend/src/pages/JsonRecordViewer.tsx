@@ -502,7 +502,7 @@ export function JsonRecordViewer({
     ?? { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' }
 
   return (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, width: '100vw', height: '100vh', zIndex: 9999, background: 'var(--color-background-primary)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+    <div style={{ width: '100%', height: '100%', background: 'var(--color-background-primary)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {/* ── Top bar ── */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', background: 'var(--color-background-primary)', borderBottom: '0.5px solid var(--color-border-tertiary)', flexShrink: 0 }}>
         <button onClick={onClose} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6, border: 'none', background: 'transparent', color: 'var(--color-text-secondary)', cursor: 'pointer', fontSize: 13 }}>
@@ -593,7 +593,7 @@ export function JsonRecordViewer({
           </div>
 
           {/* JSON body - scalar fields only */}
-          <div style={{ flex: 1, overflow: 'auto', background: '#1e1e2e', padding: '16px 12px', fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.8 }}
+          <div style={{ flex: 1, minHeight: 0, overflow: 'auto', background: '#1e1e2e', padding: '16px 12px', fontFamily: 'var(--font-mono)', fontSize: 13, lineHeight: 1.8 }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).querySelectorAll('.edit-btn').forEach((b: any) => { b.style.opacity = '1' }) }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).querySelectorAll('.edit-btn').forEach((b: any) => { b.style.opacity = '0' }) }}
           >
@@ -651,7 +651,7 @@ export function JsonRecordViewer({
           </div>
 
           {/* Review cards for complex fields */}
-          <div style={{ background: 'var(--color-background-secondary)', borderTop: '0.5px solid rgba(255,255,255,0.08)', overflow: 'auto', maxHeight: '45%', flexShrink: 0 }}>
+          <div style={{ background: 'var(--color-background-secondary)', borderTop: '0.5px solid rgba(255,255,255,0.08)', overflow: 'auto', maxHeight: 260, flexShrink: 0 }}>
             <ComplexFieldsPanel fields={fields} extrasSource={extrasSource} />
           </div>
 
