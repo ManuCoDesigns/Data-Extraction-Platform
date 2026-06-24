@@ -235,6 +235,23 @@ const SITE_TYPE_ICON: Record<string, string> = {
   'peat workings': '🌿', 'spoil heap': '🗑️',
 }
 
+// Site type colour mapping for left border accents
+const SITE_COLORS: Record<string, { border: string; bg: string; badge: string; text: string }> = {
+  mine:               { border: '#3b82f6', bg: '#eff6ff', badge: '#dbeafe', text: '#1d4ed8' },
+  quarry:             { border: '#6366f1', bg: '#eef2ff', badge: '#e0e7ff', text: '#4338ca' },
+  pit:                { border: '#8b5cf6', bg: '#f5f3ff', badge: '#ede9fe', text: '#6d28d9' },
+  refinery:           { border: '#f59e0b', bg: '#fffbeb', badge: '#fef3c7', text: '#b45309' },
+  smelter:            { border: '#ef4444', bg: '#fef2f2', badge: '#fee2e2', text: '#b91c1c' },
+  'processing plant': { border: '#f97316', bg: '#fff7ed', badge: '#ffedd5', text: '#c2410c' },
+  'exploration site': { border: '#10b981', bg: '#ecfdf5', badge: '#d1fae5', text: '#065f46' },
+  wharf:              { border: '#06b6d4', bg: '#ecfeff', badge: '#cffafe', text: '#0e7490' },
+  'handling site':    { border: '#64748b', bg: '#f8fafc', badge: '#f1f5f9', text: '#475569' },
+  laboratory:         { border: '#a855f7', bg: '#faf5ff', badge: '#f3e8ff', text: '#7e22ce' },
+  'recycling facility':{ border: '#84cc16', bg: '#f7fee7', badge: '#ecfccb', text: '#3f6212' },
+  'peat workings':    { border: '#92400e', bg: '#fef3c7', badge: '#fde68a', text: '#78350f' },
+}
+const DEFAULT_SITE_COLOR = { border: '#94a3b8', bg: '#f8fafc', badge: '#f1f5f9', text: '#475569' }
+
 function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, unknown>; extrasSource?: string }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({
     manufacturing_sites: true,
@@ -250,64 +267,128 @@ function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, u
   const jvStakes = (fields.jv_stakes as any[]) || []
   const annualProd = (fields.annual_production as any[]) || []
 
-  const Section = ({ label, count, icon, k, children }: { label: string; count: number; icon: string; k: string; children: React.ReactNode }) => {
+  const Section = ({
+    label, count, icon, k, accent, children,
+  }: { label: string; count: number; icon: string; k: string; accent: string; children: React.ReactNode }) => {
     if (!count) return null
     return (
-      <div style={{ borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
+      <div style={{ marginBottom: 0, borderBottom: '1px solid #e2e8f0' }}>
         <button
           onClick={() => toggle(k)}
-          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 16px', background: 'transparent', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+            padding: '11px 16px', background: '#f8fafc',
+            border: 'none', borderLeft: `3px solid ${accent}`,
+            cursor: 'pointer', textAlign: 'left', transition: 'background 0.1s',
+          }}
         >
-          <span style={{ fontSize: 14 }}>{icon}</span>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-primary)', flex: 1 }}>{label}</span>
-          <span style={{ fontSize: 11, color: 'var(--color-text-tertiary)', background: 'var(--color-background-tertiary)', padding: '1px 7px', borderRadius: 10 }}>{count}</span>
-          <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)' }}>{expanded[k] ? '▲' : '▼'}</span>
+          <span style={{ fontSize: 15 }}>{icon}</span>
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b', flex: 1, letterSpacing: '0.01em' }}>{label}</span>
+          <span style={{
+            fontSize: 11, fontWeight: 600, color: '#fff',
+            background: accent, padding: '1px 8px', borderRadius: 20, minWidth: 22, textAlign: 'center',
+          }}>{count}</span>
+          <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 4 }}>{expanded[k] ? '▲' : '▼'}</span>
         </button>
-        {expanded[k] && <div style={{ padding: '0 12px 12px' }}>{children}</div>}
+        {expanded[k] && (
+          <div style={{ padding: '12px 16px', background: '#ffffff' }}>
+            {children}
+          </div>
+        )}
       </div>
     )
   }
 
   return (
-    <div>
-      {/* Manufacturing Sites */}
-      <Section label="Manufacturing Sites" count={sites.length} icon="🏭" k="manufacturing_sites">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {sites.map((s: any, i: number) => (
-            <div key={i} style={{ border: '0.5px solid var(--color-border-secondary)', borderRadius: 10, overflow: 'hidden', background: 'var(--color-background-primary)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--color-background-secondary)' }}>
-                <span style={{ fontSize: 16 }}>{SITE_TYPE_ICON[s.site_type] || '📍'}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', margin: 0 }} className="truncate">{s.location}</p>
-                  <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
-                    <span style={{ fontSize: 11, color: 'var(--color-text-secondary)' }}>📌 {s.country}</span>
-                    <span style={{ fontSize: 11, padding: '0 6px', borderRadius: 4, background: '#eff6ff', color: '#3b82f6', border: '1px solid #bfdbfe' }}>{s.site_type}</span>
+    <div style={{ background: '#f8fafc' }}>
+
+      {/* ── Manufacturing Sites ────────────────────────────────────── */}
+      <Section label="Manufacturing Sites" count={sites.length} icon="🏭" k="manufacturing_sites" accent="#3b82f6">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {sites.map((s: any, i: number) => {
+            const col = SITE_COLORS[s.site_type] || DEFAULT_SITE_COLOR
+            return (
+              <div key={i} style={{
+                borderLeft: `4px solid ${col.border}`,
+                borderRadius: '0 10px 10px 0',
+                background: '#fff',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04)',
+                overflow: 'hidden',
+              }}>
+                {/* Site header */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: col.bg }}>
+                  <span style={{ fontSize: 20 }}>{SITE_TYPE_ICON[s.site_type] || '📍'}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: 0, lineHeight: 1.4 }}>{s.location}</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: 11, color: '#64748b', display: 'flex', alignItems: 'center', gap: 3 }}>
+                        📌 {s.country}
+                      </span>
+                      <span style={{
+                        fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+                        background: col.badge, color: col.text, border: `1px solid ${col.border}30`,
+                      }}>
+                        {s.site_type || 'site'}
+                      </span>
+                    </div>
                   </div>
                 </div>
+                {/* Raw text */}
+                {s.raw && (
+                  <div style={{ padding: '10px 14px', borderTop: `1px solid ${col.border}20` }}>
+                    <p style={{
+                      fontSize: 11.5, color: '#475569', lineHeight: 1.7, margin: 0,
+                      fontFamily: 'var(--font-mono)',
+                      background: '#f8fafc', borderRadius: 6, padding: '8px 10px',
+                      border: '1px solid #e2e8f0',
+                    }}>{s.raw}</p>
+                  </div>
+                )}
               </div>
-              {s.raw && (
-                <div style={{ padding: '8px 12px' }}>
-                  <p style={{ fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.6, margin: 0, fontFamily: 'var(--font-mono)' }}>{s.raw}</p>
-                </div>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </Section>
 
-      {/* Products Offered */}
-      <Section label="Products Offered" count={products.length} icon="📦" k="products_offered">
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      {/* ── Products Offered ───────────────────────────────────────── */}
+      <Section label="Products Offered" count={products.length} icon="📦" k="products_offered" accent="#10b981">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
           {products.map((p: any, i: number) => (
-            <div key={i} style={{ border: '0.5px solid var(--color-border-secondary)', borderRadius: 8, padding: '8px 12px', background: 'var(--color-background-primary)', minWidth: 180, flex: '1 1 180px' }}>
-              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-text-primary)', margin: '0 0 4px' }}>{p.product_name}</p>
-              {p.grade && <p style={{ fontSize: 11, color: '#059669', margin: '0 0 4px', fontStyle: 'italic' }}>{p.grade}</p>}
-              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 10, padding: '1px 6px', borderRadius: 4, background: '#fef3c7', color: '#b45309', border: '1px solid #fcd34d' }}>{p.category}</span>
-                {p.product_id && <span style={{ fontSize: 10, color: 'var(--color-text-tertiary)', fontFamily: 'var(--font-mono)' }}>{p.product_id}</span>}
+            <div key={i} style={{
+              background: '#fff', borderRadius: 10,
+              border: '1px solid #d1fae5',
+              borderTop: '3px solid #10b981',
+              padding: '12px 14px',
+              boxShadow: '0 1px 3px rgba(16,185,129,0.08)',
+            }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>{p.product_name}</p>
+              {p.grade && (
+                <p style={{
+                  fontSize: 11, color: '#059669', margin: '0 0 8px',
+                  fontStyle: 'italic', fontWeight: 500,
+                }}>{p.grade}</p>
+              )}
+              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: p.source_url ? 6 : 0 }}>
+                {p.category && (
+                  <span style={{
+                    fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+                    background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d',
+                  }}>{p.category}</span>
+                )}
+                {p.product_id && (
+                  <span style={{
+                    fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                    background: '#f1f5f9', color: '#64748b',
+                    fontFamily: 'var(--font-mono)',
+                  }}>{p.product_id}</span>
+                )}
               </div>
               {p.source_url && (
-                <a href={p.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 10, color: '#3b82f6', display: 'block', marginTop: 4, textDecoration: 'none', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <a href={p.source_url} target="_blank" rel="noreferrer" style={{
+                  fontSize: 10.5, color: '#3b82f6', textDecoration: 'none',
+                  display: 'flex', alignItems: 'center', gap: 3,
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                }}>
                   🔗 {p.source_url.replace(/^https?:\/\//, '')}
                 </a>
               )}
@@ -316,73 +397,138 @@ function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, u
         </div>
       </Section>
 
-      {/* JV Stakes */}
-      <Section label="JV Stakes" count={jvStakes.length} icon="🤝" k="jv_stakes">
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+      {/* ── JV Stakes ─────────────────────────────────────────────── */}
+      <Section label="JV Stakes" count={jvStakes.length} icon="🤝" k="jv_stakes" accent="#7c3aed">
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10 }}>
           {jvStakes.map((j: any, i: number) => (
-            <div key={i} style={{ border: '0.5px solid var(--color-border-secondary)', borderRadius: 8, padding: '8px 12px', background: 'var(--color-background-primary)', flex: '1 1 200px' }}>
-              <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 4px', color: 'var(--color-text-primary)' }}>{j.site_name}</p>
-              <p style={{ fontSize: 12, color: '#7c3aed', margin: '0 0 4px', fontWeight: 500 }}>{j.ownership_pct}% ownership</p>
-              <p style={{ fontSize: 11, color: 'var(--color-text-secondary)', margin: 0 }}>{j.country} · {j.commodity}</p>
-              {j.jv_partners?.length > 0 && <p style={{ fontSize: 11, color: 'var(--color-text-tertiary)', margin: '4px 0 0' }}>Partners: {j.jv_partners.join(', ')}</p>}
+            <div key={i} style={{
+              background: '#fff', borderRadius: 10,
+              border: '1px solid #ede9fe', borderLeft: '4px solid #7c3aed',
+              padding: '12px 14px',
+              boxShadow: '0 1px 3px rgba(124,58,237,0.08)',
+            }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 6px' }}>{j.site_name}</p>
+              <div style={{
+                display: 'inline-flex', alignItems: 'center', gap: 4,
+                background: '#f5f3ff', borderRadius: 20, padding: '3px 10px',
+                marginBottom: 6,
+              }}>
+                <span style={{ fontSize: 13, fontWeight: 800, color: '#6d28d9' }}>{j.ownership_pct}%</span>
+                <span style={{ fontSize: 10, color: '#7c3aed' }}>ownership</span>
+              </div>
+              <p style={{ fontSize: 11, color: '#64748b', margin: '0 0 4px' }}>📌 {j.country} · {j.commodity}</p>
+              {j.jv_partners?.length > 0 && (
+                <p style={{ fontSize: 10.5, color: '#94a3b8', margin: 0 }}>
+                  Partners: {j.jv_partners.join(', ')}
+                </p>
+              )}
             </div>
           ))}
         </div>
       </Section>
 
-      {/* Annual Production */}
-      <Section label="Annual Production" count={annualProd.length} icon="📊" k="annual_production">
-        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--color-border-tertiary)' }}>
-              {['Commodity','Volume','Unit','Year','Notes'].map(h => (
-                <th key={h} style={{ textAlign: 'left', padding: '4px 8px', fontSize: 11, color: 'var(--color-text-tertiary)', fontWeight: 500 }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {annualProd.map((r: any, i: number) => (
-              <tr key={i} style={{ borderBottom: '0.5px solid var(--color-border-tertiary)' }}>
-                <td style={{ padding: '6px 8px', fontWeight: 600, color: 'var(--color-text-primary)' }}>{r.commodity}</td>
-                <td style={{ padding: '6px 8px', color: '#059669', fontFamily: 'var(--font-mono)' }}>{r.volume}</td>
-                <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)' }}>{r.unit}</td>
-                <td style={{ padding: '6px 8px', color: 'var(--color-text-secondary)' }}>{r.year}</td>
-                <td style={{ padding: '6px 8px', color: 'var(--color-text-tertiary)', fontSize: 11 }}>{r.notes}</td>
+      {/* ── Annual Production ─────────────────────────────────────── */}
+      <Section label="Annual Production" count={annualProd.length} icon="📊" k="annual_production" accent="#f59e0b">
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #fef3c7', overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#fffbeb', borderBottom: '2px solid #fde68a' }}>
+                {['Commodity','Volume','Unit','Year','Notes'].map(h => (
+                  <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11, color: '#92400e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {annualProd.map((r: any, i: number) => (
+                <tr key={i} style={{ borderBottom: '1px solid #fef9c3', background: i % 2 === 0 ? '#fff' : '#fefce8' }}>
+                  <td style={{ padding: '8px 12px', fontWeight: 700, color: '#0f172a' }}>{r.commodity}</td>
+                  <td style={{ padding: '8px 12px', color: '#059669', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{r.volume}</td>
+                  <td style={{ padding: '8px 12px', color: '#64748b' }}>{r.unit}</td>
+                  <td style={{ padding: '8px 12px', color: '#64748b' }}>{r.year}</td>
+                  <td style={{ padding: '8px 12px', color: '#94a3b8', fontSize: 11 }}>{r.notes}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Section>
 
-      {/* Extras */}
-      <Section label={`Extras${extrasSource ? ` · ${extrasSource}` : ''}`} count={extras.length} icon="✨" k="extras">
-        {extras.map((obj: any, i: number) => (
-          <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {Object.entries(obj).map(([k, v]) => (
-              <div key={k} style={{ display: 'flex', gap: 8, padding: '6px 10px', background: 'var(--color-background-primary)', borderRadius: 8, border: '0.5px solid var(--color-border-secondary)' }}>
-                <span style={{ fontSize: 11, fontWeight: 600, color: '#7c3aed', minWidth: 120, flexShrink: 0, fontFamily: 'var(--font-mono)' }}>{k}</span>
-                <span style={{ fontSize: 11, color: 'var(--color-text-secondary)', lineHeight: 1.5 }}>{String(v)}</span>
-              </div>
-            ))}
-          </div>
-        ))}
-      </Section>
-
-      {/* Sources */}
-      <Section label="Sources" count={sources.length} icon="📚" k="sources">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {sources.map((s: any, i: number) => (
-            <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, padding: '8px 12px', background: 'var(--color-background-primary)', borderRadius: 8, border: '0.5px solid var(--color-border-secondary)' }}>
-              <span style={{ fontSize: 10, padding: '2px 6px', borderRadius: 4, background: s.tier === 'tier1' ? '#ecfdf5' : s.tier === 'tier2' ? '#eff6ff' : '#fafafa', color: s.tier === 'tier1' ? '#059669' : s.tier === 'tier2' ? '#3b82f6' : '#6b7280', border: `1px solid ${s.tier === 'tier1' ? '#6ee7b7' : s.tier === 'tier2' ? '#bfdbfe' : '#e5e7eb'}`, flexShrink: 0, marginTop: 2 }}>{s.tier}</span>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-text-primary)', margin: '0 0 2px' }}>{s.source_name}</p>
-                {s.source_url && <a href={s.source_url} target="_blank" rel="noreferrer" style={{ fontSize: 11, color: '#3b82f6', textDecoration: 'none', display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.source_url}</a>}
-                {s.doi && <p style={{ fontSize: 10, color: 'var(--color-text-tertiary)', margin: '2px 0 0' }}>DOI: {s.doi}</p>}
-              </div>
+      {/* ── Extras ────────────────────────────────────────────────── */}
+      <Section label={`Extras${extrasSource ? ` · ${extrasSource}` : ''}`} count={extras.length} icon="✨" k="extras" accent="#a855f7">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {extras.map((obj: any, idx: number) => (
+            <div key={idx} style={{
+              background: '#fff', borderRadius: 10,
+              border: '1px solid #e9d5ff',
+              overflow: 'hidden',
+              boxShadow: '0 1px 3px rgba(168,85,247,0.06)',
+            }}>
+              {Object.entries(obj).map(([k, v], j) => (
+                <div key={k} style={{
+                  display: 'flex', gap: 12, padding: '9px 14px',
+                  borderBottom: j < Object.entries(obj).length - 1 ? '1px solid #f3e8ff' : 'none',
+                  background: j % 2 === 0 ? '#faf5ff' : '#fff',
+                }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, color: '#7c3aed',
+                    minWidth: 140, flexShrink: 0, fontFamily: 'var(--font-mono)',
+                  }}>{k}</span>
+                  <span style={{ fontSize: 11, color: '#374151', lineHeight: 1.6 }}>{String(v)}</span>
+                </div>
+              ))}
             </div>
           ))}
         </div>
       </Section>
+
+      {/* ── Sources ───────────────────────────────────────────────── */}
+      <Section label="Sources" count={sources.length} icon="📚" k="sources" accent="#0ea5e9">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {sources.map((s: any, i: number) => {
+            const tierColor = s.tier === 'tier1'
+              ? { bg: '#ecfdf5', text: '#065f46', border: '#6ee7b7', label: 'Official' }
+              : s.tier === 'tier2'
+              ? { bg: '#eff6ff', text: '#1e40af', border: '#93c5fd', label: 'Company' }
+              : { bg: '#f8fafc', text: '#475569', border: '#cbd5e1', label: 'Web' }
+            return (
+              <div key={i} style={{
+                background: '#fff', borderRadius: 10,
+                border: '1px solid #e0f2fe', borderLeft: '4px solid #0ea5e9',
+                padding: '12px 14px',
+                boxShadow: '0 1px 3px rgba(14,165,233,0.07)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                  <span style={{
+                    fontSize: 10, fontWeight: 700, padding: '3px 8px', borderRadius: 20, flexShrink: 0,
+                    background: tierColor.bg, color: tierColor.text, border: `1px solid ${tierColor.border}`,
+                    marginTop: 1,
+                  }}>{tierColor.label}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', margin: '0 0 4px', lineHeight: 1.4 }}>
+                      {s.source_name}
+                    </p>
+                    {s.source_url && (
+                      <a href={s.source_url} target="_blank" rel="noreferrer" style={{
+                        fontSize: 11, color: '#0ea5e9', textDecoration: 'none', fontWeight: 500,
+                        display: 'flex', alignItems: 'center', gap: 4,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        🔗 {s.source_url}
+                      </a>
+                    )}
+                    {s.doi && (
+                      <p style={{ fontSize: 10, color: '#94a3b8', margin: '4px 0 0', fontFamily: 'var(--font-mono)' }}>
+                        DOI: {s.doi}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </Section>
+
     </div>
   )
 }
