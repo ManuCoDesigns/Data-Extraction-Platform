@@ -47,13 +47,13 @@ interface JsonRecordViewerProps {
 
 // ── VS Code colour palette ────────────────────────────────────────────────────
 const C = {
-  key:    '#569cd6',
-  str:    '#6a9955',
-  num:    '#b5cea8',
-  bool:   '#569cd6',
-  null:   '#808080',
-  brace:  'var(--color-text-secondary)',
-  punct:  'var(--color-text-tertiary)',
+  key: '#569cd6',
+  str: '#6a9955',
+  num: '#b5cea8',
+  bool: '#569cd6',
+  null: '#808080',
+  brace: 'var(--color-text-secondary)',
+  punct: 'var(--color-text-tertiary)',
 }
 
 function JsonToken({ type, value }: { type: keyof typeof C; value: string }) {
@@ -61,10 +61,10 @@ function JsonToken({ type, value }: { type: keyof typeof C; value: string }) {
 }
 
 function renderValueInline(v: unknown): JSX.Element {
-  if (v === null)      return <JsonToken type="null"  value="null" />
-  if (typeof v === 'boolean') return <JsonToken type="bool"  value={String(v)} />
-  if (typeof v === 'number')  return <JsonToken type="num"   value={String(v)} />
-  if (typeof v === 'string')  return <JsonToken type="str"   value={JSON.stringify(v)} />
+  if (v === null) return <JsonToken type="null" value="null" />
+  if (typeof v === 'boolean') return <JsonToken type="bool" value={String(v)} />
+  if (typeof v === 'number') return <JsonToken type="num" value={String(v)} />
+  if (typeof v === 'string') return <JsonToken type="str" value={JSON.stringify(v)} />
   if (Array.isArray(v)) {
     if (v.length === 0) return <><JsonToken type="brace" value="[" /><JsonToken type="brace" value="]" /></>
     return <JsonToken type="brace" value={`[…${v.length}]`} />
@@ -124,16 +124,16 @@ function FieldRow({
   const rowBg = validationError
     ? 'rgba(239,68,68,0.06)'
     : webFlag
-    ? 'rgba(245,158,11,0.06)'
-    : 'transparent'
+      ? 'rgba(245,158,11,0.06)'
+      : 'transparent'
 
   const borderLeft = validationError
     ? '2px solid #ef4444'
     : webFlag
-    ? '2px solid #f59e0b'
-    : isFixed
-    ? '2px solid #10b981'
-    : '2px solid transparent'
+      ? '2px solid #f59e0b'
+      : isFixed
+        ? '2px solid #10b981'
+        : '2px solid transparent'
 
   return (
     <div style={{ background: rowBg, borderLeft, paddingLeft: 8, marginLeft: -10, transition: 'background 0.15s' }}>
@@ -224,8 +224,7 @@ function FieldRow({
 // ── Complex field keys — shown as review cards, not in the JSON editor ────────
 const COMPLEX_KEYS = [
   'manufacturing_sites', 'products_offered', 'sources', 'extras',
-  'jv_stakes', 'annual_production', 'data_completeness_flags',
-  'certification_references', 'regulation_references',
+  'jv_stakes', 'annual_production',
 ]
 
 const SITE_TYPE_ICON: Record<string, string> = {
@@ -237,18 +236,18 @@ const SITE_TYPE_ICON: Record<string, string> = {
 
 // Site type colour mapping for left border accents
 const SITE_COLORS: Record<string, { border: string; bg: string; badge: string; text: string }> = {
-  mine:               { border: '#3b82f6', bg: '#eff6ff', badge: '#dbeafe', text: '#1d4ed8' },
-  quarry:             { border: '#6366f1', bg: '#eef2ff', badge: '#e0e7ff', text: '#4338ca' },
-  pit:                { border: '#8b5cf6', bg: '#f5f3ff', badge: '#ede9fe', text: '#6d28d9' },
-  refinery:           { border: '#f59e0b', bg: '#fffbeb', badge: '#fef3c7', text: '#b45309' },
-  smelter:            { border: '#ef4444', bg: '#fef2f2', badge: '#fee2e2', text: '#b91c1c' },
+  mine: { border: '#3b82f6', bg: '#eff6ff', badge: '#dbeafe', text: '#1d4ed8' },
+  quarry: { border: '#6366f1', bg: '#eef2ff', badge: '#e0e7ff', text: '#4338ca' },
+  pit: { border: '#8b5cf6', bg: '#f5f3ff', badge: '#ede9fe', text: '#6d28d9' },
+  refinery: { border: '#f59e0b', bg: '#fffbeb', badge: '#fef3c7', text: '#b45309' },
+  smelter: { border: '#ef4444', bg: '#fef2f2', badge: '#fee2e2', text: '#b91c1c' },
   'processing plant': { border: '#f97316', bg: '#fff7ed', badge: '#ffedd5', text: '#c2410c' },
   'exploration site': { border: '#10b981', bg: '#ecfdf5', badge: '#d1fae5', text: '#065f46' },
-  wharf:              { border: '#06b6d4', bg: '#ecfeff', badge: '#cffafe', text: '#0e7490' },
-  'handling site':    { border: '#64748b', bg: '#f8fafc', badge: '#f1f5f9', text: '#475569' },
-  laboratory:         { border: '#a855f7', bg: '#faf5ff', badge: '#f3e8ff', text: '#7e22ce' },
-  'recycling facility':{ border: '#84cc16', bg: '#f7fee7', badge: '#ecfccb', text: '#3f6212' },
-  'peat workings':    { border: '#92400e', bg: '#fef3c7', badge: '#fde68a', text: '#78350f' },
+  wharf: { border: '#06b6d4', bg: '#ecfeff', badge: '#cffafe', text: '#0e7490' },
+  'handling site': { border: '#64748b', bg: '#f8fafc', badge: '#f1f5f9', text: '#475569' },
+  laboratory: { border: '#a855f7', bg: '#faf5ff', badge: '#f3e8ff', text: '#7e22ce' },
+  'recycling facility': { border: '#84cc16', bg: '#f7fee7', badge: '#ecfccb', text: '#3f6212' },
+  'peat workings': { border: '#92400e', bg: '#fef3c7', badge: '#fde68a', text: '#78350f' },
 }
 const DEFAULT_SITE_COLOR = { border: '#94a3b8', bg: '#f8fafc', badge: '#f1f5f9', text: '#475569' }
 
@@ -306,6 +305,17 @@ function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, u
       <Section label="Manufacturing Sites" count={sites.length} icon="🏭" k="manufacturing_sites" accent="#3b82f6">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {sites.map((s: any, i: number) => {
+            // Handle legacy string format from LLM extraction
+            if (typeof s === 'string') {
+              return (
+                <div key={i} style={{ borderLeft: '4px solid #94a3b8', borderRadius: '0 10px 10px 0', background: '#f8fafc', padding: '12px 14px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ fontSize: 18 }}>📍</span>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#0f172a', margin: 0 }}>{s}</p>
+                  </div>
+                </div>
+              )
+            }
             const col = SITE_COLORS[s.site_type] || DEFAULT_SITE_COLOR
             return (
               <div key={i} style={{
@@ -353,47 +363,56 @@ function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, u
       {/* ── Products Offered ───────────────────────────────────────── */}
       <Section label="Products Offered" count={products.length} icon="📦" k="products_offered" accent="#10b981">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
-          {products.map((p: any, i: number) => (
-            <div key={i} style={{
-              background: '#fff', borderRadius: 10,
-              border: '1px solid #d1fae5',
-              borderTop: '3px solid #10b981',
-              padding: '12px 14px',
-              boxShadow: '0 1px 3px rgba(16,185,129,0.08)',
-            }}>
-              <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>{p.product_name}</p>
-              {p.grade && (
-                <p style={{
-                  fontSize: 11, color: '#059669', margin: '0 0 8px',
-                  fontStyle: 'italic', fontWeight: 500,
-                }}>{p.grade}</p>
-              )}
-              <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: p.source_url ? 6 : 0 }}>
-                {p.category && (
-                  <span style={{
-                    fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
-                    background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d',
-                  }}>{p.category}</span>
+          {products.map((p: any, i: number) => {
+            if (typeof p === 'string') {
+              return (
+                <div key={i} style={{ background: '#ecfdf5', borderRadius: 10, border: '1px solid #d1fae5', borderTop: '3px solid #10b981', padding: '12px 14px' }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: 0 }}>{p}</p>
+                </div>
+              )
+            }
+            return (
+              <div key={i} style={{
+                background: '#fff', borderRadius: 10,
+                border: '1px solid #d1fae5',
+                borderTop: '3px solid #10b981',
+                padding: '12px 14px',
+                boxShadow: '0 1px 3px rgba(16,185,129,0.08)',
+              }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>{p.product_name}</p>
+                {p.grade && (
+                  <p style={{
+                    fontSize: 11, color: '#059669', margin: '0 0 8px',
+                    fontStyle: 'italic', fontWeight: 500,
+                  }}>{p.grade}</p>
                 )}
-                {p.product_id && (
-                  <span style={{
-                    fontSize: 10, padding: '2px 6px', borderRadius: 4,
-                    background: '#f1f5f9', color: '#64748b',
-                    fontFamily: 'var(--font-mono)',
-                  }}>{p.product_id}</span>
+                <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: p.source_url ? 6 : 0 }}>
+                  {p.category && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600, padding: '2px 8px', borderRadius: 20,
+                      background: '#fef3c7', color: '#92400e', border: '1px solid #fcd34d',
+                    }}>{p.category}</span>
+                  )}
+                  {p.product_id && (
+                    <span style={{
+                      fontSize: 10, padding: '2px 6px', borderRadius: 4,
+                      background: '#f1f5f9', color: '#64748b',
+                      fontFamily: 'var(--font-mono)',
+                    }}>{p.product_id}</span>
+                  )}
+                </div>
+                {p.source_url && (
+                  <a href={p.source_url} target="_blank" rel="noreferrer" style={{
+                    fontSize: 10.5, color: '#3b82f6', textDecoration: 'none',
+                    display: 'flex', alignItems: 'center', gap: 3,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    🔗 {p.source_url.replace(/^https?:\/\//, '')}
+                  </a>
                 )}
               </div>
-              {p.source_url && (
-                <a href={p.source_url} target="_blank" rel="noreferrer" style={{
-                  fontSize: 10.5, color: '#3b82f6', textDecoration: 'none',
-                  display: 'flex', alignItems: 'center', gap: 3,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}>
-                  🔗 {p.source_url.replace(/^https?:\/\//, '')}
-                </a>
-              )}
-            </div>
-          ))}
+            )
+          })}
         </div>
       </Section>
 
@@ -433,7 +452,7 @@ function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, u
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead>
               <tr style={{ background: '#fffbeb', borderBottom: '2px solid #fde68a' }}>
-                {['Commodity','Volume','Unit','Year','Notes'].map(h => (
+                {['Commodity', 'Volume', 'Unit', 'Year', 'Notes'].map(h => (
                   <th key={h} style={{ textAlign: 'left', padding: '8px 12px', fontSize: 11, color: '#92400e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>
                 ))}
               </tr>
@@ -485,11 +504,18 @@ function ComplexFieldsPanel({ fields, extrasSource }: { fields: Record<string, u
       <Section label="Sources" count={sources.length} icon="📚" k="sources" accent="#0ea5e9">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {sources.map((s: any, i: number) => {
+            if (typeof s === 'string') {
+              return (
+                <div key={i} style={{ background: '#fff', borderRadius: 10, border: '1px solid #e0f2fe', borderLeft: '4px solid #0ea5e9', padding: '12px 14px' }}>
+                  <a href={s} target="_blank" rel="noreferrer" style={{ fontSize: 12, color: '#0ea5e9', textDecoration: 'none', fontWeight: 500 }}>🔗 {s}</a>
+                </div>
+              )
+            }
             const tierColor = s.tier === 'tier1'
               ? { bg: '#ecfdf5', text: '#065f46', border: '#6ee7b7', label: 'Official' }
               : s.tier === 'tier2'
-              ? { bg: '#eff6ff', text: '#1e40af', border: '#93c5fd', label: 'Company' }
-              : { bg: '#f8fafc', text: '#475569', border: '#cbd5e1', label: 'Web' }
+                ? { bg: '#eff6ff', text: '#1e40af', border: '#93c5fd', label: 'Company' }
+                : { bg: '#f8fafc', text: '#475569', border: '#cbd5e1', label: 'Web' }
             return (
               <div key={i} style={{
                 background: '#fff', borderRadius: 10,
@@ -638,12 +664,12 @@ export function JsonRecordViewer({
   )
 
   const statusColor = ({
-    approved:    { bg: '#ecfdf5', text: '#059669', border: '#6ee7b7' },
-    rejected:    { bg: '#fef2f2', text: '#dc2626', border: '#fca5a5' },
-    pending:     { bg: '#f0f9ff', text: '#0284c7', border: '#7dd3fc' },
+    approved: { bg: '#ecfdf5', text: '#059669', border: '#6ee7b7' },
+    rejected: { bg: '#fef2f2', text: '#dc2626', border: '#fca5a5' },
+    pending: { bg: '#f0f9ff', text: '#0284c7', border: '#7dd3fc' },
     quarantined: { bg: '#fff7ed', text: '#ea580c', border: '#fdba74' },
-    escalated:   { bg: '#faf5ff', text: '#7c3aed', border: '#c4b5fd' },
-    skipped:     { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
+    escalated: { bg: '#faf5ff', text: '#7c3aed', border: '#c4b5fd' },
+    skipped: { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' },
   } as Record<string, { bg: string; text: string; border: string }>)[record.review_status]
     ?? { bg: '#f9fafb', text: '#6b7280', border: '#e5e7eb' }
 
@@ -773,7 +799,13 @@ export function JsonRecordViewer({
             })}
 
             {/* Show complex fields collapsed as reference */}
-            {COMPLEX_KEYS.filter(k => fields[k] !== undefined).map((key, i) => {
+            {COMPLEX_KEYS.filter(k => {
+              const v = fields[k]
+              if (v === undefined || v === null) return false
+              if (Array.isArray(v)) return v.length > 0
+              if (typeof v === 'object') return Object.keys(v as object).length > 0
+              return false
+            }).map((key, i) => {
               const v = fields[key]
               const count = Array.isArray(v) ? v.length : typeof v === 'object' && v ? Object.keys(v).length : 0
               return (
