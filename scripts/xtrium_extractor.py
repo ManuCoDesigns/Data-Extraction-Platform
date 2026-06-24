@@ -166,6 +166,29 @@ EXTRAS FIELDS (add ONLY if the data exists on the website — these go beyond BG
 - annual_report_url: URL if linked on website
 - investor_relations_url: URL if linked on website
 
+CRITICAL — ARRAY FIELDS MUST CONTAIN OBJECTS, NOT STRINGS:
+
+CORRECT manufacturing_sites:
+  [{"location": "Nova Operation, Fraser Range, WA", "country": "Australia", "site_type": "mine", "raw": "Nova Operation, Fraser Range, Western Australia. 100% owned by IGO. Underground Ni-Cu-Co mine. FY25: 16,371t Ni, 7,324t Cu, 581t Co."}]
+
+WRONG (never do this):
+  ["Nova Operation, Fraser Range, Western Australia"]
+
+CORRECT products_offered:
+  [{"product_name": "Nickel", "grade": "Concentrate", "product_id": "NOVA_NI_CONC", "category": "NICKEL", "source_url": "https://www.igo.com.au/site/operations/nova", "datasheet_url": null, "cross_graph_material_id": null}]
+
+WRONG (never do this):
+  ["Nickel", "Copper", "Cobalt"]
+
+CORRECT sources:
+  [{"source_name": "IGO Limited – Nova Operation", "source_url": "https://www.igo.com.au/site/operations/nova", "doi": null, "tier": "tier2"}]
+
+WRONG (never do this):
+  ["https://igo.com.au"]
+
+CORRECT data_completeness_flags (never null):
+  {"review_score": "manual_only", "defect_rate_ppm": "manual_only", "on_time_delivery_rate": "manual_only", "pricing": "api_only", "inventory_levels": "api_only"}
+
 OUTPUT: Return ONLY a valid JSON object. No preamble, no markdown fences, no explanation."""
 
 USER_TEMPLATE = """Company website: {url}

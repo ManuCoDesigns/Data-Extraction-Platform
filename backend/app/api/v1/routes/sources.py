@@ -521,15 +521,39 @@ OPTIONAL FIELDS (include if present in the source):
 FIXED FIELDS (always set these exact values, do not extract from document):
 {chr(10).join(f'- {k}: {v}' for k, v in fixed_fields.items()) or '(none)'}
 
+CRITICAL — NESTED OBJECT STRUCTURE:
+Array fields must contain OBJECTS, not plain strings. Use these exact structures:
+
+manufacturing_sites must be an array of objects:
+  {{"location": "Site Name (Grid Ref or Lat/Long)", "country": "Country name", "site_type": "mine|quarry|pit|refinery|smelter|processing plant|handling site|wharf|recycling facility|peat workings", "raw": "verbatim source text about this site"}}
+
+products_offered must be an array of objects:
+  {{"product_name": "Product Name", "grade": "Grade or variant", "product_id": "SITE_PRODUCT_GRADE", "category": "COMMODITY CATEGORY", "source_url": "{source.website_url or ''}", "datasheet_url": null, "cross_graph_material_id": null}}
+
+sources must be an array of objects:
+  {{"source_name": "Publication or website name", "source_url": "https://...", "doi": null, "tier": "tier1|tier2|tier3"}}
+
+data_completeness_flags must be this exact object (not null):
+  {{"review_score": "manual_only", "defect_rate_ppm": "manual_only", "on_time_delivery_rate": "manual_only", "pricing": "api_only", "inventory_levels": "api_only"}}
+
+jv_stakes (if present) must be an array of objects:
+  {{"site_name": "Site name", "ownership_pct": 44.0, "jv_partners": ["Partner Name"], "country": "Country", "commodity": "Commodity"}}
+
+annual_production (if present) must be an array of objects:
+  {{"commodity": "Copper", "volume": "1,058,100", "unit": "tonnes", "year": "2024", "notes": "own sourced"}}
+
 RULES:
 1. Extract EVERY record you can find — do not skip any.
-2. If a field is not in the document, set it to null. Never invent values.
+2. If a field is not in the document, set it to null or [] (not a plain string).
 3. Return ONLY a JSON array. No preamble, no explanation, no markdown code fences.
 4. Each element of the array is one record with exactly the field names above.
-5. String values should be clean — trim whitespace, preserve original casing.
+5. NEVER put plain strings inside manufacturing_sites, products_offered, or sources arrays.
 
-Example response format:
-[{{"field_one": "value", "field_two": 1, "optional_field": null}}, ...]"""
+Example of CORRECT manufacturing_sites:
+"manufacturing_sites": [{{"location": "Greenbushes Mine (116.07°E, 33.86°S)", "country": "Australia", "site_type": "mine", "raw": "Greenbushes Lithium Operation, Western Australia. Hard-rock spodumene mine. Operated by Talison Lithium."}}]
+
+Example of WRONG manufacturing_sites (never do this):
+"manufacturing_sites": ["Greenbushes Mine, Western Australia"]"""
 
     user_message = f"""Extract all records from this document:
 
