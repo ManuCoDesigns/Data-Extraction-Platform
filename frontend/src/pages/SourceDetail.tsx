@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { JsonRecordViewer } from './JsonRecordViewer'
 import {
@@ -229,6 +228,27 @@ export function SourceDetailPage() {
 
   if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
   if (!source) return <EmptyState title="Source not found" />
+
+  // ── If a record is open, render ONLY the viewer — full page, no layout behind it ──
+  if (activeRecordIndex !== null && records[activeRecordIndex]) {
+    return (
+      <JsonRecordViewer
+        record={records[activeRecordIndex]}
+        allRecords={records}
+        currentIndex={activeRecordIndex}
+        schemaFields={schemaDefinition?.fields ?? []}
+        extractionInstructions={schemaDefinition?.extraction_instructions}
+        schemaName={schemaDefinition?.name}
+        sourceWebsiteUrl={source.website_url}
+        isExtractor={isExtractor}
+        isReviewer={isReviewer}
+        onFix={handleFixRecord}
+        onReview={handleReviewRecord}
+        onNavigate={setActiveRecordIndex}
+        onClose={() => { setActiveRecordIndex(null); load() }}
+      />
+    )
+  }
 
   const meta = STATUS_META[source.status]
   const allApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
@@ -735,24 +755,7 @@ export function SourceDetailPage() {
       />
 
       {/* Full-screen JSON Record Viewer */}
-      {activeRecordIndex !== null && records[activeRecordIndex] && createPortal(
-        <JsonRecordViewer
-          record={records[activeRecordIndex]}
-          allRecords={records}
-          currentIndex={activeRecordIndex}
-          schemaFields={schemaDefinition?.fields ?? []}
-          extractionInstructions={schemaDefinition?.extraction_instructions}
-          schemaName={schemaDefinition?.name}
-          sourceWebsiteUrl={source.website_url}
-          isExtractor={isExtractor}
-          isReviewer={isReviewer}
-          onFix={handleFixRecord}
-          onReview={handleReviewRecord}
-          onNavigate={setActiveRecordIndex}
-          onClose={() => { setActiveRecordIndex(null); load() }}
-        />,
-        document.body
-      )}
+
     </div>
   )
 }
