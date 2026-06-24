@@ -1,77 +1,43 @@
 """
 Web scraper service — fetches a URL and returns clean readable text.
 
-Uses httpx (already in requirements) for HTTP and Python's built-in
-html.parser for tag stripping — no additional dependencies needed.
-
-Handles:
-  - Standard HTML pages (most government and industry directories)
-  - Redirects and SSL
-  - Basic bot-detection avoidance via realistic User-Agent + headers
-  - Oversized pages (truncated to max_chars)
-  - Character encoding detection
+For JS-heavy company websites (most Fortune 500 sites), the homepage
+is a React/Vue SPA that returns empty HTML. This scraper handles that by:
+  1. Extracting JSON-LD structured data (always present, always readable)
+  2. Trying multiple sub-pages (press releases, newsrooms, about pages)
+  3. Extracting meta tags (og:description, description)
+  4. Combining all sources into usable text for Claude extraction
 
 Does NOT handle:
-  - JavaScript-heavy SPAs that render content client-side
-  - Sites that require login or cookie sessions
-  - Multi-page pagination (caller handles multiple calls)
-  - PDFs served at URLs (raise ValueError so caller can advise user to download)
+  - Sites requiring login
+  - Pages behind Cloudflare Bot Fight Mode
 """
 import re
+import json as _json
 import httpx
 from html.parser import HTMLParser
 
 
-# Tags whose text content is never useful
 _SKIP_TAGS = {
     "script", "style", "head", "noscript", "svg", "iframe",
     "meta", "link", "nav", "footer", "header",
 }
-
-# Tags that represent structural breaks (add a newline after)
 _BLOCK_TAGS = {
     "p", "br", "div", "li", "td", "th", "h1", "h2", "h3",
     "h4", "h5", "h6", "tr", "section", "article",
 }
 
-
-class _TextExtractor(HTMLParser):
-    """Strip HTML and return clean, readable text with reasonable whitespace."""
-
-    def __init__(self):
-        super().__init__()
-        self._skip_depth = 0
-        self.parts: list[str] = []
-
-    def handle_starttag(self, tag: str, attrs):
-        t = tag.lower()
-        if t in _SKIP_TAGS:
-            self._skip_depth += 1
-        if t in _BLOCK_TAGS and self.parts and self.parts[-1] != "\n":
-            self.parts.append("\n")
-
-    def handle_endtag(self, tag: str):
-        t = tag.lower()
-        if t in _SKIP_TAGS and self._skip_depth:
-            self._skip_depth -= 1
-        if t in _BLOCK_TAGS:
-            self.parts.append("\n")
-
-    def handle_data(self, data: str):
-        if self._skip_depth:
-            return
-        stripped = data.strip()
-        if stripped:
-            self.parts.append(stripped)
-            self.parts.append(" ")
-
-    def get_text(self) -> str:
-        raw = "".join(self.parts)
-        # Collapse excessive whitespace while preserving paragraph breaks
-        raw = re.sub(r" {2,}", " ", raw)
-        raw = re.sub(r"\n{3,}", "\n\n", raw)
-        return raw.strip()
-
+# Sub-pages to try when homepage has too little content
+_FALLBACK_PATHS = [
+    "/about", "/who-we-are", "/about-us", "/company",
+    "/operations", "/our-operations", "/what-we-do",
+    "/products", "/our-products",
+    "/newsroom", "/news", "/press-releases", "/media",
+    "/investor-relations", "/investors",
+    "/sustainability",
+    "/locations", "/global-locations",
+    "/en/about", "/en/who-we-are",
+]
 
 _BROWSER_HEADERS = {
     "User-Agent": (
@@ -86,56 +52,209 @@ _BROWSER_HEADERS = {
 }
 
 
+class _TextExtractor(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self._skip_depth = 0
+        self.parts: list[str] = []
+        self.json_ld_blocks: list[str] = []
+        self.meta_tags: dict[str, str] = {}
+        self._in_json_ld = False
+        self._current_script_type = ""
+
+    def handle_starttag(self, tag: str, attrs):
+        t = tag.lower()
+        attrs_dict = dict(attrs)
+
+        # Capture JSON-LD blocks
+        if t == "script":
+            stype = attrs_dict.get("type", "")
+            self._current_script_type = stype
+            if stype == "application/ld+json":
+                self._in_json_ld = True
+            else:
+                self._skip_depth += 1
+            return
+
+        # Capture meta tags
+        if t == "meta":
+            name = attrs_dict.get("name") or attrs_dict.get("property") or ""
+            content = attrs_dict.get("content", "")
+            if content and name.lower() in (
+                "description", "og:description", "twitter:description",
+                "og:title", "og:site_name", "keywords",
+            ):
+                self.meta_tags[name.lower()] = content
+            return
+
+        if t in _SKIP_TAGS:
+            self._skip_depth += 1
+        if t in _BLOCK_TAGS and self.parts and self.parts[-1] != "\n":
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str):
+        t = tag.lower()
+        if t == "script":
+            if self._in_json_ld:
+                self._in_json_ld = False
+            elif self._skip_depth:
+                self._skip_depth -= 1
+            self._current_script_type = ""
+            return
+        if t in _SKIP_TAGS and self._skip_depth:
+            self._skip_depth -= 1
+        if t in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str):
+        if self._in_json_ld:
+            # Collect JSON-LD for structured data extraction
+            self.json_ld_blocks.append(data)
+            return
+        if self._skip_depth:
+            return
+        stripped = data.strip()
+        if stripped:
+            self.parts.append(stripped)
+            self.parts.append(" ")
+
+    def get_text(self) -> str:
+        raw = "".join(self.parts)
+        raw = re.sub(r" {2,}", " ", raw)
+        raw = re.sub(r"\n{3,}", "\n\n", raw)
+        return raw.strip()
+
+    def get_json_ld_text(self) -> str:
+        """Extract human-readable text from JSON-LD structured data."""
+        parts = []
+        for block in self.json_ld_blocks:
+            block = block.strip()
+            if not block:
+                continue
+            try:
+                data = _json.loads(block)
+                if isinstance(data, list):
+                    for item in data:
+                        parts.append(_flatten_json_ld(item))
+                else:
+                    parts.append(_flatten_json_ld(data))
+            except Exception:
+                pass
+        return "\n".join(p for p in parts if p.strip())
+
+
+def _flatten_json_ld(obj, depth=0) -> str:
+    """Recursively extract readable strings from a JSON-LD object."""
+    if depth > 5:
+        return ""
+    if isinstance(obj, str):
+        return obj if len(obj) > 20 else ""
+    if isinstance(obj, dict):
+        parts = []
+        readable_keys = {
+            "name", "description", "headline", "text", "articleBody",
+            "addressLocality", "addressCountry", "addressRegion",
+            "telephone", "url", "email", "foundingDate", "numberOfEmployees",
+            "legalName", "alternateName", "slogan", "award", "brand",
+            "location", "place", "address", "contactPoint",
+        }
+        for k, v in obj.items():
+            if k.startswith("@"):
+                continue
+            if k in readable_keys or k.lower() in readable_keys:
+                t = _flatten_json_ld(v, depth + 1)
+                if t:
+                    parts.append(f"{k}: {t}")
+            else:
+                t = _flatten_json_ld(v, depth + 1)
+                if t:
+                    parts.append(t)
+        return "\n".join(parts)
+    if isinstance(obj, list):
+        return "\n".join(_flatten_json_ld(i, depth + 1) for i in obj if i)
+    if isinstance(obj, (int, float)):
+        return str(obj)
+    return ""
+
+
+async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int) -> tuple[str, str]:
+    """Fetch one URL. Returns (main_text, json_ld_text)."""
+    try:
+        response = await client.get(url)
+        if response.status_code >= 400:
+            return "", ""
+        content_type = response.headers.get("content-type", "").lower()
+        if "pdf" in content_type:
+            return "", ""
+        parser = _TextExtractor()
+        parser.feed(response.text)
+        main = parser.get_text()[:max_chars]
+        json_ld = parser.get_json_ld_text()
+        meta = "\n".join(f"{k}: {v}" for k, v in parser.meta_tags.items())
+        combined = "\n\n".join(p for p in [meta, json_ld, main] if p.strip())
+        return combined, url
+    except Exception:
+        return "", ""
+
+
 async def fetch_url_text(url: str, max_chars: int = 80_000) -> tuple[str, dict]:
     """
     Fetch a URL and return (readable_text, metadata).
 
-    metadata keys:
-      - url: final URL after redirects
-      - status_code: HTTP status
-      - content_type: response content-type header
-      - char_count: length of extracted text before truncation
-      - truncated: whether the text was truncated to max_chars
-
-    Raises:
-      ValueError  — if the URL is a PDF (caller should advise user to download)
-      httpx.HTTPStatusError — on 4xx/5xx responses
-      httpx.ConnectError    — if the host is unreachable
-      httpx.TimeoutException — if the server takes too long
+    For JS-rendered sites where the homepage returns little text,
+    automatically tries common sub-pages and extracts JSON-LD structured
+    data so Claude still gets something useful to work with.
     """
     async with httpx.AsyncClient(
         follow_redirects=True,
-        timeout=httpx.Timeout(30.0, connect=10.0),
+        timeout=httpx.Timeout(25.0, connect=10.0),
         headers=_BROWSER_HEADERS,
         verify=True,
     ) as client:
-        response = await client.get(url)
-        response.raise_for_status()
 
-    content_type = response.headers.get("content-type", "").lower()
-    final_url = str(response.url)
+        # Try the main URL first
+        base = url.rstrip("/")
+        main_text, _ = await _fetch_one(client, base, max_chars // 3)
 
-    if "pdf" in content_type or final_url.lower().endswith(".pdf"):
-        raise ValueError(
-            "This URL serves a PDF file. Download it manually and upload it "
-            "directly using the Upload button — the AI extraction will handle it."
-        )
+        all_parts = []
+        if main_text.strip():
+            all_parts.append(f"=== {base} ===\n{main_text}")
 
-    # Detect encoding from Content-Type or let httpx auto-detect
-    html = response.text
+        # If we got very little text (JS-rendered), try sub-pages
+        raw_text_len = len(re.sub(r'\s+', '', main_text))
+        if raw_text_len < 500:
+            for path in _FALLBACK_PATHS:
+                try:
+                    sub_text, sub_url = await _fetch_one(client, base + path, max_chars // 4)
+                    sub_raw = len(re.sub(r'\s+', '', sub_text))
+                    if sub_raw > 300:
+                        all_parts.append(f"=== {base + path} ===\n{sub_text}")
+                    if sum(len(p) for p in all_parts) > max_chars:
+                        break
+                except Exception:
+                    continue
 
-    parser = _TextExtractor()
-    parser.feed(html)
-    text = parser.get_text()
+        combined = "\n\n".join(all_parts)
 
-    truncated = len(text) > max_chars
-    return text[:max_chars], {
-        "url": final_url,
-        "status_code": response.status_code,
-        "content_type": content_type,
-        "char_count": len(text),
-        "truncated": truncated,
-    }
+        if not combined.strip():
+            raise ValueError(
+                "The page returned no readable text. This website likely requires "
+                "JavaScript to render its content. "
+                "Try one of these alternatives:\n"
+                "1. Find the company's annual report or sustainability PDF and upload it\n"
+                "2. Copy the text from their website and paste it into a .txt file, then upload\n"
+                "3. Use the company's press releases page URL instead (usually server-rendered)\n"
+                "4. Try: " + base + "/newsroom OR " + base + "/press-releases OR " + base + "/annual-report"
+            )
+
+        truncated = len(combined) > max_chars
+        return combined[:max_chars], {
+            "url": url,
+            "status_code": 200,
+            "content_type": "text/html",
+            "char_count": len(combined),
+            "truncated": truncated,
+        }
 
 
 async def fetch_multiple_pages(
@@ -144,33 +263,35 @@ async def fetch_multiple_pages(
     max_pages: int = 5,
     max_chars_per_page: int = 40_000,
 ) -> str:
-    """
-    Fetch up to max_pages pages of a paginated URL and combine the text.
-    Uses common pagination patterns: ?page=N and ?start=N*100 style.
-    Stops early if a page returns the same content as page 1 (end of pagination).
-    """
     all_text_parts: list[str] = []
     page1_fingerprint: str | None = None
 
-    for page_num in range(1, max_pages + 1):
-        if page_num == 1:
-            url = base_url
-        else:
-            sep = "&" if "?" in base_url else "?"
-            url = f"{base_url}{sep}{page_param}={page_num}"
+    async with httpx.AsyncClient(
+        follow_redirects=True,
+        timeout=httpx.Timeout(25.0, connect=10.0),
+        headers=_BROWSER_HEADERS,
+        verify=True,
+    ) as client:
+        for page_num in range(1, max_pages + 1):
+            if page_num == 1:
+                url = base_url
+            else:
+                sep = "&" if "?" in base_url else "?"
+                url = f"{base_url}{sep}{page_param}={page_num}"
 
-        try:
-            text, _ = await fetch_url_text(url, max_chars=max_chars_per_page)
-        except Exception:
-            break
+            try:
+                text, _ = await _fetch_one(client, url, max_chars_per_page)
+                if not text:
+                    break
+            except Exception:
+                break
 
-        # Detect duplicate page (past the end of pagination)
-        fingerprint = text[:500]
-        if page_num == 1:
-            page1_fingerprint = fingerprint
-        elif fingerprint == page1_fingerprint:
-            break
+            fingerprint = text[:500]
+            if page_num == 1:
+                page1_fingerprint = fingerprint
+            elif fingerprint == page1_fingerprint:
+                break
 
-        all_text_parts.append(f"--- Page {page_num} ---\n{text}")
+            all_text_parts.append(f"--- Page {page_num} ---\n{text}")
 
     return "\n\n".join(all_text_parts)

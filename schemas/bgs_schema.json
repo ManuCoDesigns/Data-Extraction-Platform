@@ -1,0 +1,128 @@
+{
+  "name": "Xtrium Supplier Graph Schema v1.0 (BGS DMQ 2020)",
+  "grouping_key": "company_name",
+  "base_schema": "bgs-supplier-graph-v1",
+  "extraction_instructions": "SOP-DS-002 v1.1 — BGS Directory of Mines & Quarries 2020\n\nCORE RULE: ONE supplier object per unique operating company. A company appearing under multiple commodities or regions is STILL ONE object.\n\nCANONICAL NAME (Section 7.2): lowercase → & to 'and' FIRST → spaces to hyphens → remove all punctuation except hyphens. 'A & D Sutherland' → 'a-and-d-sutherland'\n\nSUPPLY CHAIN TIER:\n- 1: quarry, mine, pit, peat workings, oil/gas/brine well\n- 2: handling site, wharf, processing plant, recycling facility, spoil heap\n\nINDUSTRY SECTOR (Section 4.3):\n- Limestone, Sand&Gravel, Sandstone, Granite, Basalt, Igneous/Metamorphic → construction minerals\n- Silica Sand, Ball Clay, China Clay, Fluorspar, Gypsum, Potash, Salt, Clay/Shale → industrial minerals\n- Building stone (Slate, Granite for building) → building stone\n- Limestone/Chalk for cement or lime → cement and lime\n- Coal → coal | Oil/Gas → oil and gas | Metals → metals mining\n- Recycled aggregates → recycled aggregates | Peat → peat | Wharves → mineral handling\n\nCOUNTRY from region code: CSCT/NSCT/SSCT=Scotland, NIR=Northern Ireland, NWLS/SWLS=Wales, CHA=Channel Islands, IOM=Isle of Man, all others=England\n\nPRODUCTS_OFFERED: one entry per site per commodity per end-use. product_id format: '{GridRef}_{CommodityAbbrev}_{GradeSuffix}'\n\nFIXED: is_verified=false, supplier_id=null, duns_number=null, source_url always BGS download page.",
+  "fields": [
+    {
+      "name": "supplier_id",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "duns_number",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "company_name",
+      "type": "string",
+      "required": true,
+      "description": "Full legal company name exactly as printed in source. Do not abbreviate."
+    },
+    {
+      "name": "canonical_name",
+      "type": "string",
+      "required": true,
+      "description": "Derived: lowercase, & → 'and', spaces → hyphens, remove punctuation. 'Tarmac Ltd' → 'tarmac-ltd'"
+    },
+    {
+      "name": "headquarters_location",
+      "type": "string",
+      "required": false,
+      "description": "'City, Country' format. e.g. 'Buxton, United Kingdom'. Null if not available."
+    },
+    {
+      "name": "website",
+      "type": "string",
+      "required": false,
+      "description": "Company website URL. Null in BGS DMQ — populated separately."
+    },
+    {
+      "name": "company_description",
+      "type": "string",
+      "required": false,
+      "description": "Brief description of the company. Null from BGS DMQ alone."
+    },
+    {
+      "name": "industry_sector",
+      "type": "string",
+      "required": true,
+      "description": "Based on primary commodity. See sector mapping in extraction_instructions.",
+      "enum": [
+        "construction minerals",
+        "industrial minerals",
+        "building stone",
+        "cement and lime",
+        "coal",
+        "oil and gas",
+        "metals mining",
+        "recycled aggregates",
+        "peat",
+        "mineral handling"
+      ]
+    },
+    {
+      "name": "supply_chain_tier",
+      "type": "integer",
+      "required": true,
+      "description": "1=mine/quarry/pit/peat/well (extraction). 2=handling/processing/recycling/smelting/refining. 3=trader/distributor."
+    },
+    {
+      "name": "typical_lead_time_days",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "is_verified",
+      "type": "boolean",
+      "required": true,
+      "fixed_value": false
+    },
+    {
+      "name": "manufacturing_sites",
+      "type": "array",
+      "required": true,
+      "description": "ONE entry per physical site. Each: {location:'Site Name (GridRef or Lat/Long)', country, site_type:'quarry|mine|pit|oil well|gas well|brine well|handling site|wharf|processing plant|spoil heap|recycling facility|peat workings', raw:'verbatim source text'}"
+    },
+    {
+      "name": "products_offered",
+      "type": "array",
+      "required": true,
+      "description": "ONE entry per site per commodity per end-use. Each: {product_name, grade, product_id:'GridRef_CommodCode_Grade', category, source_url, datasheet_url:null, cross_graph_material_id:null}"
+    },
+    {
+      "name": "certification_references",
+      "type": "array",
+      "required": false,
+      "fixed_value": []
+    },
+    {
+      "name": "certifications_raw",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "regulation_references",
+      "type": "array",
+      "required": false,
+      "fixed_value": []
+    },
+    {
+      "name": "data_completeness_flags",
+      "type": "object",
+      "required": true,
+      "description": "Fixed: {review_score:'manual_only', defect_rate_ppm:'manual_only', on_time_delivery_rate:'manual_only', pricing:'api_only', inventory_levels:'api_only'}"
+    },
+    {
+      "name": "sources",
+      "type": "array",
+      "required": true,
+      "description": "BGS: [{source_name:'BGS Directory of Mines and Quarries 2020, 11th Edition', source_url:'https://www.bgs.ac.uk/mineralsuk/download/directory-of-mines-and-quarries-2020/', doi:null, tier:'tier1'}]"
+    }
+  ]
+}

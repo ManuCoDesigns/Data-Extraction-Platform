@@ -1,0 +1,186 @@
+{
+  "name": "Xtrium Supplier Graph Schema — Atlas Australia Mines 2024",
+  "grouping_key": "company_name",
+  "base_schema": "bgs-supplier-graph-v1",
+  "source_website": "https://digital.atlas.gov.au/datasets/australian-operating-mines-2024/explore",
+  "extraction_instructions": "BASE: BGS Supplier Graph Schema v1.0 rules apply.\n\nSOURCE: Australian Operating Mines 2024 — Geoscience Australia.\nUnlike BGS (grouped by operator), Atlas data is SITE-CENTRIC — one supplier object per mine.\ncompany_name = MINE NAME (not the operator company).\n\nINDUSTRY SECTOR from commodity:\n- Precious/Base/Battery/Alloy metals, Uranium, REE, Manganese, Diamond, Iron ore → metals mining\n- Coal → coal\n- Silica, Heavy mineral sands, Phosphate, Bauxite, Graphite, Potash → industrial minerals\n\nsupply_chain_tier: Always 1 (all Atlas sites are extraction sites).\n\nmanufacturing_sites: location = '{MineName} ({lat}, {long})'. country = 'Australia'. site_type = 'mine'. raw = verbatim Atlas entry text.\n\nATLAS EXTRAS (required on every record):\n- state: 2-3 letter state code from raw field (WA, QLD, NSW, SA, VIC, TAS, NT, ACT)\n- operational_status: 'Operating mine' | 'Care and maintenance' | 'Development'\n- latitude: WGS84 decimal (negative for Australia)\n- longitude: WGS84 decimal (positive for Australia)\n- source_doi: always '10.26186/150821'\n\nFIXED: is_verified=false, supplier_id=null, supply_chain_tier=1, source_url='https://digital.atlas.gov.au/datasets/australian-operating-mines-2024'",
+  "fields": [
+    {
+      "name": "supplier_id",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "duns_number",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "company_name",
+      "type": "string",
+      "required": true,
+      "description": "Full legal company name exactly as printed in source. Do not abbreviate."
+    },
+    {
+      "name": "canonical_name",
+      "type": "string",
+      "required": true,
+      "description": "Derived: lowercase, & → 'and', spaces → hyphens, remove punctuation. 'Tarmac Ltd' → 'tarmac-ltd'"
+    },
+    {
+      "name": "headquarters_location",
+      "type": "string",
+      "required": false,
+      "description": "'City, Country' format. e.g. 'Buxton, United Kingdom'. Null if not available."
+    },
+    {
+      "name": "website",
+      "type": "string",
+      "required": false,
+      "description": "Company website URL. Null in BGS DMQ — populated separately."
+    },
+    {
+      "name": "company_description",
+      "type": "string",
+      "required": false,
+      "description": "Brief description of the company. Null from BGS DMQ alone."
+    },
+    {
+      "name": "industry_sector",
+      "type": "string",
+      "required": true,
+      "description": "Based on primary commodity. See sector mapping in extraction_instructions.",
+      "enum": [
+        "construction minerals",
+        "industrial minerals",
+        "building stone",
+        "cement and lime",
+        "coal",
+        "oil and gas",
+        "metals mining",
+        "recycled aggregates",
+        "peat",
+        "mineral handling"
+      ]
+    },
+    {
+      "name": "supply_chain_tier",
+      "type": "integer",
+      "required": true,
+      "description": "1=mine/quarry/pit/peat/well (extraction). 2=handling/processing/recycling/smelting/refining. 3=trader/distributor."
+    },
+    {
+      "name": "typical_lead_time_days",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "is_verified",
+      "type": "boolean",
+      "required": true,
+      "fixed_value": false
+    },
+    {
+      "name": "manufacturing_sites",
+      "type": "array",
+      "required": true,
+      "description": "ONE entry per physical site. Each: {location:'Site Name (GridRef or Lat/Long)', country, site_type:'quarry|mine|pit|oil well|gas well|brine well|handling site|wharf|processing plant|spoil heap|recycling facility|peat workings', raw:'verbatim source text'}"
+    },
+    {
+      "name": "products_offered",
+      "type": "array",
+      "required": true,
+      "description": "ONE entry per site per commodity per end-use. Each: {product_name, grade, product_id:'GridRef_CommodCode_Grade', category, source_url, datasheet_url:null, cross_graph_material_id:null}"
+    },
+    {
+      "name": "certification_references",
+      "type": "array",
+      "required": false,
+      "fixed_value": []
+    },
+    {
+      "name": "certifications_raw",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "regulation_references",
+      "type": "array",
+      "required": false,
+      "fixed_value": []
+    },
+    {
+      "name": "data_completeness_flags",
+      "type": "object",
+      "required": true,
+      "description": "Fixed: {review_score:'manual_only', defect_rate_ppm:'manual_only', on_time_delivery_rate:'manual_only', pricing:'api_only', inventory_levels:'api_only'}"
+    },
+    {
+      "name": "sources",
+      "type": "array",
+      "required": true,
+      "description": "BGS: [{source_name:'BGS Directory of Mines and Quarries 2020, 11th Edition', source_url:'https://www.bgs.ac.uk/mineralsuk/download/directory-of-mines-and-quarries-2020/', doi:null, tier:'tier1'}]"
+    },
+    {
+      "name": "state",
+      "type": "string",
+      "required": true,
+      "description": "Australian state/territory where the mine is located.",
+      "enum": [
+        "WA",
+        "QLD",
+        "NSW",
+        "SA",
+        "VIC",
+        "TAS",
+        "NT",
+        "ACT",
+        "CI"
+      ],
+      "extras": true,
+      "extras_source": "atlas.gov.au"
+    },
+    {
+      "name": "operational_status",
+      "type": "string",
+      "required": true,
+      "description": "Mine operational status from Atlas 2024 dataset.",
+      "enum": [
+        "Operating mine",
+        "Care and maintenance",
+        "Development"
+      ],
+      "extras": true,
+      "extras_source": "atlas.gov.au"
+    },
+    {
+      "name": "latitude",
+      "type": "number",
+      "required": true,
+      "description": "WGS84 decimal latitude. Negative for Australia (Southern Hemisphere). e.g. -30.368888",
+      "extras": true,
+      "extras_source": "atlas.gov.au"
+    },
+    {
+      "name": "longitude",
+      "type": "number",
+      "required": true,
+      "description": "WGS84 decimal longitude. Positive for Australia. e.g. 121.148544",
+      "extras": true,
+      "extras_source": "atlas.gov.au"
+    },
+    {
+      "name": "source_doi",
+      "type": "string",
+      "required": true,
+      "description": "Dataset DOI. Always '10.26186/150821' for Australian Operating Mines 2024.",
+      "fixed_value": "10.26186/150821",
+      "extras": true,
+      "extras_source": "atlas.gov.au"
+    }
+  ]
+}

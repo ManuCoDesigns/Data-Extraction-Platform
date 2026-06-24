@@ -1,0 +1,232 @@
+{
+  "name": "Xtrium Supplier Graph Schema — Critical Materials (Website-Sourced)",
+  "grouping_key": "company_name",
+  "base_schema": "bgs-supplier-graph-v1",
+  "source_type": "company_website",
+  "extraction_instructions": "BASE: BGS Supplier Graph Schema v1.0 rules apply for all base fields.\n\nSOURCE: Company's own website (NOT the Excel, NOT third-party sources).\n\nMAP TO BGS BASE FIELDS FIRST:\n- company_name: Full legal name from website header/About page\n- headquarters_location: From Contact Us/About page. 'City, Country'\n- company_description: Company's own About text\n- industry_sector: From primary commodity. Metals (Li, Co, Ni, Cu, Zn, REE, etc.) → metals mining. Graphite, Silica, Ball Clay → industrial minerals. Bauxite/Alumina → construction minerals. Coal → coal.\n- supply_chain_tier: 1=mine/primary producer. 2=refiner/smelter/processor/recycler. 3=trader/distributor. If both mining AND refining, use 1.\n- manufacturing_sites: ONE entry per named mine/plant/refinery/smelter on the website. Each: {location:'Site Name, Country', country, site_type:'mine|refinery|smelter|processing plant', raw:'verbatim website text about this site'}\n- products_offered: ONE entry per distinct product grade. Separate 'battery-grade lithium hydroxide' and 'technical-grade lithium carbonate' as different entries.\n- sources: company website as tier2 source\n\nEXTRAS FIELDS (capture if found on website — all marked extras:true):\n- ticker_symbol + stock_exchange: from investor relations or homepage\n- primary_commodities + by_product_commodities: from operations/products pages\n- annual_production: specific tonnage figures with year from production reports\n- jv_stakes: ownership percentages like 'Collahuasi (44%)'\n- processing_capabilities: mining/processing methods mentioned\n- certifications: Copper Mark, IRMA, ISO 14001, LME, etc.\n- sustainability_report_url, annual_report_url, investor_relations_url: if linked\n\nFIXED: is_verified=false, supplier_id=null, duns_number=null.\nDO NOT INVENT. If not on the website, set null or [].",
+  "fields": [
+    {
+      "name": "supplier_id",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "duns_number",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "company_name",
+      "type": "string",
+      "required": true,
+      "description": "Full legal company name exactly as printed in source. Do not abbreviate."
+    },
+    {
+      "name": "canonical_name",
+      "type": "string",
+      "required": true,
+      "description": "Derived: lowercase, & → 'and', spaces → hyphens, remove punctuation. 'Tarmac Ltd' → 'tarmac-ltd'"
+    },
+    {
+      "name": "headquarters_location",
+      "type": "string",
+      "required": false,
+      "description": "'City, Country' format. e.g. 'Buxton, United Kingdom'. Null if not available."
+    },
+    {
+      "name": "website",
+      "type": "string",
+      "required": false,
+      "description": "Company website URL. Null in BGS DMQ — populated separately."
+    },
+    {
+      "name": "company_description",
+      "type": "string",
+      "required": false,
+      "description": "Brief description of the company. Null from BGS DMQ alone."
+    },
+    {
+      "name": "industry_sector",
+      "type": "string",
+      "required": true,
+      "description": "Based on primary commodity. See sector mapping in extraction_instructions.",
+      "enum": [
+        "construction minerals",
+        "industrial minerals",
+        "building stone",
+        "cement and lime",
+        "coal",
+        "oil and gas",
+        "metals mining",
+        "recycled aggregates",
+        "peat",
+        "mineral handling"
+      ]
+    },
+    {
+      "name": "supply_chain_tier",
+      "type": "integer",
+      "required": true,
+      "description": "1=mine/quarry/pit/peat/well (extraction). 2=handling/processing/recycling/smelting/refining. 3=trader/distributor."
+    },
+    {
+      "name": "typical_lead_time_days",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "is_verified",
+      "type": "boolean",
+      "required": true,
+      "fixed_value": false
+    },
+    {
+      "name": "manufacturing_sites",
+      "type": "array",
+      "required": true,
+      "description": "ONE entry per physical site. Each: {location:'Site Name (GridRef or Lat/Long)', country, site_type:'quarry|mine|pit|oil well|gas well|brine well|handling site|wharf|processing plant|spoil heap|recycling facility|peat workings', raw:'verbatim source text'}"
+    },
+    {
+      "name": "products_offered",
+      "type": "array",
+      "required": true,
+      "description": "ONE entry per site per commodity per end-use. Each: {product_name, grade, product_id:'GridRef_CommodCode_Grade', category, source_url, datasheet_url:null, cross_graph_material_id:null}"
+    },
+    {
+      "name": "certification_references",
+      "type": "array",
+      "required": false,
+      "fixed_value": []
+    },
+    {
+      "name": "certifications_raw",
+      "type": "string",
+      "required": false,
+      "fixed_value": null
+    },
+    {
+      "name": "regulation_references",
+      "type": "array",
+      "required": false,
+      "fixed_value": []
+    },
+    {
+      "name": "data_completeness_flags",
+      "type": "object",
+      "required": true,
+      "description": "Fixed: {review_score:'manual_only', defect_rate_ppm:'manual_only', on_time_delivery_rate:'manual_only', pricing:'api_only', inventory_levels:'api_only'}"
+    },
+    {
+      "name": "sources",
+      "type": "array",
+      "required": true,
+      "description": "BGS: [{source_name:'BGS Directory of Mines and Quarries 2020, 11th Edition', source_url:'https://www.bgs.ac.uk/mineralsuk/download/directory-of-mines-and-quarries-2020/', doi:null, tier:'tier1'}]"
+    },
+    {
+      "name": "ticker_symbol",
+      "type": "string",
+      "required": false,
+      "description": "Stock exchange ticker if publicly listed. e.g. 'ALB', 'GLEN', 'LYC'.",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "stock_exchange",
+      "type": "string",
+      "required": false,
+      "description": "Primary stock exchange. e.g. 'NYSE', 'LSE', 'ASX', 'HKEx', 'TSX'.",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "primary_commodities",
+      "type": "array",
+      "required": false,
+      "description": "Main commodities produced. e.g. ['Lithium','Bromine']. From operations/products pages.",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "by_product_commodities",
+      "type": "array",
+      "required": false,
+      "description": "Secondary/by-product commodities. e.g. ['Gold','Silver','Sulfuric acid'].",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "annual_production",
+      "type": "array",
+      "required": false,
+      "description": "Production figures from most recent annual/quarterly report on the site. Each: {commodity:'Cobalt', volume:'36,100', unit:'tonnes', year:'2025', notes:'own sourced'}",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "jv_stakes",
+      "type": "array",
+      "required": false,
+      "description": "Joint venture ownership stakes. Each: {site_name:'Collahuasi', ownership_pct:44, jv_partners:['Anglo American'], country:'Chile', commodity:'Copper'}",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "processing_capabilities",
+      "type": "array",
+      "required": false,
+      "description": "Processing methods mentioned on the website. e.g. ['brine extraction','solar evaporation','direct lithium extraction','smelting','electrorefining']",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "certifications",
+      "type": "array",
+      "required": false,
+      "description": "Named certifications and standards. e.g. ['Copper Mark','IRMA','ISO 14001','LME responsible sourcing']",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "data_transparency_level",
+      "type": "string",
+      "required": false,
+      "description": "Research assessment of public data availability for this company.",
+      "enum": [
+        "High",
+        "Medium-High",
+        "Medium",
+        "Low-Medium",
+        "Low"
+      ],
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "sustainability_report_url",
+      "type": "string",
+      "required": false,
+      "description": "URL to latest sustainability/ESG report if linked from website.",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "annual_report_url",
+      "type": "string",
+      "required": false,
+      "description": "URL to latest annual report if linked from website.",
+      "extras": true,
+      "extras_source": "company-website"
+    },
+    {
+      "name": "investor_relations_url",
+      "type": "string",
+      "required": false,
+      "description": "URL to investor relations page.",
+      "extras": true,
+      "extras_source": "company-website"
+    }
+  ]
+}
