@@ -410,6 +410,64 @@ async def upload_to_source(
             mapped = map_row_to_fields(row, schema_fields)
             raw_text = json.dumps(row, ensure_ascii=False, default=str)
 
+            # ── Post-mapping inference for computed fields ────────────────
+            # Infer canonical_name from company_name if missing
+            if not mapped.get("canonical_name") and mapped.get("company_name"):
+                import unicodedata as _ud
+                n = str(mapped["company_name"]).lower().strip()
+                n = n.replace("&", "and")
+                n = _ud.normalize("NFD", n)
+                n = "".join(c for c in n if _ud.category(c) != "Mn")
+                n = __import__("re").sub(r"[^\w\s-]", "", n)
+                n = __import__("re").sub(r"\s+", "-", n.strip())
+                n = __import__("re").sub(r"-{2,}", "-", n)
+                mapped["canonical_name"] = n
+
+            # Infer supply_chain_tier from type_description if missing
+            if not mapped.get("supply_chain_tier") and mapped.get("type_description"):
+                t = str(mapped["type_description"]).lower()
+                tier = 1
+                if any(x in t for x in ["refiner", "smelter", "recycler", "processor"]):
+                    tier = 2
+                elif "trader" in t or "distributor" in t:
+                    tier = 3
+                mapped["supply_chain_tier"] = tier
+
+            # Infer industry_sector from products_raw if missing
+            if not mapped.get("industry_sector"):
+                src_text = " ".join(filter(None, [
+                    str(mapped.get("products_raw") or ""),
+                    str(mapped.get("type_description") or ""),
+                    str(mapped.get("company_description") or ""),
+                ])).lower()
+                SECTOR_KW = [
+                    ("recycl", "recycled aggregates"),
+                    ("rare earth", "metals mining"), ("ree", "metals mining"),
+                    ("lithium", "metals mining"), ("cobalt", "metals mining"),
+                    ("nickel", "metals mining"), ("copper", "metals mining"),
+                    ("zinc", "metals mining"), ("lead", "metals mining"),
+                    ("tin", "metals mining"), ("aluminum", "metals mining"),
+                    ("aluminium", "metals mining"), ("bauxite", "construction minerals"),
+                    ("gold", "metals mining"), ("silver", "metals mining"),
+                    ("platinum", "metals mining"), ("uranium", "metals mining"),
+                    ("graphite", "industrial minerals"), ("silica", "industrial minerals"),
+                    ("potash", "industrial minerals"), ("salt", "industrial minerals"),
+                    ("coal", "coal"), ("oil", "oil and gas"), ("gas", "oil and gas"),
+                ]
+                sector = "metals mining"  # default for this dataset
+                for kw, sec in SECTOR_KW:
+                    if kw in src_text:
+                        sector = sec
+                        break
+                mapped["industry_sector"] = sector
+
+            # Set fixed values from schema
+            for field_def in schema_fields:
+                if "fixed_value" in field_def and field_def["name"] not in mapped:
+                    mapped[field_def["name"]] = field_def["fixed_value"]
+            # Always enforce is_verified=false
+            mapped["is_verified"] = False
+
         is_valid, errors = validate_record(mapped, schema_fields)
         if is_valid:
             valid_count += 1

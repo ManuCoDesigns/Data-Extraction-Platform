@@ -83,6 +83,16 @@ export function ProjectDetailPage() {
           <Link to={`/projects/${projectId}/sources`}>
             <Button size="sm"><Database className="w-3.5 h-3.5" /> Sources Board</Button>
           </Link>
+          <Button variant="secondary" size="sm" onClick={async () => {
+            try {
+              await projectsApi.exportProject(projectId!, 'approved', `${project.name.replace(/[^a-z0-9]/gi,'_')}_approved.zip`)
+              toast.success('Export downloaded — contains all approved records + README')
+            } catch (err: any) {
+              toast.error(err?.response?.data?.detail || 'Export failed — approve some records first')
+            }
+          }}>
+            <Download className="w-3.5 h-3.5" /> Export Approved
+          </Button>
         </div>
       </div>
 

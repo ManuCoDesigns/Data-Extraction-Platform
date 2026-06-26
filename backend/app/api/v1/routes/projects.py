@@ -208,3 +208,109 @@ def delete_project(
         before_value={"name": project.name},
     ))
     db.commit()
+
+
+@router.get("/{project_id}/export")
+def export_project(
+    project_id: str,
+    status: str = "approved",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Export all records from all sources in a project as a single ZIP file.
+    Contains: records/ folder (one JSON per record), combined.json, README.md
+    Defaults to approved records only; pass ?status=all for everything.
+    """
+    import io, zipfile, json as _json
+    from datetime import datetime, timezone
+    from fastapi.responses import StreamingResponse
+    from app.models.all_models import Source, ExtractedRecord
+
+    project = db.query(Project).filter(
+        Project.id == project_id, Project.deleted_at == None
+    ).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Collect all sources in the project
+    sources = db.query(Source).filter(
+        Source.project_id == project_id,
+        Source.deleted_at == None
+    ).all()
+
+    # Collect records
+    all_records = []
+    for source in sources:
+        q = db.query(ExtractedRecord).filter(
+            ExtractedRecord.source_id == source.id,
+            ExtractedRecord.deleted_at == None
+        )
+        if status != "all":
+            q = q.filter(ExtractedRecord.review_status == status)
+        recs = q.all()
+        for r in recs:
+            record_data = r.extracted_fields or {}
+            # Add Xtrium metadata
+            record_data["_xtrium"] = {
+                "record_id": str(r.id),
+                "source_id": str(source.id),
+                "source_name": source.name,
+                "review_status": r.review_status,
+                "is_schema_valid": r.is_schema_valid,
+                "exported_at": datetime.now(timezone.utc).isoformat(),
+            }
+            all_records.append(record_data)
+
+    if not all_records:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No {status} records found in this project. "
+                   f"Approve records first or use ?status=all to export everything."
+        )
+
+    # Build README
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    readme = f"""# {project.name} — Xtrium Export
+
+Exported: {ts}
+Records: {len(all_records)} ({status})
+Sources: {len(sources)}
+
+## Contents
+- `records/` — one JSON file per record (named by canonical_name)
+- `combined.json` — all records in one array (upload to any system)
+- `README.md` — this file
+
+## Record fields
+Each record follows the BGS Supplier Graph Schema v1.0.
+Non-BGS fields are in the `extras` array.
+`_xtrium` contains export metadata (not part of the schema).
+
+## Sources in this project
+"""
+    for s in sources:
+        count = sum(1 for r in all_records if r.get("_xtrium",{}).get("source_id") == str(s.id))
+        readme += f"- {s.name}: {count} records\n"
+
+    # Build ZIP in memory
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("README.md", readme)
+        zf.writestr("combined.json",
+                     _json.dumps(all_records, indent=2, ensure_ascii=False, default=str))
+        for record in all_records:
+            cn = record.get("canonical_name") or record.get("company_name", "record")
+            cn = str(cn).lower().replace(" ", "-")[:60]
+            fname = f"records/{cn}.json"
+            zf.writestr(fname, _json.dumps(record, indent=2, ensure_ascii=False, default=str))
+
+    buf.seek(0)
+    project_slug = re.sub(r"[^a-z0-9_]", "_", project.name.lower())[:40]
+    filename = f"{project_slug}_export_{datetime.now().strftime('%Y%m%d')}.zip"
+
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
