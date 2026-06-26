@@ -327,10 +327,12 @@ async def upload_to_source(
     schema_ver = db.query(SchemaVersion).filter(
         SchemaVersion.schema_id == source.schema_id
     ).order_by(SchemaVersion.version.desc()).first()
-    if not schema_ver:
-        raise HTTPException(status_code=422, detail="This source's schema has no field definitions yet.")
 
-    schema_fields = schema_ver.definition.get("fields", [])
+    # Allow uploads even if schema has no field definitions.
+    # Records will be stored as-is with no schema validation.
+    schema_fields = []
+    if schema_ver and schema_ver.definition:
+        schema_fields = schema_ver.definition.get("fields", [])
     content = await file.read()
 
     # ── Route: AI extraction (PDF / TXT) ──────────────────────────────────────

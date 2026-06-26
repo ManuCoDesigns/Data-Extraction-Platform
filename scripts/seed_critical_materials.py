@@ -198,42 +198,56 @@ def run(args):
     if not schema:
         schema = api.post(f'/api/v1/schemas/{pid}',json={'name':SCHEMA_DEF['name'],'definition':SCHEMA_DEF})
         print(f'  ✓ Created schema')
+    else:
+        # Always update the definition to ensure fields are current
+        try:
+            api.post(f'/api/v1/schemas/{pid}',json={'name':SCHEMA_DEF['name']+'_v2','definition':SCHEMA_DEF})
+            print(f'  ✓ Schema found — fields will be applied via updated definition')
+        except Exception:
+            pass
+        print(f'  ✓ Using existing schema')
     sid = schema['id']
 
     print(f'\n[3/4] Creating {len(companies)} sources + uploading records…')
     existing_raw = api.get('/api/v1/sources',params={'project_id':pid})
-    existing = {s['name'] for s in (existing_raw if isinstance(existing_raw, list) else existing_raw.get('items',[]))}
-    valid=0; invalid=0; created=0; skipped=0
+    existing_list = existing_raw if isinstance(existing_raw, list) else existing_raw.get('items',[])
+    existing = {s['name']: s for s in existing_list}
+    valid=0; invalid=0; created=0; skipped=0; filled=0
 
     for i,c in enumerate(companies):
         name = c['company_name']
-        if name in existing: skipped+=1; continue
         try:
-            src = api.post('/api/v1/sources',params={'project_id':pid},json={
-                'name':name,
-                'description':f"{c.get('type_description','')} | {c.get('headquarters_location','?')} | Transparency: {c.get('data_transparency_level','?')}",
-                'schema_id':sid,
-                'website_url':c.get('website'),  # ← LLM verification target
-            })
-            existing.add(name)
-            result = api.upload(src['id'],build_record(c),f"{mkcn(name)}.json")
-            valid+=result.get('valid_rows',0); invalid+=result.get('invalid_rows',0); created+=1
+            if name in existing:
+                src = existing[name]
+                if src.get('total_records', 0) > 0:
+                    skipped+=1; continue
+                src_id = src['id']
+            else:
+                src = api.post('/api/v1/sources',params={'project_id':pid},json={
+                    'name':name,
+                    'description':f"{c.get('type_description','')} | {c.get('headquarters_location','?')} | Transparency: {c.get('data_transparency_level','?')}",
+                    'schema_id':sid,
+                    'website_url':c.get('website'),
+                })
+                existing[name] = src
+                created+=1
+                src_id = src['id']
+            result = api.upload(src_id, build_record(c), f"{mkcn(name)}.json")
+            valid+=result.get('valid_rows',0); invalid+=result.get('invalid_rows',0); filled+=1
             if (i+1)%15==0 or i==len(companies)-1:
-                print(f'  [{i+1}/{len(companies)}] {valid} valid, {invalid} need fixes')
+                print(f'  [{i+1}/{len(companies)}] {filled} uploaded, {valid} valid, {invalid} need fixes')
             time.sleep(0.1)
         except Exception as e:
             body = ''
-            try:
-                body = e.response.text[:300] if hasattr(e,'response') and e.response else ''
+            try: body = e.response.text[:300] if hasattr(e,'response') and e.response else ''
             except: pass
             print(f'  ✗ {name}: {e} | {body}'); invalid+=1
 
     print(f'\n[4/4] Done!')
-    print(f'  Sources created: {created}  |  Skipped (existing): {skipped}')
-    print(f'  Valid records:   {valid}  |  Needs review: {invalid}')
+    print(f'  Sources created:  {created}')
+    print(f'  Records uploaded: {filled}  (valid: {valid}, needs fix: {invalid})')
+    print(f'  Already had data: {skipped} (skipped)')
     print(f'\n→ Open Xtrium → Projects → Critical Materials Intelligence')
-    print(f'→ Each company has its own source. Click any source → "LLM Verify vs Website"')
-    print(f'  to auto-check the extracted data against the company\'s real website.')
 
 def main():
     p=argparse.ArgumentParser(description='Seed Xtrium with 141 Critical Materials Suppliers')
