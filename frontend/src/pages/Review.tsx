@@ -1,9 +1,9 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import {
   ArrowLeft, CheckCircle, XCircle, SkipForward, AlertTriangle,
-  ChevronLeft, ChevronRight, List, Layers
+  ChevronLeft, ChevronRight, List, Layers, Clock
 } from 'lucide-react'
 import { recordsApi, jobsApi } from '@/api/client'
 import type { ExtractedRecord, Job, LLMFieldFlag } from '@/types'
@@ -13,16 +13,21 @@ type Mode = 'single' | 'bulk'
 
 export function ReviewPage() {
   const { jobId } = useParams<{ jobId: string }>()
-  const [job, setJob] = useState<Job | null>(null)
-  const [records, setRecords] = useState<ExtractedRecord[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [mode, setMode] = useState<Mode>('single')
-  const [cursor, setCursor] = useState(0)
-  const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [job, setJob]             = useState<Job | null>(null)
+  const [records, setRecords]     = useState<ExtractedRecord[]>([])
+  const [allCounts, setAllCounts] = useState({ pending: 0, approved: 0, rejected: 0, all: 0 })
+  const [total, setTotal]         = useState(0)
+  const [loading, setLoading]     = useState(true)
+  const [mode, setMode]           = useState<Mode>('single')
+  const [cursor, setCursor]       = useState(0)
+  const [selected, setSelected]   = useState<Set<string>>(new Set())
   const [overrides, setOverrides] = useState<Record<string, Record<string, string>>>({})
-  const [saving, setSaving] = useState(false)
-  const [filter, setFilter] = useState('pending')
+  const [saving, setSaving]       = useState(false)
+
+  // Read filter from URL — ?filter=pending|approved|rejected|all
+  const filter = searchParams.get('filter') || 'pending'
+  const setFilter = (f: string) => { setSearchParams({ filter: f }); setCursor(0) }
 
   // Use Element (not HTMLDivElement) so the virtualizer types align
   const bulkParentRef = useRef<Element>(null)
@@ -30,13 +35,23 @@ export function ReviewPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [jobData, recordData] = await Promise.all([
+      const [jobData, recordData, pendingData, approvedData, rejectedData, allData] = await Promise.all([
         jobsApi.get(jobId!),
-        recordsApi.list(jobId!, { review_status: filter, page_size: 100 }),
+        recordsApi.list(jobId!, { review_status: filter === 'all' ? undefined : filter, page_size: 100 }),
+        recordsApi.list(jobId!, { review_status: 'pending',  page_size: 1 }),
+        recordsApi.list(jobId!, { review_status: 'approved', page_size: 1 }),
+        recordsApi.list(jobId!, { review_status: 'rejected', page_size: 1 }),
+        recordsApi.list(jobId!, { page_size: 1 }),
       ])
       setJob(jobData)
       setRecords(recordData.items)
       setTotal(recordData.total)
+      setAllCounts({
+        pending:  pendingData.total,
+        approved: approvedData.total,
+        rejected: rejectedData.total,
+        all:      allData.total,
+      })
       setCursor(0)
     } finally {
       setLoading(false)
@@ -117,19 +132,35 @@ export function ReviewPage() {
             <ArrowLeft className="w-4 h-4" />
           </Link>
           <span className="font-semibold text-gray-900 text-sm">{job?.name}</span>
-          <Badge variant="gray">{total} records</Badge>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
-            {['pending', 'approved', 'rejected', ''].map(f => (
-              <button key={f} onClick={() => setFilter(f)}
-                className={cn('px-3 py-1 rounded-lg text-xs font-medium transition',
-                  filter === f ? 'bg-white shadow-sm text-gray-900' : 'text-gray-500 hover:text-gray-700')}>
-                {f || 'All'}
+
+        {/* Clear status filter buttons with counts */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {[
+            { key: 'pending',  label: 'Pending Review', icon: '⏳', count: allCounts.pending,  activeColor: '#d97706', activeBg: '#fffbeb', activeBorder: '#fcd34d' },
+            { key: 'approved', label: 'Approved',       icon: '✅', count: allCounts.approved, activeColor: '#059669', activeBg: '#ecfdf5', activeBorder: '#6ee7b7' },
+            { key: 'rejected', label: 'Rejected',       icon: '❌', count: allCounts.rejected, activeColor: '#dc2626', activeBg: '#fef2f2', activeBorder: '#fca5a5' },
+            { key: 'all',      label: 'All Records',    icon: '📋', count: allCounts.all,      activeColor: '#4f46e5', activeBg: '#eff6ff', activeBorder: '#c7d2fe' },
+          ].map(({ key, label, icon, count, activeColor, activeBg, activeBorder }) => {
+            const isActive = filter === key
+            return (
+              <button key={key} onClick={() => setFilter(key)} style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                padding: '6px 14px', borderRadius: 20, border: `2px solid ${isActive ? activeBorder : '#e2e8f0'}`,
+                background: isActive ? activeBg : '#fff',
+                color: isActive ? activeColor : '#64748b',
+                fontSize: 12, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s',
+              }}>
+                <span>{icon}</span>
+                <span>{label}</span>
+                <span style={{ background: isActive ? activeBorder : '#f1f5f9', color: isActive ? activeColor : '#475569', borderRadius: 20, padding: '0 7px', fontSize: 11 }}>
+                  {count}
+                </span>
               </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1">
+            )
+          })}
+
+          <div className="flex items-center gap-1 bg-gray-100 rounded-xl p-1 ml-2">
             {([['single', Layers, 'Single'], ['bulk', List, 'Bulk']] as const).map(([id, Icon, label]) => (
               <button key={id} onClick={() => setMode(id as Mode)}
                 className={cn('px-3 py-1 rounded-lg text-xs font-medium transition flex items-center gap-1.5',
@@ -141,9 +172,24 @@ export function ReviewPage() {
         </div>
       </div>
 
+      {/* Status explanation banner */}
+      {filter === 'pending' && allCounts.pending === 0 && allCounts.approved > 0 && (
+        <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 12, padding: '12px 16px', margin: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <CheckCircle size={16} color="#059669" />
+          <p style={{ fontSize: 13, color: '#065f46', margin: 0 }}>
+            No pending records — all {allCounts.approved} records have been approved! Click <strong>Approved</strong> above to view them, or go back to submit.
+          </p>
+        </div>
+      )}
+
       {records.length === 0 ? (
         <div className="flex-1 flex items-center justify-center">
-          <EmptyState title="No records to review" description="All records in this filter have been reviewed." />
+          <EmptyState
+            title={filter === 'pending' ? 'No pending records' : filter === 'approved' ? 'No approved records yet' : 'No records found'}
+            description={filter === 'pending' && allCounts.approved > 0
+              ? `All ${allCounts.approved} records are already approved. Switch to the Approved tab above.`
+              : 'No records match this filter.'}
+          />
         </div>
       ) : mode === 'single' ? (
         <SinglePanel

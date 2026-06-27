@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, RefreshCw, Send, RotateCcw, CheckCircle,
-  AlertCircle, Download, Eye, Globe, Clock, Zap, ChevronRight
+  AlertCircle, Download, Eye, Globe, Clock, Zap, ChevronRight, SkipForward
 } from 'lucide-react'
 import { jobsApi, recordsApi, submissionApi } from '@/api/client'
 import type { Job, JobStateHistory, ExtractedRecord } from '@/types'
@@ -51,6 +51,7 @@ export function JobDetailPage() {
   const [showSubmit, setShowSubmit]     = useState(false)
   const [submitting, setSubmitting]     = useState(false)
   const [retrying, setRetrying]         = useState(false)
+  const [skippingLlm, setSkippingLlm]   = useState(false)
 
   const loadJob = () =>
     Promise.all([
@@ -80,6 +81,17 @@ export function JobDetailPage() {
     try { await jobsApi.retry(jobId!); toast.success('Job queued for retry'); loadJob() }
     catch (err: any) { toast.error(err?.response?.data?.detail || 'Retry failed') }
     finally { setRetrying(false) }
+  }
+
+  const handleSkipLlm = async () => {
+    setSkippingLlm(true)
+    try {
+      await jobsApi.skipLlm(jobId!)
+      toast.success('LLM check skipped — job moved to Ready for Review')
+      loadJob()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Skip failed')
+    } finally { setSkippingLlm(false) }
   }
 
   const handleSubmit = async () => {
@@ -163,10 +175,30 @@ export function JobDetailPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap shrink-0">
           {isFailed && <Button variant="secondary" onClick={handleRetry} loading={retrying} size="sm"><RotateCcw className="w-3.5 h-3.5"/> Retry</Button>}
-          {canReview && (
-            <Link to={`/jobs/${jobId}/review`}>
-              <Button variant="secondary" size="sm"><Eye className="w-3.5 h-3.5"/> Open Review</Button>
-            </Link>
+          {job.status === 'llm_review' && (
+            <Button variant="secondary" size="sm" onClick={handleSkipLlm} loading={skippingLlm}
+              style={{ borderColor: '#f59e0b', color: '#d97706' }}
+              title="Bypass the AI check and move straight to human review">
+              <SkipForward className="w-3.5 h-3.5"/> Skip LLM Check
+            </Button>
+          )}
+          {(canReview || job.total_approved > 0) && (
+            <>
+              {pending > 0 && (
+                <Link to={`/jobs/${jobId}/review?filter=pending`}>
+                  <Button variant="secondary" size="sm" style={{ borderColor: '#f59e0b', color: '#d97706' }}>
+                    <Eye className="w-3.5 h-3.5"/> Review Pending ({pending})
+                  </Button>
+                </Link>
+              )}
+              {approved > 0 && (
+                <Link to={`/jobs/${jobId}/review?filter=approved`}>
+                  <Button variant="secondary" size="sm" style={{ borderColor: '#10b981', color: '#059669' }}>
+                    <CheckCircle className="w-3.5 h-3.5"/> View Approved ({approved})
+                  </Button>
+                </Link>
+              )}
+            </>
           )}
           {canSubmit && (
             <Button onClick={() => setShowSubmit(true)} size="sm"

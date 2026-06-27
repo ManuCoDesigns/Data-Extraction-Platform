@@ -142,6 +142,7 @@ export const jobsApi = {
   get: (id: string) => api.get(`/jobs/${id}`).then(r => r.data),
   history: (id: string) => api.get(`/jobs/${id}/history`).then(r => r.data),
   retry: (id: string) => api.post(`/jobs/${id}/retry`).then(r => r.data),
+  skipLlm: (id: string) => api.post(`/jobs/${id}/skip-llm`).then(r => r.data),
   delete: (id: string) => api.delete(`/jobs/${id}`).then(r => r.data),
   upload: (projectId: string, formData: FormData) =>
     api.post(`/jobs/${projectId}/upload`, formData, {
