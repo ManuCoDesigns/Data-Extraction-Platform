@@ -113,7 +113,7 @@ export const projectsApi = {
     api.post(`/projects/${projectId}/members`, { user_id: userId, role }).then(r => r.data),
   removeMember: (projectId: string, userId: string) =>
     api.delete(`/projects/${projectId}/members/${userId}`).then(r => r.data),
-  exportProject: async (projectId: string, status = 'approved', filename?: string) => {
+  exportProject: async (projectId: string, status = 'all', filename?: string) => {
     const r = await api.get(`/projects/${projectId}/export`, {
       params: { status },
       responseType: 'blob',
@@ -125,6 +125,10 @@ export const projectsApi = {
     a.click()
     URL.revokeObjectURL(url)
   },
+  exportPackage: async (projectId: string, projectName = 'project') => {
+    const r = await api.get(`/projects/${projectId}/export-package`, { responseType: 'blob' })
+    triggerBrowserDownload(new Blob([r.data], { type: 'application/zip' }), `${projectName.replace(/[^a-z0-9]/gi,'_')}_package.zip`)
+  },
 }
 
 // ─── Jobs ─────────────────────────────────────────────────────────────────────
@@ -134,6 +138,7 @@ export const jobsApi = {
   history: (id: string) => api.get(`/jobs/${id}/history`).then(r => r.data),
   retry: (id: string) => api.post(`/jobs/${id}/retry`).then(r => r.data),
   delete: (id: string) => api.delete(`/jobs/${id}`).then(r => r.data),
+  skipLlm: (id: string) => api.post(`/jobs/${id}/skip-llm`).then(r => r.data),
   upload: (projectId: string, formData: FormData) =>
     api.post(`/jobs/${projectId}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -277,6 +282,8 @@ export const sourcesApi = {
   verify: (id: string) => api.post(`/sources/${id}/verify`).then(r => r.data),
   reset: (id: string, clearRecords = true) =>
     api.post(`/sources/${id}/reset`, null, { params: { clear_records: clearRecords } }).then(r => r.data),
+  clearRecords: (id: string) =>
+    api.delete(`/sources/${id}/records`).then(r => r.data),
   dismissFlag: (sourceId: string, recordId: string, flagIndex: number) =>
     api.delete(`/sources/${sourceId}/records/${recordId}/flags/${flagIndex}`).then(r => r.data),
   schema: (id: string) => api.get(`/sources/${id}/schema`).then(r => r.data),
