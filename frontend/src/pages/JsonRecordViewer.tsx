@@ -4,9 +4,10 @@
  * Replaces the VS Code JSON editor approach with a structured review UI.
  */
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { X, CheckCircle, XCircle, AlertTriangle, Globe, ChevronLeft, ChevronRight, Edit3, Save, ExternalLink } from 'lucide-react'
+import { X, CheckCircle, XCircle, AlertTriangle, Globe, ChevronLeft, ChevronRight, Edit3, Save, ExternalLink, Code } from 'lucide-react'
 import type { ExtractedRecord } from '@/types'
 import { toast } from '@/components/ui'
+import { JsonEditor } from './JsonEditor'
 
 interface SchemaField {
   name: string; type?: string; required?: boolean
@@ -16,6 +17,7 @@ interface Props {
   record: ExtractedRecord; allRecords: ExtractedRecord[]; currentIndex: number
   schemaFields: SchemaField[]; extractionInstructions?: string; schemaName?: string
   sourceWebsiteUrl?: string; extrasFields?: string[]; extrasSource?: string
+  sourceId: string
   isExtractor: boolean; isReviewer: boolean
   onFix: (id: string, fields: Record<string, unknown>) => Promise<void>
   onReview: (id: string, action: 'approve' | 'reject', note?: string) => Promise<void>
@@ -85,13 +87,14 @@ function EditField({ label, value, field, onSave, required, isExtra }: {
 
 export function JsonRecordViewer({
   record, allRecords, currentIndex, schemaFields, schemaName,
-  sourceWebsiteUrl, extrasFields = [], extrasSource,
+  sourceWebsiteUrl, extrasFields = [], extrasSource, sourceId,
   isExtractor, isReviewer, onFix, onReview, onNavigate, onClose,
 }: Props) {
   const fields = record.extracted_fields || {}
   const errors = record.validation_errors || []
   const webFlags = record.web_check_flags || []
 
+  const [viewTab, setViewTab] = useState<'review' | 'json'>('review')
   const [rejectNote, setRejectNote] = useState('')
   const [showReject, setShowReject] = useState(false)
   const [saving, setSaving] = useState<'approve' | 'reject' | null>(null)
@@ -186,9 +189,21 @@ export function JsonRecordViewer({
           {website && <a href={website} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#3b82f6', textDecoration: 'none', flexShrink: 0 }}><Globe size={12} />{new URL(website).hostname}</a>}
         </div>
 
-        {/* Actions */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          {hasChanges && (
+          {/* View tabs */}
+          <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0', flexShrink: 0 }}>
+            {[{ id: 'review', label: 'Review' }, { id: 'json', label: '{ } JSON Editor' }].map(t => (
+              <button key={t.id} onClick={() => setViewTab(t.id as 'review' | 'json')} style={{
+                padding: '5px 14px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
+                background: viewTab === t.id ? '#fff' : 'transparent',
+                color: viewTab === t.id ? '#1d4ed8' : '#64748b',
+                boxShadow: viewTab === t.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+              }}>{t.label}</button>
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {hasChanges && viewTab === 'review' && (
             <button onClick={handleSaveAll} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: '#fff', border: '1.5px solid #3b82f6', borderRadius: 8, color: '#3b82f6', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
               <Save size={13} /> Save changes
             </button>
@@ -225,8 +240,20 @@ export function JsonRecordViewer({
         </div>
       )}
 
+      {/* ── JSON EDITOR TAB ─────────────────────────────────────────────── */}
+      {viewTab === 'json' && (
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <JsonEditor
+            record={record}
+            sourceId={sourceId}
+            canEdit={isExtractor}
+            onSave={async (fields) => { await onFix(record.id, fields); }}
+          />
+        </div>
+      )}
+
       {/* ── MAIN BODY ───────────────────────────────────────────────────── */}
-      <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignContent: 'start' }}>
+      {viewTab === 'review' && <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignContent: 'start' }}>
 
         {/* ── LEFT COLUMN ────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -450,7 +477,7 @@ export function JsonRecordViewer({
             </div>
           )}
         </div>
-      </div>
+      </div>}
     </div>
   )
 }

@@ -1416,3 +1416,92 @@ def get_source_schema(
         "extras_fields": extras_fields,
         "extras_source": extras_source,
     }
+
+
+# ─── Admin: Reset source status ───────────────────────────────────────────────
+
+@router.post("/{source_id}/reset")
+def reset_source(
+    source_id: str,
+    clear_records: bool = True,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin-only: Reset a source back to 'not_started'.
+    Optionally wipe all extracted records (default: True).
+    Use this to recover from bad extractions or test data.
+    """
+    source = db.query(Source).filter(
+        Source.id == source_id, Source.deleted_at == None
+    ).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    roles = [r.role for r in current_user.roles]
+    if not any(r in roles for r in ["org_admin", "project_admin"]):
+        raise HTTPException(status_code=403, detail="Only admins can reset sources")
+
+    if clear_records:
+        db.query(ExtractedRecord).filter(
+            ExtractedRecord.source_id == source_id,
+            ExtractedRecord.deleted_at == None,
+        ).update({"deleted_at": __import__("datetime").datetime.utcnow()})
+
+    source.status = "not_started"
+    source.total_records = 0
+    source.valid_records = 0
+    source.invalid_records = 0
+    source.approved_records = 0
+    source.extraction_started_at = None
+    source.extraction_completed_at = None
+    source.review_started_at = None
+    source.approved_at = None
+    source.web_verified = None
+    source.web_check_summary = None
+    db.commit()
+    db.refresh(source)
+
+    return {
+        "message": f"Source reset to 'not_started'{'with records cleared' if clear_records else ''}",
+        "source_id": source_id,
+        "status": source.status,
+        "records_cleared": clear_records,
+    }
+
+
+# ─── Admin: Dismiss a web check flag on a record ──────────────────────────────
+
+@router.delete("/{source_id}/records/{record_id}/flags/{flag_index}")
+def dismiss_flag(
+    source_id: str,
+    record_id: str,
+    flag_index: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Dismiss one web-check flag by index. Available to reviewers and above.
+    The flag is removed permanently from the record — use when the LLM flagged
+    something that is actually correct.
+    """
+    record = db.query(ExtractedRecord).filter(
+        ExtractedRecord.id == record_id,
+        ExtractedRecord.source_id == source_id,
+        ExtractedRecord.deleted_at == None,
+    ).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    flags = list(record.web_check_flags or [])
+    if flag_index < 0 or flag_index >= len(flags):
+        raise HTTPException(status_code=400, detail=f"Flag index {flag_index} out of range")
+
+    removed = flags.pop(flag_index)
+    record.web_check_flags = flags
+    if not flags:
+        record.web_verified = True
+        record.web_check_summary = "All flags dismissed by reviewer"
+
+    db.commit()
+    return {"dismissed": removed, "remaining_flags": len(flags)}

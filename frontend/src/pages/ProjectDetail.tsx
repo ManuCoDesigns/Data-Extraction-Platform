@@ -85,13 +85,13 @@ export function ProjectDetailPage() {
           </Link>
           <Button variant="secondary" size="sm" onClick={async () => {
             try {
-              await projectsApi.exportProject(projectId!, 'approved', `${project.name.replace(/[^a-z0-9]/gi,'_')}_approved.zip`)
-              toast.success('Export downloaded — contains all approved records + README')
+              await projectsApi.exportProject(projectId!, 'all', `${project.name.replace(/[^a-z0-9]/gi,'_')}_export.zip`)
+              toast.success('Export downloaded — all records + README')
             } catch (err: any) {
-              toast.error(err?.response?.data?.detail || 'Export failed — approve some records first')
+              toast.error(err?.response?.data?.detail || 'Export failed — no records found in this project')
             }
           }}>
-            <Download className="w-3.5 h-3.5" /> Export Approved
+            <Download className="w-3.5 h-3.5" /> Export All Records
           </Button>
         </div>
       </div>

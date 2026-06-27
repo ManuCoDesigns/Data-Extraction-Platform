@@ -3,7 +3,7 @@
   "grouping_key": "company_name",
   "base_schema": "bgs-supplier-graph-v1",
   "source_type": "company_website",
-  "extraction_instructions": "BASE: BGS Supplier Graph Schema v1.0 rules apply for all base fields.\n\nSOURCE: Company's own website (NOT the Excel, NOT third-party sources).\n\nMAP TO BGS BASE FIELDS FIRST:\n- company_name: Full legal name from website header/About page\n- headquarters_location: From Contact Us/About page. 'City, Country'\n- company_description: Company's own About text\n- industry_sector: From primary commodity. Metals (Li, Co, Ni, Cu, Zn, REE, etc.) → metals mining. Graphite, Silica, Ball Clay → industrial minerals. Bauxite/Alumina → construction minerals. Coal → coal.\n- supply_chain_tier: 1=mine/primary producer. 2=refiner/smelter/processor/recycler. 3=trader/distributor. If both mining AND refining, use 1.\n- manufacturing_sites: ONE entry per named mine/plant/refinery/smelter on the website. Each: {location:'Site Name, Country', country, site_type:'mine|refinery|smelter|processing plant', raw:'verbatim website text about this site'}\n- products_offered: ONE entry per distinct product grade. Separate 'battery-grade lithium hydroxide' and 'technical-grade lithium carbonate' as different entries.\n- sources: company website as tier2 source\n\nEXTRAS FIELDS (capture if found on website — all marked extras:true):\n- ticker_symbol + stock_exchange: from investor relations or homepage\n- primary_commodities + by_product_commodities: from operations/products pages\n- annual_production: specific tonnage figures with year from production reports\n- jv_stakes: ownership percentages like 'Collahuasi (44%)'\n- processing_capabilities: mining/processing methods mentioned\n- certifications: Copper Mark, IRMA, ISO 14001, LME, etc.\n- sustainability_report_url, annual_report_url, investor_relations_url: if linked\n\nFIXED: is_verified=false, supplier_id=null, duns_number=null.\nDO NOT INVENT. If not on the website, set null or [].",
+  "extraction_instructions": "EXCEL UPLOAD: This schema maps directly from the Critical Materials Suppliers Excel.\nColumn mappings: 'Company Name'→company_name, 'Country'→headquarters_location, 'Website'→website, 'Type'→type_description, 'Products'→products_raw, 'Capacity/Production Data'→company_description, 'Data Transparency Level'→data_transparency_level.\n\nCOMPUTED FIELDS (auto-inferred from Excel data):\nsupply_chain_tier: 1=Mine/Explorer/Developer/Producer, 2=Refiner/Smelter/Processor/Recycler, 3=Trader\nindustry_sector: inferred from products_raw column\n\nBASE: BGS Supplier Graph Schema v1.0 rules apply for all base fields.\n\nSOURCE: Company's own website (NOT the Excel, NOT third-party sources).\n\nMAP TO BGS BASE FIELDS FIRST:\n- company_name: Full legal name from website header/About page\n- headquarters_location: From Contact Us/About page. 'City, Country'\n- company_description: Company's own About text\n- industry_sector: From primary commodity. Metals (Li, Co, Ni, Cu, Zn, REE, etc.) → metals mining. Graphite, Silica, Ball Clay → industrial minerals. Bauxite/Alumina → construction minerals. Coal → coal.\n- supply_chain_tier: 1=mine/primary producer. 2=refiner/smelter/processor/recycler. 3=trader/distributor. If both mining AND refining, use 1.\n- manufacturing_sites: ONE entry per named mine/plant/refinery/smelter on the website. Each: {location:'Site Name, Country', country, site_type:'mine|refinery|smelter|processing plant', raw:'verbatim website text about this site'}\n- products_offered: ONE entry per distinct product grade. Separate 'battery-grade lithium hydroxide' and 'technical-grade lithium carbonate' as different entries.\n- sources: company website as tier2 source\n\nEXTRAS FIELDS (capture if found on website — all marked extras:true):\n- ticker_symbol + stock_exchange: from investor relations or homepage\n- primary_commodities + by_product_commodities: from operations/products pages\n- annual_production: specific tonnage figures with year from production reports\n- jv_stakes: ownership percentages like 'Collahuasi (44%)'\n- processing_capabilities: mining/processing methods mentioned\n- certifications: Copper Mark, IRMA, ISO 14001, LME, etc.\n- sustainability_report_url, annual_report_url, investor_relations_url: if linked\n\nFIXED: is_verified=false, supplier_id=null, duns_number=null.\nDO NOT INVENT. If not on the website, set null or [].",
   "fields": [
     {
       "name": "supplier_id",
@@ -21,7 +21,8 @@
       "name": "company_name",
       "type": "string",
       "required": true,
-      "description": "Full legal company name exactly as printed in source. Do not abbreviate."
+      "description": "Full legal company name exactly as printed in source. Do not abbreviate.",
+      "source_field": "Company Name"
     },
     {
       "name": "canonical_name",
@@ -33,19 +34,22 @@
       "name": "headquarters_location",
       "type": "string",
       "required": false,
-      "description": "'City, Country' format. e.g. 'Buxton, United Kingdom'. Null if not available."
+      "description": "'City, Country' format. e.g. 'Buxton, United Kingdom'. Null if not available.",
+      "source_field": "Country"
     },
     {
       "name": "website",
       "type": "string",
       "required": false,
-      "description": "Company website URL. Null in BGS DMQ — populated separately."
+      "description": "Company website URL. Null in BGS DMQ — populated separately.",
+      "source_field": "Website"
     },
     {
       "name": "company_description",
       "type": "string",
       "required": false,
-      "description": "Brief description of the company. Null from BGS DMQ alone."
+      "description": "Brief description of the company. Null from BGS DMQ alone.",
+      "source_field": "Capacity/Production Data"
     },
     {
       "name": "industry_sector",
@@ -202,7 +206,8 @@
         "Low"
       ],
       "extras": true,
-      "extras_source": "company-website"
+      "extras_source": "company-website",
+      "source_field": "Data Transparency Level"
     },
     {
       "name": "sustainability_report_url",

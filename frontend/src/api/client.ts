@@ -275,6 +275,10 @@ export const sourcesApi = {
   approve: (id: string) => api.post(`/sources/${id}/approve`).then(r => r.data),
   scrape: (id: string) => api.post(`/sources/${id}/scrape`).then(r => r.data),
   verify: (id: string) => api.post(`/sources/${id}/verify`).then(r => r.data),
+  reset: (id: string, clearRecords = true) =>
+    api.post(`/sources/${id}/reset`, null, { params: { clear_records: clearRecords } }).then(r => r.data),
+  dismissFlag: (sourceId: string, recordId: string, flagIndex: number) =>
+    api.delete(`/sources/${sourceId}/records/${recordId}/flags/${flagIndex}`).then(r => r.data),
   schema: (id: string) => api.get(`/sources/${id}/schema`).then(r => r.data),
   export: async (id: string, filename: string) => {
     const res = await api.get(`/sources/${id}/export`, { responseType: 'blob' })

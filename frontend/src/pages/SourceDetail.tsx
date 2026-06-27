@@ -5,7 +5,7 @@ import { JsonRecordViewer } from './JsonRecordViewer'
 import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
-  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown
+  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -38,6 +38,9 @@ export function SourceDetailPage() {
   const [tab, setTab] = useState<Tab>('records')
   const [validityFilter, setValidityFilter] = useState('')
   const [showUpload, setShowUpload] = useState(false)
+  const [showEditSource, setShowEditSource] = useState(false)
+  const [editSourceForm, setEditSourceForm] = useState({ name: '', description: '', website_url: '' })
+  const [showSchemaJson, setShowSchemaJson] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [file, setFile] = useState<File | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -46,6 +49,9 @@ export function SourceDetailPage() {
   const [editFields, setEditFields] = useState<Record<string, string>>({})
   const [savingEdit, setSavingEdit] = useState(false)
   const [deleteSourceConfirm, setDeleteSourceConfirm] = useState(false)
+  const [showReset, setShowReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [resetClearRecords, setResetClearRecords] = useState(true)
   const [deleteRecord, setDeleteRecord] = useState<any | null>(null)
   const [deleting, setDeleting] = useState(false)
   // New capabilities
@@ -187,8 +193,35 @@ export function SourceDetailPage() {
     }
   }
 
-  const handleDeleteRecord = async () => {
-    if (!deleteRecord || !sourceId) return
+  const handleUpdateSource = async () => {
+    if (!sourceId) return
+    try {
+      await sourcesApi.update(sourceId, {
+        name: editSourceForm.name,
+        description: editSourceForm.description || null,
+        website_url: editSourceForm.website_url || null,
+      })
+      toast.success('Source updated')
+      setShowEditSource(false)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Update failed')
+    }
+  }
+
+  const handleReset = async () => {    if (!sourceId) return
+    setResetting(true)
+    try {
+      await sourcesApi.reset(sourceId, resetClearRecords)
+      toast.success(`Source reset to "Not Started"${resetClearRecords ? ' — all records cleared' : ''}`)
+      setShowReset(false)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Reset failed')
+    } finally { setResetting(false) }
+  }
+
+  const handleDeleteRecord = async () => {    if (!deleteRecord || !sourceId) return
     setDeleting(true)
     try {
       await sourcesApi.deleteRecord(sourceId, deleteRecord.id)
@@ -232,7 +265,7 @@ export function SourceDetailPage() {
 
   // ── If a record is open, portal the viewer to <body> so app shell can't clip it ──
   if (activeRecordIndex !== null && records[activeRecordIndex]) {
-    return createPortal(
+    return (
       <div style={{ position: 'fixed', inset: 0, zIndex: 9999, overflow: 'hidden' }}>
         <JsonRecordViewer
           record={records[activeRecordIndex]}
@@ -242,6 +275,7 @@ export function SourceDetailPage() {
           extractionInstructions={schemaDefinition?.extraction_instructions}
           schemaName={schemaDefinition?.name}
           sourceWebsiteUrl={source.website_url}
+          sourceId={sourceId!}
           isExtractor={isExtractor}
           isReviewer={isReviewer}
           onFix={handleFixRecord}
@@ -249,8 +283,7 @@ export function SourceDetailPage() {
           onNavigate={setActiveRecordIndex}
           onClose={() => { setActiveRecordIndex(null); load() }}
         />
-      </div>,
-      document.body
+      </div>
     )
   }
 
@@ -286,6 +319,14 @@ export function SourceDetailPage() {
               <Upload className="w-3.5 h-3.5" /> Upload Data
             </Button>
           )}
+          {isAdmin && (
+            <Button variant="secondary" size="sm" onClick={() => {
+              setEditSourceForm({ name: source.name, description: source.description || '', website_url: source.website_url || '' })
+              setShowEditSource(true)
+            }}>
+              <Edit3 className="w-3.5 h-3.5" /> Edit Source
+            </Button>
+          )}
           {isExtractor && source.website_url && source.status !== 'approved' && (
             <Button variant="secondary" size="sm" onClick={handleScrape} loading={scraping}>
               <Search className="w-3.5 h-3.5" />
@@ -313,6 +354,12 @@ export function SourceDetailPage() {
             <Button variant="secondary" size="sm" onClick={() => setDeleteSourceConfirm(true)}
               className="!text-red-600 !border-red-200 hover:!bg-red-50">
               <Trash2 className="w-3.5 h-3.5" /> Delete
+            </Button>
+          )}
+          {isAdmin && (
+            <Button variant="secondary" size="sm" onClick={() => setShowReset(true)}
+              className="!text-orange-600 !border-orange-200 hover:!bg-orange-50">
+              <RotateCcw className="w-3.5 h-3.5" /> Reset Source
             </Button>
           )}
         </div>
@@ -440,9 +487,15 @@ export function SourceDetailPage() {
                     <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
                       {schemaDefinition.name || 'Schema'} Fields
                     </h4>
-                    <button onClick={() => setShowSchemaPanel(false)} className="text-gray-400 hover:text-gray-600">
-                      <XCircle className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => setShowSchemaJson(true)}
+                        className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1">
+                        <Code className="w-3 h-3" /> Full JSON
+                      </button>
+                      <button onClick={() => setShowSchemaPanel(false)} className="text-gray-400 hover:text-gray-600">
+                        <XCircle className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
                   {schemaDefinition.extraction_instructions && (
                     <div className="mb-3 p-2 bg-brand-50 rounded-lg text-xs text-brand-700 leading-relaxed">
@@ -770,6 +823,69 @@ export function SourceDetailPage() {
         onConfirm={handleDeleteRecord}
         onCancel={() => setDeleteRecord(null)}
       />
+
+      {/* Edit Source modal */}
+      <Modal open={showEditSource} onClose={() => setShowEditSource(false)} title="Edit Source" description="Update the source name, description, or website URL.">
+        <div className="space-y-4">
+          <Input label="Source Name" value={editSourceForm.name}
+            onChange={e => setEditSourceForm(f => ({ ...f, name: e.target.value }))} />
+          <Input label="Website URL" value={editSourceForm.website_url} placeholder="https://www.company.com"
+            onChange={e => setEditSourceForm(f => ({ ...f, website_url: e.target.value }))} />
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Description</label>
+            <textarea value={editSourceForm.description} rows={3}
+              onChange={e => setEditSourceForm(f => ({ ...f, description: e.target.value }))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              placeholder="Brief description of this source…" />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setShowEditSource(false)}>Cancel</Button>
+            <Button onClick={handleUpdateSource} disabled={!editSourceForm.name.trim()}>
+              <Save className="w-4 h-4" /> Save Changes
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Schema full JSON view modal */}
+      <Modal open={showSchemaJson} onClose={() => setShowSchemaJson(false)} title={schemaDefinition?.name || 'Schema Definition'} size="lg">
+        <div style={{ height: 500, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+          <textarea readOnly value={JSON.stringify(schemaDefinition, null, 2)}
+            style={{ width: '100%', height: '100%', fontFamily: 'var(--font-mono)', fontSize: 12, padding: 16, border: 'none', outline: 'none', resize: 'none', background: '#0f172a', color: '#e2e8f0', lineHeight: 1.6 }} />
+        </div>
+        <div className="flex justify-end mt-4">
+          <Button variant="secondary" size="sm" onClick={() => {
+            navigator.clipboard.writeText(JSON.stringify(schemaDefinition, null, 2))
+            toast.success('Schema JSON copied to clipboard')
+          }}>Copy JSON</Button>
+        </div>
+      </Modal>
+
+      {/* Reset Source modal */}
+      <Modal open={showReset} onClose={() => !resetting && setShowReset(false)} title="Reset Source" description="This will undo all extraction progress and allow the source to be re-extracted from scratch.">
+        <div className="space-y-4">
+          <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 text-sm text-orange-800">
+            <p className="font-semibold mb-1">⚠ Admin Action — "{source?.name}"</p>
+            <p>This resets the source status back to <strong>Not Started</strong>. Use this to recover from bad test data or incorrect extractions.</p>
+          </div>
+          <label className="flex items-center gap-3 cursor-pointer p-3 bg-gray-50 rounded-xl border border-gray-200">
+            <input type="checkbox" checked={resetClearRecords} onChange={e => setResetClearRecords(e.target.checked)} className="w-4 h-4 text-orange-500" />
+            <div>
+              <p className="text-sm font-semibold text-gray-800">Clear all records ({source?.total_records} records)</p>
+              <p className="text-xs text-gray-500">Recommended — removes test/incorrect records so the extractor starts clean</p>
+            </div>
+          </label>
+          {!resetClearRecords && (
+            <p className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">Records will be kept but the status, review progress, and timestamps will be reset.</p>
+          )}
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setShowReset(false)} disabled={resetting}>Cancel</Button>
+            <Button onClick={handleReset} loading={resetting} className="!bg-orange-500 hover:!bg-orange-600">
+              <RotateCcw className="w-4 h-4" /> Reset{resetClearRecords ? ' & Clear Records' : ' Status Only'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Full-screen JSON Record Viewer */}
 
