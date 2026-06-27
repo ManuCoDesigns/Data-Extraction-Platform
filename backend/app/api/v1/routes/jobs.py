@@ -197,38 +197,6 @@ def retry_job(
 
 
 @router.get("/{job_id}", response_model=JobOut)
-@router.post("/{job_id}/skip-llm", response_model=JobOut)
-def skip_llm_review(
-    job_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Skip/bypass the LLM review step and move the job directly to 'ready_for_review'.
-    Use this when the AI check is not needed or is taking too long.
-    All records will be marked as llm_skipped=True.
-    """
-    from app.models.all_models import ExtractedRecord
-
-    job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).first()
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    if job.status.value not in ("llm_review", "llm_failed", "extracting", "ready_for_review"):
-        raise HTTPException(
-            status_code=422,
-            detail=f"Cannot skip LLM for job in status '{job.status.value}'"
-        )
-
-    # Mark all records in this job as llm_skipped
-    db.query(ExtractedRecord).filter(
-        ExtractedRecord.job_id == job_id
-    ).update({"llm_skipped": True, "llm_verdict": "SKIPPED"})
-
-    _transition(job, JobStatus.READY_FOR_REVIEW, db, triggered_by=f"user:{current_user.id} (skipped LLM)")
-    db.commit()
-    db.refresh(job)
-    return _serialize(job)
 def get_job(job_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).first()
     if not job:
