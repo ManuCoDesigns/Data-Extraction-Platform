@@ -113,7 +113,7 @@ export const projectsApi = {
     api.post(`/projects/${projectId}/members`, { user_id: userId, role }).then(r => r.data),
   removeMember: (projectId: string, userId: string) =>
     api.delete(`/projects/${projectId}/members/${userId}`).then(r => r.data),
-  exportProject: async (projectId: string, status = 'approved', filename?: string) => {
+  exportProject: async (projectId: string, status = 'all', filename?: string) => {
     const r = await api.get(`/projects/${projectId}/export`, {
       params: { status },
       responseType: 'blob',
@@ -122,6 +122,15 @@ export const projectsApi = {
     const a = document.createElement('a')
     a.href = url
     a.download = filename || `project_export_${new Date().toISOString().slice(0,10)}.zip`
+    a.click()
+    URL.revokeObjectURL(url)
+  },
+  exportPackage: async (projectId: string, projectName = 'project') => {
+    const r = await api.get(`/projects/${projectId}/export-package`, { responseType: 'blob' })
+    const url = URL.createObjectURL(new Blob([r.data], { type: 'application/zip' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${projectName.replace(/[^a-z0-9]/gi, '_')}_package_${new Date().toISOString().slice(0, 10)}.zip`
     a.click()
     URL.revokeObjectURL(url)
   },
