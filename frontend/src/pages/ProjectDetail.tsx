@@ -78,20 +78,34 @@ export function ProjectDetailPage() {
             {project.description && <p className="text-sm text-gray-500 mt-0.5">{project.description}</p>}
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <Badge variant={project.status === 'active' ? 'green' : 'gray'}>{project.status}</Badge>
           <Link to={`/projects/${projectId}/sources`}>
             <Button size="sm"><Database className="w-3.5 h-3.5" /> Sources Board</Button>
           </Link>
+
+          {/* Export Approved — for sharing progress with clients */}
           <Button variant="secondary" size="sm" onClick={async () => {
             try {
-              await projectsApi.exportProject(projectId!, 'all', `${project.name.replace(/[^a-z0-9]/gi,'_')}_export.zip`)
-              toast.success('Export downloaded — all records + README')
+              await projectsApi.exportProject(projectId!, 'approved', `${project.name.replace(/[^a-z0-9]/gi,'_')}_approved.zip`)
+              toast.success('Downloaded — approved records only')
             } catch (err: any) {
-              toast.error(err?.response?.data?.detail || 'Export failed — no records found in this project')
+              toast.error(err?.response?.data?.detail || 'No approved records yet')
             }
           }}>
-            <Download className="w-3.5 h-3.5" /> Export All Records
+            <Download className="w-3.5 h-3.5" /> Export Approved
+          </Button>
+
+          {/* Export All — everything uploaded so far */}
+          <Button variant="secondary" size="sm" onClick={async () => {
+            try {
+              await projectsApi.exportProject(projectId!, 'all', `${project.name.replace(/[^a-z0-9]/gi,'_')}_all.zip`)
+              toast.success('Downloaded — all records')
+            } catch (err: any) {
+              toast.error(err?.response?.data?.detail || 'No records found')
+            }
+          }}>
+            <Download className="w-3.5 h-3.5" /> Export All
           </Button>
         </div>
       </div>

@@ -52,30 +52,55 @@ def _project_role(user: User, project: Project) -> str | None:
     return m.role.value if m else None
 
 
+def _is_org_admin(user: User) -> bool:
+    return "org_admin" in {r.role.value for r in user.roles}
+
+
+def _user_roles(user: User) -> set:
+    return {r.role.value for r in user.roles}
+
+
 def _can_access(user: User, project: Project) -> bool:
+    if _is_org_admin(user):
+        return True
     return _project_role(user, project) is not None
 
 
 def _is_project_admin(user: User, project: Project) -> bool:
+    if _is_org_admin(user):
+        return True
     return _project_role(user, project) in ("org_admin", "project_admin")
 
 
 def _can_manage_source(user: User, source: Source) -> bool:
-    user_roles = {r.role.value for r in user.roles}
-    if "org_admin" in user_roles:
+    """Admin always wins. For non-admins, check project membership via project_id (no lazy-load)."""
+    if _is_org_admin(user):
         return True
-    return _is_project_admin(user, source.project)
+    # Check project role via project_id — avoids lazy-loading source.project
+    roles = _user_roles(user)
+    if "project_admin" in roles:
+        return True
+    return False
 
 
 def _is_assigned_extractor(user: User, source: Source) -> bool:
-    return source.assigned_extractor_id == user.id or _can_manage_source(user, source)
+    """Admin and project_admin can act as extractor on any source."""
+    if _is_org_admin(user):
+        return True
+    roles = _user_roles(user)
+    if "project_admin" in roles:
+        return True
+    return source.assigned_extractor_id == user.id
 
 
 def _is_assigned_reviewer(user: User, source: Source) -> bool:
-    user_roles = {r.role.value for r in user.roles}
-    if "qa_lead" in user_roles:
+    """Admin, project_admin, and qa_lead can review any source."""
+    if _is_org_admin(user):
         return True
-    return source.assigned_reviewer_id == user.id or _can_manage_source(user, source)
+    roles = _user_roles(user)
+    if "project_admin" in roles or "qa_lead" in roles:
+        return True
+    return source.assigned_reviewer_id == user.id
 
 
 # ─── Serialization ───────────────────────────────────────────────────────────
@@ -302,7 +327,7 @@ async def upload_to_source(
     """
     source = _get_source_or_404(source_id, db)
     if not _is_assigned_extractor(current_user, source):
-        raise HTTPException(status_code=403, detail="Only the assigned extractor or a project admin can upload to this source")
+        raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
 
     import os as _os
     filename = file.filename or ""
@@ -785,7 +810,7 @@ def fix_record(
 ):
     source = _get_source_or_404(source_id, db)
     if not _is_assigned_extractor(current_user, source):
-        raise HTTPException(status_code=403, detail="Only the assigned extractor or a project admin can fix records")
+        raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can fix records")
 
     record = db.query(ExtractedRecord).join(ExtractionJob).filter(
         ExtractedRecord.id == record_id, ExtractionJob.source_id == source_id
@@ -830,12 +855,8 @@ def review_source_record(
 ):
     source = _get_source_or_404(source_id, db)
 
-    # Allow org_admin, project_admin, qa_lead, AND the specifically assigned reviewer
-    user_roles = {r.role.value for r in current_user.roles}
-    allowed_roles = {"org_admin", "project_admin", "qa_lead", "reviewer"}
-    is_assigned = source.assigned_reviewer_id == current_user.id
-    if not (user_roles & allowed_roles) and not is_assigned:
-        raise HTTPException(status_code=403, detail="Only reviewers, QA leads, or admins can review records")
+    if not _is_assigned_reviewer(current_user, source):
+        raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can review records")
 
     record = (
         db.query(ExtractedRecord)
@@ -882,12 +903,8 @@ def approve_source(
     """Mark a source as fully approved. Warns if pending records remain but allows admins to override."""
     source = _get_source_or_404(source_id, db)
 
-    # Allow org_admin, project_admin, qa_lead, and assigned reviewer
-    user_roles = {r.role.value for r in current_user.roles}
-    allowed_roles = {"org_admin", "project_admin", "qa_lead", "reviewer"}
-    is_assigned = source.assigned_reviewer_id == current_user.id
-    if not (user_roles & allowed_roles) and not is_assigned:
-        raise HTTPException(status_code=403, detail="Only reviewers, QA leads, or admins can approve a source")
+    if not _is_assigned_reviewer(current_user, source):
+        raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can approve a source")
 
     # Count unapproved records
     pending_or_rejected = (
@@ -925,8 +942,8 @@ def approve_source(
 @router.get("/{source_id}/export")
 def export_source(source_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     source = _get_source_or_404(source_id, db)
-    if not _can_manage_source(current_user, source):
-        raise HTTPException(status_code=403, detail="Only project admins can export a source")
+    if not _is_assigned_reviewer(current_user, source) and not _is_assigned_extractor(current_user, source):
+        raise HTTPException(status_code=403, detail="Access denied")
     if source.status != SourceStatus.APPROVED:
         raise HTTPException(status_code=422, detail="Source must be approved before export")
 
@@ -1000,10 +1017,12 @@ Generated by Xtrium DataOps on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H
                 pass  # raw file not retrievable — JSON + cover sheet still included
 
     buf.seek(0)
-    safe_name = "".join(c if c.isalnum() or c in "-_" else "_" for c in source.name)
+    # Use canonical_name as the ZIP filename — SOP naming convention, never transform it
+    cn = source.canonical_name or source.name
+    cn = str(cn).strip().replace("/", "-").replace("\\", "-").replace(":", "-") or "source"
     return StreamingResponse(
         buf, media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{safe_name}_export.zip"'},
+        headers={"Content-Disposition": f'attachment; filename="{cn}.zip"'},
     )
 
 
@@ -1267,7 +1286,7 @@ async def llm_verify_source(
     """
     source = _get_source_or_404(source_id, db)
     if not _is_assigned_reviewer(current_user, source):
-        raise HTTPException(status_code=403, detail="Only the assigned reviewer or admin can run LLM verification")
+        raise HTTPException(status_code=403, detail="Access denied")
 
     if not source.website_url:
         raise HTTPException(status_code=422, detail="No website URL — cannot verify without a source to check against.")
@@ -1556,12 +1575,8 @@ def clear_source_records(
     """
     source = _get_source_or_404(source_id, db)
 
-    user_roles = {r.role.value for r in current_user.roles}
-    if "org_admin" not in user_roles:
-        from app.models.all_models import ProjectMember as PM
-        member = db.query(PM).filter(PM.project_id == source.project_id, PM.user_id == current_user.id).first()
-        if not member or member.role.value not in ("project_admin", "org_admin"):
-            raise HTTPException(status_code=403, detail="Only admins can clear records")
+    if not _can_manage_source(current_user, source):
+        raise HTTPException(status_code=403, detail="Only admins can clear records")
 
     job_ids = [j.id for j in db.query(ExtractionJob).filter(
         ExtractionJob.source_id == source_id

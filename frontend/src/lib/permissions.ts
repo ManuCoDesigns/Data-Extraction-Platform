@@ -23,14 +23,26 @@ const ALL_CAPABILITIES: Capability[] = [
 ]
 
 export const ROLE_CAPABILITIES: Record<string, Capability[]> = {
+  // org_admin — full system control
   org_admin: ALL_CAPABILITIES,
+
+  // project_admin — everything except managing org-wide users
   project_admin: [
     'manage_project_members', 'manage_project_resources', 'manage_schemas',
-    'upload_extraction_jobs', 'review_submissions', 'submit_work',
+    'upload_extraction_jobs', 'submit_work', 'review_submissions',
+    'review_records', 'view_all_projects',
   ],
-  qa_lead: ['review_submissions', 'review_records'],
+
+  // qa_lead — review + submit across all projects
+  qa_lead: ['review_submissions', 'review_records', 'submit_work', 'upload_extraction_jobs'],
+
+  // pipeline_operator / extractor
   pipeline_operator: ['upload_extraction_jobs', 'submit_work'],
+
+  // reviewer
   reviewer: ['review_submissions', 'review_records'],
+
+  // read_only
   read_only: [],
 }
 
