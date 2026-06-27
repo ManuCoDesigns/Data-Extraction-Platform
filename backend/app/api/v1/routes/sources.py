@@ -758,7 +758,7 @@ def list_source_records(
     q = (
         db.query(ExtractedRecord)
         .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
-        .filter(ExtractionJob.source_id == source_id, ExtractedRecord.deleted_at == None)
+        .filter(ExtractionJob.source_id == source_id)
     )
     if validity == "valid":
         q = q.filter(ExtractedRecord.is_schema_valid == True)
@@ -840,8 +840,7 @@ def review_source_record(
     record = (
         db.query(ExtractedRecord)
         .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
-        .filter(ExtractedRecord.id == record_id, ExtractionJob.source_id == source_id,
-                ExtractedRecord.deleted_at == None)
+        .filter(ExtractedRecord.id == record_id, ExtractionJob.source_id == source_id)
         .first()
     )
     if not record:
@@ -897,7 +896,6 @@ def approve_source(
         .filter(
             ExtractionJob.source_id == source_id,
             ExtractedRecord.review_status != ReviewStatus.APPROVED,
-            ExtractedRecord.deleted_at == None,
         ).count()
     )
 
@@ -932,17 +930,15 @@ def export_source(source_id: str, db: Session = Depends(get_db), current_user: U
     if source.status != SourceStatus.APPROVED:
         raise HTTPException(status_code=422, detail="Source must be approved before export")
 
-    # Fetch approved records — check both job path and direct source_id path
+    # Fetch approved records through ExtractionJob
     records = (
         db.query(ExtractedRecord)
-        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id, isouter=True)
+        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
         .filter(
-            (ExtractionJob.source_id == source_id) | (ExtractedRecord.source_id == source_id),
+            ExtractionJob.source_id == source_id,
             ExtractedRecord.review_status == ReviewStatus.APPROVED,
-            ExtractedRecord.deleted_at == None,
         ).all()
     )
-    data = [r.extracted_fields for r in records]
     data = [r.extracted_fields for r in records]
 
     duration = None
@@ -1109,12 +1105,6 @@ def delete_source(
     if job_ids:
         db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
         db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
-
-    # Also delete orphaned records linked directly to source_id
-    db.query(ExtractedRecord).filter(
-        ExtractedRecord.source_id == source_id,
-        ExtractedRecord.deleted_at == None
-    ).update({"deleted_at": datetime.utcnow()})
 
     db.delete(source)
     db.add(AuditLog(
@@ -1617,10 +1607,11 @@ def dismiss_flag(
     The flag is removed permanently from the record — use when the LLM flagged
     something that is actually correct.
     """
-    record = db.query(ExtractedRecord).filter(
+    record = db.query(ExtractedRecord).join(
+        ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id
+    ).filter(
         ExtractedRecord.id == record_id,
-        ExtractedRecord.source_id == source_id,
-        ExtractedRecord.deleted_at == None,
+        ExtractionJob.source_id == source_id,
     ).first()
     if not record:
         raise HTTPException(status_code=404, detail="Record not found")
