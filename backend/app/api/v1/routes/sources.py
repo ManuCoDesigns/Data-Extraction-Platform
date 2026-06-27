@@ -1432,23 +1432,17 @@ def reset_source(
     Optionally wipe all extracted records (default: True).
     Use this to recover from bad extractions or test data.
     """
-    source = db.query(Source).filter(
-        Source.id == source_id, Source.deleted_at == None
-    ).first()
-    if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
-
-    roles = [r.role for r in current_user.roles]
-    if not any(r in roles for r in ["org_admin", "project_admin"]):
+    source = _get_source_or_404(source_id, db)
+    if not _can_access(current_user, source.project):
         raise HTTPException(status_code=403, detail="Only admins can reset sources")
 
     if clear_records:
         db.query(ExtractedRecord).filter(
             ExtractedRecord.source_id == source_id,
             ExtractedRecord.deleted_at == None,
-        ).update({"deleted_at": __import__("datetime").datetime.utcnow()})
+        ).update({"deleted_at": datetime.utcnow()})
 
-    source.status = "not_started"
+    source.status = SourceStatus.NOT_STARTED
     source.total_records = 0
     source.valid_records = 0
     source.invalid_records = 0
@@ -1463,7 +1457,7 @@ def reset_source(
     db.refresh(source)
 
     return {
-        "message": f"Source reset to 'not_started'{'with records cleared' if clear_records else ''}",
+        "message": f"Source reset to 'not_started' {'with records cleared' if clear_records else 'status only'}",
         "source_id": source_id,
         "status": source.status,
         "records_cleared": clear_records,
