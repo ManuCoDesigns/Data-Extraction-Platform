@@ -5,7 +5,7 @@ import { JsonRecordViewer } from './JsonRecordViewer'
 import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
-  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code
+  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Eye
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -66,13 +66,17 @@ export function SourceDetailPage() {
 
   const load = () => {
     if (!projectId || !sourceId) return
-    Promise.all([
-      projectsApi.get(projectId).then(setProject),
-      sourcesApi.get(sourceId).then(setSource),
-      sourcesApi.records(sourceId, { validity: validityFilter || undefined, page_size: 200 }).then((r: any) => setRecords(r.items)),
-      projectsApi.listMembers(projectId).then((m: any) => setMembers(m.map((x: any) => ({ id: x.user_id, full_name: x.full_name, email: x.email })))),
-      sourcesApi.schema(sourceId).then(setSchemaDefinition).catch(() => {}),
-    ]).finally(() => setLoading(false))
+    // Load each piece independently so one failure doesn't wipe all data
+    projectsApi.get(projectId).then(setProject).catch(() => {})
+    sourcesApi.get(sourceId).then(setSource).catch(() => {})
+    sourcesApi.records(sourceId, { validity: validityFilter || undefined, page_size: 200 })
+      .then((r: any) => setRecords(r?.items ?? []))
+      .catch(() => toast.error('Could not load records — refresh to retry'))
+    projectsApi.listMembers(projectId)
+      .then((m: any) => setMembers(m.map((x: any) => ({ id: x.user_id, full_name: x.full_name, email: x.email }))))
+      .catch(() => {})
+    sourcesApi.schema(sourceId).then(setSchemaDefinition).catch(() => {})
+    setLoading(false)
   }
   useEffect(() => { load() }, [projectId, sourceId, validityFilter])
 
@@ -288,8 +292,12 @@ export function SourceDetailPage() {
   }
 
   const meta = STATUS_META[source.status]
-  const allApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
-  const canApproveSource = source.status !== 'approved' && allApproved && isReviewer
+  // Show Approve button for any reviewer/admin whenever source is not yet approved
+  // Don't gatekeep on source.total_records (counter can lag) — backend validates
+  const canApproveSource = (isReviewer || isAdmin) && source.status !== 'approved'
+  const allRecordsApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
+  const pendingCount = records.filter(r => r.review_status === 'pending').length
+  const approvedCount = records.filter(r => r.review_status === 'approved').length
 
   return (
     <div className="p-8 space-y-6">
@@ -327,6 +335,22 @@ export function SourceDetailPage() {
               <Edit3 className="w-3.5 h-3.5" /> Edit Source
             </Button>
           )}
+          {isAdmin && records.length > 0 && (
+            <Button variant="secondary" size="sm"
+              className="!text-orange-600 !border-orange-200 hover:!bg-orange-50"
+              onClick={async () => {
+                if (!window.confirm(`Clear all ${records.length} records from "${source.name}"? This cannot be undone.`)) return
+                try {
+                  const r = await sourcesApi.clearRecords(sourceId!)
+                  toast.success(r.message || 'Records cleared')
+                  load()
+                } catch (err: any) {
+                  toast.error(err?.response?.data?.detail || 'Clear failed')
+                }
+              }}>
+              <Trash2 className="w-3.5 h-3.5" /> Clear Records
+            </Button>
+          )}
           {isExtractor && source.website_url && source.status !== 'approved' && (
             <Button variant="secondary" size="sm" onClick={handleScrape} loading={scraping}>
               <Search className="w-3.5 h-3.5" />
@@ -341,8 +365,12 @@ export function SourceDetailPage() {
             </Button>
           )}
           {canApproveSource && (
-            <Button size="sm" onClick={handleApproveSource}>
-              <CheckCircle className="w-3.5 h-3.5" /> Approve Source
+            <Button size="sm" onClick={handleApproveSource}
+              style={{ background: '#10b981', border: 'none', color: '#fff' }}>
+              <CheckCircle className="w-3.5 h-3.5" />
+              {source.approved_records === source.total_records && source.total_records > 0
+                ? 'Approve Source'
+                : `Approve Source ${source.approved_records > 0 ? `(${source.approved_records}/${source.total_records} approved)` : ''}`}
             </Button>
           )}
           {source.status === 'approved' && isAdmin && (
@@ -432,7 +460,43 @@ export function SourceDetailPage() {
 
       {tab === 'records' && (
         <div className="space-y-4">
-          {/* Verify result banner */}
+
+          {/* ── Workflow next-step banner ── */}
+          {source.status === 'approved' ? (
+            <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 12, padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <CheckCircle size={16} color="#059669" />
+              <p style={{ fontSize: 13, color: '#065f46', margin: 0, flex: 1 }}>
+                <strong>Source Approved</strong> — all records have been reviewed. Use <strong>Export Package</strong> to download.
+              </p>
+              <Button size="sm" onClick={handleExport} style={{ background: '#059669', border: 'none', color: '#fff', flexShrink: 0 }}>
+                <Download className="w-3.5 h-3.5" /> Export Package
+              </Button>
+            </div>
+          ) : records.length > 0 && (isReviewer || isAdmin) ? (
+            <div style={{ background: allRecordsApproved ? '#ecfdf5' : '#fffbeb', border: `1px solid ${allRecordsApproved ? '#6ee7b7' : '#fcd34d'}`, borderRadius: 12, padding: '14px 18px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: allRecordsApproved ? 10 : 8 }}>
+                <Eye size={16} color={allRecordsApproved ? '#059669' : '#d97706'} style={{ flexShrink: 0, marginTop: 1 }} />
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: allRecordsApproved ? '#065f46' : '#92400e', margin: 0 }}>
+                    {allRecordsApproved
+                      ? `All ${records.length} records approved — ready to approve source`
+                      : `${pendingCount} record${pendingCount !== 1 ? 's' : ''} pending review · ${approvedCount} approved`}
+                  </p>
+                  <p style={{ fontSize: 12, color: allRecordsApproved ? '#059669' : '#b45309', margin: '3px 0 0' }}>
+                    {allRecordsApproved
+                      ? 'Click "Approve Source" to mark this source as complete and unlock export.'
+                      : 'Click any record below to open the review panel. Use ✓ Approve or ✗ Send Back on each record.'}
+                  </p>
+                </div>
+              </div>
+              {allRecordsApproved && (
+                <Button size="sm" onClick={handleApproveSource}
+                  style={{ background: '#10b981', border: 'none', color: '#fff' }}>
+                  <CheckCircle className="w-3.5 h-3.5" /> Approve Source & Unlock Export
+                </Button>
+              )}
+            </div>
+          ) : null}
           {showVerifyResult && verifyResult && (
             <div className={cn(
               'border rounded-xl p-4 flex items-start justify-between gap-4',

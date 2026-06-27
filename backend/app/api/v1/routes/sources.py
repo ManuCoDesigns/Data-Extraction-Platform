@@ -744,10 +744,22 @@ def list_source_records(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     source = _get_source_or_404(source_id, db)
-    if not _can_access(current_user, source.project):
-        raise HTTPException(status_code=403, detail="Access denied")
 
-    q = db.query(ExtractedRecord).join(ExtractionJob).filter(ExtractionJob.source_id == source_id)
+    # Role check without lazy-loading source.project
+    user_roles = {r.role.value for r in current_user.roles}
+    if "org_admin" not in user_roles:
+        member = db.query(ProjectMember).filter(
+            ProjectMember.project_id == source.project_id,
+            ProjectMember.user_id == current_user.id,
+        ).first()
+        if not member:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+    q = (
+        db.query(ExtractedRecord)
+        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+        .filter(ExtractionJob.source_id == source_id, ExtractedRecord.deleted_at == None)
+    )
     if validity == "valid":
         q = q.filter(ExtractedRecord.is_schema_valid == True)
     elif validity == "invalid":
@@ -817,12 +829,21 @@ def review_source_record(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     source = _get_source_or_404(source_id, db)
-    if not _is_assigned_reviewer(current_user, source):
-        raise HTTPException(status_code=403, detail="Only the assigned reviewer or a project admin can review records")
 
-    record = db.query(ExtractedRecord).join(ExtractionJob).filter(
-        ExtractedRecord.id == record_id, ExtractionJob.source_id == source_id
-    ).first()
+    # Allow org_admin, project_admin, qa_lead, AND the specifically assigned reviewer
+    user_roles = {r.role.value for r in current_user.roles}
+    allowed_roles = {"org_admin", "project_admin", "qa_lead", "reviewer"}
+    is_assigned = source.assigned_reviewer_id == current_user.id
+    if not (user_roles & allowed_roles) and not is_assigned:
+        raise HTTPException(status_code=403, detail="Only reviewers, QA leads, or admins can review records")
+
+    record = (
+        db.query(ExtractedRecord)
+        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+        .filter(ExtractedRecord.id == record_id, ExtractionJob.source_id == source_id,
+                ExtractedRecord.deleted_at == None)
+        .first()
+    )
     if not record:
         raise HTTPException(status_code=404, detail="Record not found in this source")
 
@@ -859,17 +880,34 @@ def review_source_record(
 def approve_source(
     source_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    """Final approval — all records must be approved first. Skips the (fast-follow) LLM verification stage for now."""
+    """Mark a source as fully approved. Warns if pending records remain but allows admins to override."""
     source = _get_source_or_404(source_id, db)
-    if not _is_assigned_reviewer(current_user, source):
-        raise HTTPException(status_code=403, detail="Only the assigned reviewer or a project admin can approve a source")
 
-    pending_or_rejected = db.query(ExtractedRecord).join(ExtractionJob).filter(
-        ExtractionJob.source_id == source_id,
-        ExtractedRecord.review_status != ReviewStatus.APPROVED,
-    ).count()
-    if pending_or_rejected > 0:
-        raise HTTPException(status_code=422, detail=f"{pending_or_rejected} record(s) are not yet approved")
+    # Allow org_admin, project_admin, qa_lead, and assigned reviewer
+    user_roles = {r.role.value for r in current_user.roles}
+    allowed_roles = {"org_admin", "project_admin", "qa_lead", "reviewer"}
+    is_assigned = source.assigned_reviewer_id == current_user.id
+    if not (user_roles & allowed_roles) and not is_assigned:
+        raise HTTPException(status_code=403, detail="Only reviewers, QA leads, or admins can approve a source")
+
+    # Count unapproved records
+    pending_or_rejected = (
+        db.query(ExtractedRecord)
+        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+        .filter(
+            ExtractionJob.source_id == source_id,
+            ExtractedRecord.review_status != ReviewStatus.APPROVED,
+            ExtractedRecord.deleted_at == None,
+        ).count()
+    )
+
+    # Only block if reviewer (not admin) and records are pending
+    is_admin = "org_admin" in user_roles or "project_admin" in user_roles
+    if pending_or_rejected > 0 and not is_admin:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{pending_or_rejected} record(s) are not yet approved. Approve them first or ask an admin to override."
+        )
 
     source.status = SourceStatus.APPROVED
     source.approved_at = datetime.now(timezone.utc)
@@ -894,9 +932,17 @@ def export_source(source_id: str, db: Session = Depends(get_db), current_user: U
     if source.status != SourceStatus.APPROVED:
         raise HTTPException(status_code=422, detail="Source must be approved before export")
 
-    records = db.query(ExtractedRecord).join(ExtractionJob).filter(
-        ExtractionJob.source_id == source_id, ExtractedRecord.review_status == ReviewStatus.APPROVED
-    ).all()
+    # Fetch approved records — check both job path and direct source_id path
+    records = (
+        db.query(ExtractedRecord)
+        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id, isouter=True)
+        .filter(
+            (ExtractionJob.source_id == source_id) | (ExtractedRecord.source_id == source_id),
+            ExtractedRecord.review_status == ReviewStatus.APPROVED,
+            ExtractedRecord.deleted_at == None,
+        ).all()
+    )
+    data = [r.extracted_fields for r in records]
     data = [r.extracted_fields for r in records]
 
     duration = None
@@ -1032,20 +1078,49 @@ def delete_source(
     current_user: User = Depends(get_current_user),
 ):
     """Delete a source and all its jobs and records. Only admins can do this."""
-    source = _get_source_or_404(source_id, db)
-    if not _can_manage_source(current_user, source):
-        raise HTTPException(status_code=403, detail="Only project admins can delete sources")
+    source = db.query(Source).filter(
+        Source.id == source_id, Source.deleted_at == None
+    ).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    # Use current_user.roles directly — already loaded by the auth dependency
+    user_roles = {r.role.value for r in current_user.roles}
+    is_org_admin = "org_admin" in user_roles
+
+    if not is_org_admin:
+        from app.models.all_models import ProjectMember as PM
+        member = db.query(PM).filter(
+            PM.project_id == source.project_id,
+            PM.user_id == current_user.id,
+        ).first()
+        if not member or member.role.value not in ("project_admin", "org_admin"):
+            raise HTTPException(status_code=403, detail="Only admins can delete sources")
+
     if source.status == SourceStatus.APPROVED:
-        raise HTTPException(status_code=422, detail="Approved sources cannot be deleted — they are part of the record.")
+        raise HTTPException(status_code=422, detail="Approved sources cannot be deleted. Reset it first.")
+
+    source_name = source.name
+    source_status = source.status.value
+    project_id = source.project_id
+
+    # Delete all records and jobs first
     job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
     if job_ids:
         db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
         db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
+
+    # Also delete orphaned records linked directly to source_id
+    db.query(ExtractedRecord).filter(
+        ExtractedRecord.source_id == source_id,
+        ExtractedRecord.deleted_at == None
+    ).update({"deleted_at": datetime.utcnow()})
+
     db.delete(source)
     db.add(AuditLog(
-        user_id=current_user.id, project_id=source.project_id,
+        user_id=current_user.id, project_id=project_id,
         action=AuditAction.SOURCE_STATUS_CHANGED,
-        before_value={"name": source.name, "status": source.status.value},
+        before_value={"name": source_name, "status": source_status},
         after_value={"deleted": True},
     ))
     db.commit()
@@ -1432,23 +1507,30 @@ def reset_source(
     Optionally wipe all extracted records (default: True).
     Use this to recover from bad extractions or test data.
     """
-    source = db.query(Source).filter(
-        Source.id == source_id, Source.deleted_at == None
-    ).first()
-    if not source:
-        raise HTTPException(status_code=404, detail="Source not found")
+    source = _get_source_or_404(source_id, db)
 
-    roles = [r.role for r in current_user.roles]
-    if not any(r in roles for r in ["org_admin", "project_admin"]):
-        raise HTTPException(status_code=403, detail="Only admins can reset sources")
+    # Check admin using current_user.roles (already loaded) — avoid lazy-load on source.project
+    user_roles = {r.role.value for r in current_user.roles}
+    if "org_admin" not in user_roles:
+        from app.models.all_models import ProjectMember as PM
+        member = db.query(PM).filter(PM.project_id == source.project_id, PM.user_id == current_user.id).first()
+        if not member or member.role.value not in ("project_admin", "org_admin"):
+            raise HTTPException(status_code=403, detail="Only admins can reset sources")
 
     if clear_records:
-        db.query(ExtractedRecord).filter(
-            ExtractedRecord.source_id == source_id,
-            ExtractedRecord.deleted_at == None,
-        ).update({"deleted_at": __import__("datetime").datetime.utcnow()})
+        # ExtractedRecord links to Source through ExtractionJob (no direct source_id)
+        job_ids = [j.id for j in db.query(ExtractionJob).filter(
+            ExtractionJob.source_id == source_id
+        ).all()]
+        if job_ids:
+            db.query(ExtractedRecord).filter(
+                ExtractedRecord.job_id.in_(job_ids)
+            ).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(
+            ExtractionJob.source_id == source_id
+        ).delete(synchronize_session=False)
 
-    source.status = "not_started"
+    source.status = SourceStatus.NOT_STARTED
     source.total_records = 0
     source.valid_records = 0
     source.invalid_records = 0
@@ -1463,10 +1545,60 @@ def reset_source(
     db.refresh(source)
 
     return {
-        "message": f"Source reset to 'not_started'{'with records cleared' if clear_records else ''}",
+        "message": f"Source reset to 'not_started' {'with records cleared' if clear_records else 'status only'}",
         "source_id": source_id,
         "status": source.status,
         "records_cleared": clear_records,
+    }
+
+
+# ─── Admin: Clear all records from a source (keep source, keep status) ────────
+
+@router.delete("/{source_id}/records", status_code=200)
+def clear_source_records(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin-only: Delete ALL records from a source without changing its status.
+    Use this to wipe test data before a real extraction run.
+    """
+    source = _get_source_or_404(source_id, db)
+
+    user_roles = {r.role.value for r in current_user.roles}
+    if "org_admin" not in user_roles:
+        from app.models.all_models import ProjectMember as PM
+        member = db.query(PM).filter(PM.project_id == source.project_id, PM.user_id == current_user.id).first()
+        if not member or member.role.value not in ("project_admin", "org_admin"):
+            raise HTTPException(status_code=403, detail="Only admins can clear records")
+
+    job_ids = [j.id for j in db.query(ExtractionJob).filter(
+        ExtractionJob.source_id == source_id
+    ).all()]
+
+    deleted_records = 0
+    if job_ids:
+        deleted_records = db.query(ExtractedRecord).filter(
+            ExtractedRecord.job_id.in_(job_ids)
+        ).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(
+            ExtractionJob.id.in_(job_ids)
+        ).delete(synchronize_session=False)
+
+    # Reset counts
+    source.total_records = 0
+    source.valid_records = 0
+    source.invalid_records = 0
+    source.approved_records = 0
+    source.web_verified = None
+    source.web_check_summary = None
+    db.commit()
+
+    return {
+        "message": f"Cleared {deleted_records} records from source",
+        "records_deleted": deleted_records,
+        "source_id": source_id,
     }
 
 
