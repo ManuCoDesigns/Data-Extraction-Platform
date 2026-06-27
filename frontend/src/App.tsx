@@ -115,10 +115,7 @@ export function App() {
             element={<SourceDetailPage />}
           />
 
-          <Route
-            path="jobs"
-            element={<JobsPage />}
-          />
+          <Route path="jobs" element={<Navigate to="/projects" replace />} />
 
           <Route
             path="jobs/:jobId"

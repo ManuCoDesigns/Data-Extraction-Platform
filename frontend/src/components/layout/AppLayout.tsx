@@ -63,7 +63,6 @@ export function AppLayout() {
         { to: '/sources',  icon: Database,        label: 'Sources',    exact: false, show: true },
         { to: '/',         icon: LayoutDashboard, label: 'Dashboard',  exact: true,  show: true },
         { to: '/projects', icon: FolderKanban,    label: 'Projects',   exact: false, show: true },
-        { to: '/jobs',     icon: Briefcase,       label: 'Jobs',       exact: false, show: canUploadJobs },
         { to: '/schemas',  icon: Layers,          label: 'Schemas',    exact: false, show: canManageSchemas },
       ].filter(n => n.show)
     : [
