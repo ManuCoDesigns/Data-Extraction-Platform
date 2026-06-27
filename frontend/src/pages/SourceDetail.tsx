@@ -327,6 +327,22 @@ export function SourceDetailPage() {
               <Edit3 className="w-3.5 h-3.5" /> Edit Source
             </Button>
           )}
+          {isAdmin && records.length > 0 && (
+            <Button variant="secondary" size="sm"
+              className="!text-orange-600 !border-orange-200 hover:!bg-orange-50"
+              onClick={async () => {
+                if (!window.confirm(`Clear all ${records.length} records from "${source.name}"? This cannot be undone.`)) return
+                try {
+                  const r = await sourcesApi.clearRecords(sourceId!)
+                  toast.success(r.message || 'Records cleared')
+                  load()
+                } catch (err: any) {
+                  toast.error(err?.response?.data?.detail || 'Clear failed')
+                }
+              }}>
+              <Trash2 className="w-3.5 h-3.5" /> Clear Records
+            </Button>
+          )}
           {isExtractor && source.website_url && source.status !== 'approved' && (
             <Button variant="secondary" size="sm" onClick={handleScrape} loading={scraping}>
               <Search className="w-3.5 h-3.5" />

@@ -1038,20 +1038,18 @@ def delete_source(
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    # Query roles directly — avoid lazy-load relationship issues
-    user_roles = {r.role.value for r in db.query(current_user.__class__).get(current_user.id).roles}
+    # Use current_user.roles directly — already loaded by the auth dependency
+    user_roles = {r.role.value for r in current_user.roles}
     is_org_admin = "org_admin" in user_roles
 
     if not is_org_admin:
-        # Check project membership
-        from app.models.all_models import ProjectMember
-        member = db.query(ProjectMember).filter(
-            ProjectMember.project_id == source.project_id,
-            ProjectMember.user_id == current_user.id,
+        from app.models.all_models import ProjectMember as PM
+        member = db.query(PM).filter(
+            PM.project_id == source.project_id,
+            PM.user_id == current_user.id,
         ).first()
-        member_role = member.role.value if member else None
-        if member_role not in ("project_admin", "org_admin"):
-            raise HTTPException(status_code=403, detail="Only project admins can delete sources")
+        if not member or member.role.value not in ("project_admin", "org_admin"):
+            raise HTTPException(status_code=403, detail="Only admins can delete sources")
 
     if source.status == SourceStatus.APPROVED:
         raise HTTPException(status_code=422, detail="Approved sources cannot be deleted. Reset it first.")
@@ -1464,14 +1462,27 @@ def reset_source(
     Use this to recover from bad extractions or test data.
     """
     source = _get_source_or_404(source_id, db)
-    if not _can_access(current_user, source.project):
-        raise HTTPException(status_code=403, detail="Only admins can reset sources")
+
+    # Check admin using current_user.roles (already loaded) — avoid lazy-load on source.project
+    user_roles = {r.role.value for r in current_user.roles}
+    if "org_admin" not in user_roles:
+        from app.models.all_models import ProjectMember as PM
+        member = db.query(PM).filter(PM.project_id == source.project_id, PM.user_id == current_user.id).first()
+        if not member or member.role.value not in ("project_admin", "org_admin"):
+            raise HTTPException(status_code=403, detail="Only admins can reset sources")
 
     if clear_records:
-        db.query(ExtractedRecord).filter(
-            ExtractedRecord.source_id == source_id,
-            ExtractedRecord.deleted_at == None,
-        ).update({"deleted_at": datetime.utcnow()})
+        # ExtractedRecord links to Source through ExtractionJob (no direct source_id)
+        job_ids = [j.id for j in db.query(ExtractionJob).filter(
+            ExtractionJob.source_id == source_id
+        ).all()]
+        if job_ids:
+            db.query(ExtractedRecord).filter(
+                ExtractedRecord.job_id.in_(job_ids)
+            ).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(
+            ExtractionJob.source_id == source_id
+        ).delete(synchronize_session=False)
 
     source.status = SourceStatus.NOT_STARTED
     source.total_records = 0
@@ -1492,6 +1503,56 @@ def reset_source(
         "source_id": source_id,
         "status": source.status,
         "records_cleared": clear_records,
+    }
+
+
+# ─── Admin: Clear all records from a source (keep source, keep status) ────────
+
+@router.delete("/{source_id}/records", status_code=200)
+def clear_source_records(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin-only: Delete ALL records from a source without changing its status.
+    Use this to wipe test data before a real extraction run.
+    """
+    source = _get_source_or_404(source_id, db)
+
+    user_roles = {r.role.value for r in current_user.roles}
+    if "org_admin" not in user_roles:
+        from app.models.all_models import ProjectMember as PM
+        member = db.query(PM).filter(PM.project_id == source.project_id, PM.user_id == current_user.id).first()
+        if not member or member.role.value not in ("project_admin", "org_admin"):
+            raise HTTPException(status_code=403, detail="Only admins can clear records")
+
+    job_ids = [j.id for j in db.query(ExtractionJob).filter(
+        ExtractionJob.source_id == source_id
+    ).all()]
+
+    deleted_records = 0
+    if job_ids:
+        deleted_records = db.query(ExtractedRecord).filter(
+            ExtractedRecord.job_id.in_(job_ids)
+        ).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(
+            ExtractionJob.id.in_(job_ids)
+        ).delete(synchronize_session=False)
+
+    # Reset counts
+    source.total_records = 0
+    source.valid_records = 0
+    source.invalid_records = 0
+    source.approved_records = 0
+    source.web_verified = None
+    source.web_check_summary = None
+    db.commit()
+
+    return {
+        "message": f"Cleared {deleted_records} records from source",
+        "records_deleted": deleted_records,
+        "source_id": source_id,
     }
 
 
