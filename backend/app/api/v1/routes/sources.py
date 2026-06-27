@@ -1032,20 +1032,51 @@ def delete_source(
     current_user: User = Depends(get_current_user),
 ):
     """Delete a source and all its jobs and records. Only admins can do this."""
-    source = _get_source_or_404(source_id, db)
-    if not _can_manage_source(current_user, source):
-        raise HTTPException(status_code=403, detail="Only project admins can delete sources")
+    source = db.query(Source).filter(
+        Source.id == source_id, Source.deleted_at == None
+    ).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    # Query roles directly — avoid lazy-load relationship issues
+    user_roles = {r.role.value for r in db.query(current_user.__class__).get(current_user.id).roles}
+    is_org_admin = "org_admin" in user_roles
+
+    if not is_org_admin:
+        # Check project membership
+        from app.models.all_models import ProjectMember
+        member = db.query(ProjectMember).filter(
+            ProjectMember.project_id == source.project_id,
+            ProjectMember.user_id == current_user.id,
+        ).first()
+        member_role = member.role.value if member else None
+        if member_role not in ("project_admin", "org_admin"):
+            raise HTTPException(status_code=403, detail="Only project admins can delete sources")
+
     if source.status == SourceStatus.APPROVED:
-        raise HTTPException(status_code=422, detail="Approved sources cannot be deleted — they are part of the record.")
+        raise HTTPException(status_code=422, detail="Approved sources cannot be deleted. Reset it first.")
+
+    source_name = source.name
+    source_status = source.status.value
+    project_id = source.project_id
+
+    # Delete all records and jobs first
     job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
     if job_ids:
         db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
         db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
+
+    # Also delete orphaned records linked directly to source_id
+    db.query(ExtractedRecord).filter(
+        ExtractedRecord.source_id == source_id,
+        ExtractedRecord.deleted_at == None
+    ).update({"deleted_at": datetime.utcnow()})
+
     db.delete(source)
     db.add(AuditLog(
-        user_id=current_user.id, project_id=source.project_id,
+        user_id=current_user.id, project_id=project_id,
         action=AuditAction.SOURCE_STATUS_CHANGED,
-        before_value={"name": source.name, "status": source.status.value},
+        before_value={"name": source_name, "status": source_status},
         after_value={"deleted": True},
     ))
     db.commit()

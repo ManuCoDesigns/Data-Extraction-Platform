@@ -116,15 +116,22 @@ def health_db():
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all for unhandled 500 errors — returns the real Python error
-    so it's visible in the browser instead of a bare CORS block."""
+    """Catch-all — returns the real error AND adds CORS headers so the
+    browser sees the actual 500 message instead of a CORS block."""
     import traceback
+    origin = request.headers.get("origin", "*")
     return JSONResponse(
         status_code=500,
         content={
             "detail": str(exc),
             "type": type(exc).__name__,
-            "trace": traceback.format_exc()[-2000:],  # last 2000 chars of traceback
+            "trace": traceback.format_exc()[-2000:],
+        },
+        headers={
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+            "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
         },
     )
 
