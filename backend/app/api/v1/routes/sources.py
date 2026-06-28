@@ -40,29 +40,37 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 
 def _delete_jobs_safely(job_ids: list, db) -> None:
     """
-    Delete extraction jobs and all child rows safely.
+    Delete extraction jobs safely.
 
-    Root cause of repeated failures: SQLAlchemy ORM session events fire
-    DURING the deletion sequence and create new audit_log rows with the
-    job_id we just deleted. Fix:
-      1. db.expunge_all()  — clears all ORM-tracked objects so no events fire
-      2. Delete audit_log LAST — catches any rows added mid-sequence
-      3. Single flush at the end — no intermediate flushes that trigger events
+    The audit_log table has a DB trigger that fires ON DELETE of extraction_jobs
+    and inserts a new audit_log row — so deleting audit_log first never works
+    because the trigger re-creates the row during the job deletion.
+
+    Fix: UPDATE audit_log SET job_id = NULL (job_id is nullable) so no FK
+    constraint exists when we delete the jobs. Even if the trigger creates
+    a new audit_log row, it will have job_id = NULL and won't block deletion.
+    We NULL it out twice — before all deletions and again right before deleting
+    extraction_jobs — to catch any rows created mid-sequence.
     """
     if not job_ids:
         return
 
     from sqlalchemy import text
 
-    # Critical: remove all ORM-tracked objects from the session.
-    # This prevents before_flush / after_bulk_delete event listeners
-    # from creating new child rows during the deletion sequence.
     db.expunge_all()
 
     placeholders = ", ".join(f":id{i}" for i in range(len(job_ids)))
     params = {f"id{i}": jid for i, jid in enumerate(job_ids)}
 
-    # Delete all non-audit child tables first (no intermediate flushes)
+    # Step 1: NULL out audit_log job_id references (job_id is nullable)
+    # This removes the FK dependency without deleting audit history
+    db.execute(
+        text(f"UPDATE audit_log SET job_id = NULL WHERE job_id IN ({placeholders})"),
+        params
+    )
+    db.flush()
+
+    # Step 2: Delete all other child tables
     for table, col in [
         ("submission_batches", "job_id"),
         ("llm_call_log",       "job_id"),
@@ -70,17 +78,25 @@ def _delete_jobs_safely(job_ids: list, db) -> None:
         ("job_state_history",  "job_id"),
         ("job_reviewers",      "job_id"),
     ]:
-        db.execute(text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"), params)
-
-    # Flush once — sends all 5 DELETEs to Postgres as a batch
+        db.execute(
+            text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"),
+            params
+        )
     db.flush()
 
-    # Delete audit_log LAST — catches any rows added mid-sequence by ORM events
-    db.execute(text(f"DELETE FROM audit_log WHERE job_id IN ({placeholders})"), params)
+    # Step 3: NULL audit_log AGAIN — catches any rows the trigger may have
+    # created during the deletions above
+    db.execute(
+        text(f"UPDATE audit_log SET job_id = NULL WHERE job_id IN ({placeholders})"),
+        params
+    )
     db.flush()
 
-    # Now extraction_jobs is safe to delete
-    db.execute(text(f"DELETE FROM extraction_jobs WHERE id IN ({placeholders})"), params)
+    # Step 4: Now safe — no FK references remain
+    db.execute(
+        text(f"DELETE FROM extraction_jobs WHERE id IN ({placeholders})"),
+        params
+    )
     db.flush()
 
 
