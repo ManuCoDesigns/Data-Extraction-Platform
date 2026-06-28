@@ -40,42 +40,47 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 
 def _delete_jobs_safely(job_ids: list, db) -> None:
     """
-    Delete extraction jobs by explicitly clearing every child table first.
-    Does NOT rely on CASCADE constraints — deletes each table directly
-    so this works regardless of what constraints exist in the database.
+    Delete extraction jobs and all child rows safely.
+
+    Root cause of repeated failures: SQLAlchemy ORM session events fire
+    DURING the deletion sequence and create new audit_log rows with the
+    job_id we just deleted. Fix:
+      1. db.expunge_all()  — clears all ORM-tracked objects so no events fire
+      2. Delete audit_log LAST — catches any rows added mid-sequence
+      3. Single flush at the end — no intermediate flushes that trigger events
     """
     if not job_ids:
         return
 
     from sqlalchemy import text
 
+    # Critical: remove all ORM-tracked objects from the session.
+    # This prevents before_flush / after_bulk_delete event listeners
+    # from creating new child rows during the deletion sequence.
+    db.expunge_all()
+
     placeholders = ", ".join(f":id{i}" for i in range(len(job_ids)))
     params = {f"id{i}": jid for i, jid in enumerate(job_ids)}
 
-    # Wipe every table that references extraction_jobs, in order
+    # Delete all non-audit child tables first (no intermediate flushes)
     for table, col in [
-        ("audit_log",          "job_id"),
         ("submission_batches", "job_id"),
         ("llm_call_log",       "job_id"),
         ("extracted_records",  "job_id"),
         ("job_state_history",  "job_id"),
         ("job_reviewers",      "job_id"),
     ]:
-        try:
-            db.execute(
-                text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"),
-                params
-            )
-            db.flush()
-        except Exception:
-            db.rollback()
-            raise
+        db.execute(text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"), params)
 
-    # Now safe — no child rows remain
-    db.execute(
-        text(f"DELETE FROM extraction_jobs WHERE id IN ({placeholders})"),
-        params
-    )
+    # Flush once — sends all 5 DELETEs to Postgres as a batch
+    db.flush()
+
+    # Delete audit_log LAST — catches any rows added mid-sequence by ORM events
+    db.execute(text(f"DELETE FROM audit_log WHERE job_id IN ({placeholders})"), params)
+    db.flush()
+
+    # Now extraction_jobs is safe to delete
+    db.execute(text(f"DELETE FROM extraction_jobs WHERE id IN ({placeholders})"), params)
     db.flush()
 
 
