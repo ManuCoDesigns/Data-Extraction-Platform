@@ -1,210 +1,375 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
-  Clock, Send, TrendingUp, Plus, ArrowRight, Database,
-  Activity, CheckCircle, AlertCircle, Users, BarChart3,
-  FileText, Upload, Eye, RefreshCw, Zap
+  Database, TrendingUp, CheckCircle, AlertCircle,
+  Upload, Eye, Send, ArrowRight, Activity,
+  Clock, Users, BarChart3, RefreshCw, Zap
 } from 'lucide-react'
 import { statsApi, sourcesApi } from '@/api/client'
-import { StatCard, Card, Badge, Spinner, Skeleton, cn, safeFromNow, safeFormat } from '@/components/ui'
+import { Spinner, cn, safeFromNow } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
-import { useCapability } from '@/lib/permissions'
-import { format } from 'date-fns'
-import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Cell
-} from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
 function greeting() {
   const h = new Date().getHours()
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
 
+// Pipeline step config
+const PIPELINE = [
+  { id: 'upload',  label: 'Upload',  icon: '📤', statuses: ['not_started','extracting','needs_fixes'], color: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe' },
+  { id: 'review',  label: 'Review',  icon: '🔍', statuses: ['ready_for_review','in_review','changes_requested','llm_verification'], color: '#7c3aed', bg: '#faf5ff', border: '#c4b5fd' },
+  { id: 'approve', label: 'Approved',icon: '✅', statuses: ['approved'],  color: '#059669', bg: '#ecfdf5', border: '#6ee7b7' },
+]
+
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
   not_started:       { label: 'Not Started',       color: '#94a3b8', bg: '#f1f5f9' },
-  extracting:        { label: 'Extracting',        color: '#3b82f6', bg: '#eff6ff' },
-  needs_fixes:       { label: 'Needs Fixes',        color: '#f59e0b', bg: '#fffbeb' },
-  ready_for_review:  { label: 'Ready for Review',   color: '#6366f1', bg: '#eef2ff' },
+  extracting:        { label: 'Uploading',          color: '#3b82f6', bg: '#eff6ff' },
+  needs_fixes:       { label: 'Schema Errors',      color: '#f59e0b', bg: '#fffbeb' },
+  ready_for_review:  { label: 'Awaiting Review',    color: '#6366f1', bg: '#eef2ff' },
   in_review:         { label: 'In Review',          color: '#a855f7', bg: '#faf5ff' },
-  changes_requested: { label: 'Changes Requested',  color: '#ef4444', bg: '#fef2f2' },
+  changes_requested: { label: 'Corrections Needed', color: '#ef4444', bg: '#fef2f2' },
+  llm_verification:  { label: 'LLM Check Done',     color: '#a855f7', bg: '#faf5ff' },
   approved:          { label: 'Approved',           color: '#10b981', bg: '#ecfdf5' },
 }
 
-// ─── Admin Dashboard ──────────────────────────────────────────────────────────
-function AdminDashboard() {
-  const { user } = useAuthStore()
-  const [summary, setSummary] = useState<any>(null)
-  const [perf, setPerf] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-
-  const load = () =>
-    Promise.all([
-      statsApi.sourcesSummary().then(setSummary),
-      sourcesApi.performanceStats().then(setPerf),
-    ]).finally(() => setLoading(false))
-
-  useEffect(() => { load(); const iv = setInterval(load, 60_000); return () => clearInterval(iv) }, [])
-
-  if (loading) return <DashSkeleton />
-
-  const byStatus = summary?.by_status ?? {}
-  const total = summary?.total ?? 0
-  const approvedCount = byStatus['approved'] ?? 0
-  const inProgressCount = (byStatus['extracting'] ?? 0) + (byStatus['needs_fixes'] ?? 0) + (byStatus['ready_for_review'] ?? 0) + (byStatus['in_review'] ?? 0) + (byStatus['changes_requested'] ?? 0)
-  const notStarted = byStatus['not_started'] ?? 0
-
-  const statusChartData = Object.entries(byStatus)
-    .filter(([, count]) => (count as number) > 0)
-    .map(([status, count]) => ({
-      name: STATUS_META[status]?.label ?? status,
-      value: count as number,
-      fill: STATUS_META[status]?.color ?? '#94a3b8',
-    }))
-
-  const extractors = perf?.extractors ?? []
-  const reviewers = perf?.reviewers ?? []
-
+// ── KPI Card ──────────────────────────────────────────────────────────────────
+function KpiCard({ label, value, sub, icon, color, trend }: {
+  label: string; value: number | string; sub: string
+  icon: React.ReactNode; color: string; trend?: { value: number; label: string }
+}) {
+  const colors: Record<string, { bg: string; text: string; border: string; icon: string }> = {
+    blue:   { bg: '#eff6ff', text: '#2563eb', border: '#bfdbfe', icon: '#2563eb' },
+    green:  { bg: '#ecfdf5', text: '#059669', border: '#6ee7b7', icon: '#059669' },
+    purple: { bg: '#faf5ff', text: '#7c3aed', border: '#c4b5fd', icon: '#7c3aed' },
+    amber:  { bg: '#fffbeb', text: '#d97706', border: '#fcd34d', icon: '#d97706' },
+    red:    { bg: '#fef2f2', text: '#dc2626', border: '#fecaca', icon: '#dc2626' },
+    orange: { bg: '#fff7ed', text: '#ea580c', border: '#fed7aa', icon: '#ea580c' },
+  }
+  const c = colors[color] || colors.blue
   return (
-    <div className="p-8 space-y-8">
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {greeting()}, {user?.full_name.split(' ')[0]} 👋
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">Here's your extraction operation at a glance.</p>
+    <div style={{ background: '#fff', borderRadius: 16, padding: '20px 22px', border: `1px solid ${c.border}`, borderTop: `3px solid ${c.text}`, boxShadow: '0 1px 4px rgba(0,0,0,0.05)', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: -12, right: -12, width: 64, height: 64, borderRadius: '50%', background: c.bg, opacity: 0.7 }} />
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+        <div style={{ width: 40, height: 40, borderRadius: 12, background: c.bg, display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.icon }}>
+          {icon}
         </div>
-        <Link to="/sources">
-          <button className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition shadow-sm">
-            <Database className="w-4 h-4" /> All Sources
-          </button>
-        </Link>
+        {trend && (
+          <span style={{ fontSize: 11, fontWeight: 700, color: trend.value >= 0 ? '#059669' : '#dc2626', background: trend.value >= 0 ? '#ecfdf5' : '#fef2f2', padding: '3px 8px', borderRadius: 20 }}>
+            {trend.value >= 0 ? '↑' : '↓'} {Math.abs(trend.value)} {trend.label}
+          </span>
+        )}
       </div>
+      <p style={{ fontSize: 30, fontWeight: 800, color: '#0f172a', margin: '0 0 4px', lineHeight: 1 }}>{value}</p>
+      <p style={{ fontSize: 12, fontWeight: 600, color: c.text, margin: '0 0 2px' }}>{label}</p>
+      <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>{sub}</p>
+    </div>
+  )
+}
 
-      {/* Top stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Total Sources" value={total} sub="across all projects" icon={<Database className="w-4 h-4" />} color="brand" />
-        <StatCard label="In Progress" value={inProgressCount} sub="extracting or in review" icon={<Activity className="w-4 h-4" />} color="amber" />
-        <StatCard label="Approved" value={approvedCount} sub={`${total > 0 ? Math.round(approvedCount/total*100) : 0}% complete`} icon={<CheckCircle className="w-4 h-4" />} color="green" />
-        <StatCard label="This Week" value={summary?.approved_this_week ?? 0} sub="newly approved" icon={<TrendingUp className="w-4 h-4" />} color="purple" />
+// ── Pipeline Step Card ─────────────────────────────────────────────────────────
+function PipelineStep({ step, count, total, isLast }: { step: typeof PIPELINE[0]; count: number; total: number; isLast: boolean }) {
+  const pct = total > 0 ? Math.round((count / total) * 100) : 0
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', flex: 1 }}>
+      <div style={{ flex: 1, background: '#fff', border: `1px solid ${step.border}`, borderRadius: 14, padding: '16px 18px', borderTop: `3px solid ${step.color}` }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 20 }}>{step.icon}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: step.color, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{step.label}</span>
+          </div>
+          <span style={{ fontSize: 26, fontWeight: 800, color: '#0f172a' }}>{count}</span>
+        </div>
+        <div style={{ background: '#f1f5f9', borderRadius: 99, height: 6, overflow: 'hidden' }}>
+          <div style={{ background: step.color, height: '100%', borderRadius: 99, width: `${pct}%`, transition: 'width 0.8s ease' }} />
+        </div>
+        <p style={{ fontSize: 10, color: '#94a3b8', margin: '6px 0 0' }}>{pct}% of total sources</p>
       </div>
-
-      {/* Split view: Sources chart + Team performance */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Sources by status */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">Sources by Status</h2>
-              <p className="text-xs text-gray-400 mt-0.5">{total} total across all projects</p>
-            </div>
-            <Link to="/sources" className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1">
-              View all <ArrowRight className="w-3 h-3" />
-            </Link>
-          </div>
-          {statusChartData.length === 0 ? (
-            <div className="py-8 text-center text-gray-400 text-sm">No sources yet</div>
-          ) : (
-            <>
-              <ResponsiveContainer width="100%" height={180}>
-                <BarChart data={statusChartData} barSize={28} margin={{ top: 4, bottom: 4 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval={0} />
-                  <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                  <Tooltip contentStyle={{ border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 12 }} cursor={{ fill: '#f8fafc' }} />
-                  <Bar dataKey="value" radius={[6, 6, 0, 0]} name="Sources">
-                    {statusChartData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
-                  </Bar>
-                </BarChart>
-              </ResponsiveContainer>
-              <div className="grid grid-cols-2 gap-2 mt-4">
-                {statusChartData.map(d => (
-                  <div key={d.name} className="flex items-center justify-between px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: STATUS_META[Object.keys(STATUS_META).find(k => STATUS_META[k].label === d.name) ?? '']?.bg ?? '#f8fafc' }}>
-                    <span className="text-gray-600 truncate">{d.name}</span>
-                    <span className="font-bold ml-2" style={{ color: d.fill }}>{d.value}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </Card>
-
-        {/* Team performance */}
-        <Card className="p-6">
-          <div className="flex items-center justify-between mb-5">
-            <div>
-              <h2 className="text-sm font-semibold text-gray-900">Team Performance</h2>
-              <p className="text-xs text-gray-400 mt-0.5">Sources assigned vs completed</p>
-            </div>
-          </div>
-          {extractors.length === 0 && reviewers.length === 0 ? (
-            <div className="py-8 text-center text-gray-400 text-sm">Assign sources to team members to see performance</div>
-          ) : (
-            <div className="space-y-5">
-              {extractors.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Extractors</p>
-                  <div className="space-y-2.5">
-                    {extractors.map((e: any) => (
-                      <PerfRow key={e.user_id} name={e.name} assigned={e.sources_count} completed={e.approved_count} avgHours={e.avg_hours_per_source} role="extractor" />
-                    ))}
-                  </div>
-                </div>
-              )}
-              {reviewers.length > 0 && (
-                <div>
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Reviewers</p>
-                  <div className="space-y-2.5">
-                    {reviewers.map((r: any) => (
-                      <PerfRow key={r.user_id} name={r.name} assigned={r.sources_count} completed={r.approved_count} avgHours={r.avg_hours_per_source} role="reviewer" />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-        </Card>
-      </div>
-
-      {/* Recent activity */}
-      {(summary?.recent ?? []).length > 0 && (
-        <Card>
-          <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-900">Recent Activity</h2>
-            <Link to="/sources" className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1">
-              View all <ArrowRight className="w-3 h-3" />
-            </Link>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {(summary.recent as any[]).map((s: any) => (
-              <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
-                className="flex items-center justify-between px-6 py-3.5 hover:bg-gray-50/60 transition group">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                    style={{ backgroundColor: STATUS_META[s.status]?.bg ?? '#f8fafc' }}>
-                    <Database className="w-4 h-4" style={{ color: STATUS_META[s.status]?.color ?? '#94a3b8' }} />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900 group-hover:text-brand-700 truncate">{s.name}</p>
-                    <p className="text-xs text-gray-400">{safeFromNow(s.updated_at)}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-3 shrink-0 ml-4">
-                  <span className="text-xs text-gray-500 hidden sm:block">
-                    {s.valid_records}/{s.total_records} valid
-                  </span>
-                  <StatusPill status={s.status} />
-                </div>
-              </Link>
-            ))}
-          </div>
-        </Card>
+      {!isLast && (
+        <div style={{ padding: '0 8px', color: '#cbd5e1' }}>
+          <ArrowRight style={{ width: 16, height: 16 }} />
+        </div>
       )}
     </div>
   )
 }
 
-// ─── Extractor Dashboard ──────────────────────────────────────────────────────
+// ── Team Performance Row ───────────────────────────────────────────────────────
+function PerfRow({ name, assigned, completed, avgHours, role }: {
+  name: string; assigned: number; completed: number; avgHours: number | null; role: 'extractor' | 'reviewer'
+}) {
+  const pct = assigned > 0 ? Math.round((completed / assigned) * 100) : 0
+  const color = role === 'extractor' ? '#059669' : '#7c3aed'
+  const bg = role === 'extractor' ? '#ecfdf5' : '#faf5ff'
+  const initial = name?.charAt(0)?.toUpperCase() || '?'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 0', borderBottom: '1px solid #f8fafc' }}>
+      <div style={{ width: 34, height: 34, borderRadius: '50%', background: color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+        {initial}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 5 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{name}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 8 }}>
+            <span style={{ fontSize: 12, color: '#64748b' }}>{completed}/{assigned} sources</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color, background: bg, padding: '2px 8px', borderRadius: 20 }}>{pct}%</span>
+          </div>
+        </div>
+        <div style={{ background: '#f1f5f9', borderRadius: 99, height: 6, overflow: 'hidden' }}>
+          <div style={{ background: color, height: '100%', borderRadius: 99, width: `${pct}%`, transition: 'width 0.8s ease' }} />
+        </div>
+        {avgHours != null && (
+          <p style={{ fontSize: 10, color: '#94a3b8', margin: '4px 0 0' }}>avg {avgHours}h per source</p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ── Status pill ────────────────────────────────────────────────────────────────
+function StatusPill({ status }: { status: string }) {
+  const m = STATUS_META[status]
+  if (!m) return null
+  return (
+    <span style={{ fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 20, background: m.bg, color: m.color, whiteSpace: 'nowrap' }}>
+      {m.label}
+    </span>
+  )
+}
+
+// ── Skeleton ─────────────────────────────────────────────────────────────────
+function Skeleton() {
+  return (
+    <div style={{ padding: 32, display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div style={{ height: 32, width: 280, background: '#e2e8f0', borderRadius: 8, animation: 'pulse 2s infinite' }} />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16 }}>
+        {[0,1,2,3].map(i => <div key={i} style={{ height: 120, background: '#e2e8f0', borderRadius: 16 }} />)}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        <div style={{ height: 280, background: '#e2e8f0', borderRadius: 16 }} />
+        <div style={{ height: 280, background: '#e2e8f0', borderRadius: 16 }} />
+      </div>
+    </div>
+  )
+}
+
+// ── Admin Dashboard ────────────────────────────────────────────────────────────
+function AdminDashboard() {
+  const { user } = useAuthStore()
+  const [summary, setSummary] = useState<any>(null)
+  const [perf, setPerf]       = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [lastRefresh, setLastRefresh] = useState(new Date())
+
+  const load = useCallback(() =>
+    Promise.all([
+      statsApi.sourcesSummary().then(setSummary),
+      sourcesApi.performanceStats().then(setPerf),
+    ]).then(() => setLastRefresh(new Date()))
+     .finally(() => setLoading(false)), [])
+
+  useEffect(() => {
+    load()
+    const iv = setInterval(load, 30_000)
+    window.addEventListener('focus', load)
+    return () => { clearInterval(iv); window.removeEventListener('focus', load) }
+  }, [load])
+
+  if (loading) return <Skeleton />
+
+  const byStatus = summary?.by_status ?? {}
+  const total = summary?.total ?? 0
+  const approvedCount = byStatus['approved'] ?? 0
+  const inProgressCount = ['extracting','needs_fixes','ready_for_review','in_review','changes_requested'].reduce((s, k) => s + (byStatus[k] ?? 0), 0)
+  const notStarted = byStatus['not_started'] ?? 0
+
+  const pipelineCounts = PIPELINE.map(step => ({
+    ...step,
+    count: step.statuses.reduce((s, k) => s + (byStatus[k] ?? 0), 0)
+  }))
+
+  const chartData = Object.entries(byStatus)
+    .filter(([, v]) => (v as number) > 0)
+    .map(([status, count]) => ({
+      name: STATUS_META[status]?.label?.replace(' ', '\n') ?? status,
+      value: count as number,
+      color: STATUS_META[status]?.color ?? '#94a3b8',
+    }))
+
+  const extractors = perf?.extractors ?? []
+  const reviewers  = perf?.reviewers  ?? []
+
+  return (
+    <div style={{ padding: '28px 32px', maxWidth: 1280, margin: '0 auto' }}>
+
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+            {greeting()}, {user?.full_name?.split(' ')[0]} 👋
+          </h1>
+          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
+            Here's your extraction operation at a glance · Last updated {lastRefresh.toLocaleTimeString()}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={load}
+            style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <RefreshCw style={{ width: 14, height: 14 }} /> Refresh
+          </button>
+          <Link to="/sources" style={{ padding: '8px 16px', background: 'linear-gradient(135deg, #2563eb, #4f46e5)', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Database style={{ width: 14, height: 14 }} /> All Sources
+          </Link>
+        </div>
+      </div>
+
+      {/* KPI Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+        <KpiCard label="Total Sources" value={total} sub="across all projects" icon={<Database style={{ width: 18, height: 18 }} />} color="blue" />
+        <KpiCard label="In Progress" value={inProgressCount} sub="uploading or in review" icon={<Activity style={{ width: 18, height: 18 }} />} color="purple" />
+        <KpiCard label="Approved" value={approvedCount} sub={`${total > 0 ? Math.round(approvedCount/total*100) : 0}% complete`} icon={<CheckCircle style={{ width: 18, height: 18 }} />} color="green" trend={{ value: summary?.approved_this_week ?? 0, label: 'this week' }} />
+        <KpiCard label="Not Started" value={notStarted} sub="waiting for extraction" icon={<Clock style={{ width: 18, height: 18 }} />} color="amber" />
+      </div>
+
+      {/* Pipeline funnel */}
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '20px 22px', marginBottom: 24, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <div>
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Extraction Pipeline</h2>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>Sources moving through the 4-step workflow</p>
+          </div>
+          <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            View board <ArrowRight style={{ width: 12, height: 12 }} />
+          </Link>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+          {pipelineCounts.map((step, i) => (
+            <PipelineStep key={step.id} step={step} count={step.count} total={total} isLast={i === pipelineCounts.length - 1} />
+          ))}
+        </div>
+      </div>
+
+      {/* Charts + Team */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+
+        {/* Bar chart by status */}
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '20px 22px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>Sources by Status</h2>
+          <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 16px' }}>{total} sources across all projects</p>
+          {chartData.length === 0 ? (
+            <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 13 }}>
+              No sources yet
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={200}>
+              <BarChart data={chartData} barSize={24} margin={{ top: 4, right: 4, bottom: 4, left: -10 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
+                <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval={0} />
+                <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={{ border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} cursor={{ fill: '#f8fafc' }} />
+                <Bar dataKey="value" radius={[6,6,0,0]} name="Sources">
+                  {chartData.map((d, i) => <Cell key={i} fill={d.color} />)}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          )}
+
+          {/* Legend */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 12 }}>
+            {chartData.map(d => (
+              <div key={d.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 10px', borderRadius: 8, background: '#f8fafc' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: 2, background: d.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 11, color: '#64748b' }}>{d.name}</span>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 700, color: d.color }}>{d.value}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Team performance */}
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '20px 22px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>Team Performance</h2>
+          <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 16px' }}>Sources assigned vs completed per member</p>
+
+          {extractors.length === 0 && reviewers.length === 0 ? (
+            <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#94a3b8' }}>
+              <Users style={{ width: 32, height: 32, opacity: 0.3 }} />
+              <p style={{ fontSize: 13, margin: 0 }}>Assign sources to see performance data</p>
+            </div>
+          ) : (
+            <div style={{ maxHeight: 280, overflowY: 'auto' }}>
+              {extractors.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#059669' }} />
+                    <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>Extractors</p>
+                  </div>
+                  {extractors.map((e: any) => (
+                    <PerfRow key={e.user_id} name={e.name} assigned={e.sources_count} completed={e.approved_count} avgHours={e.avg_hours_per_source} role="extractor" />
+                  ))}
+                </div>
+              )}
+              {reviewers.length > 0 && (
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#7c3aed' }} />
+                    <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>Reviewers</p>
+                  </div>
+                  {reviewers.map((r: any) => (
+                    <PerfRow key={r.user_id} name={r.name} assigned={r.sources_count} completed={r.approved_count} avgHours={r.avg_hours_per_source} role="reviewer" />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Recent Activity */}
+      {(summary?.recent ?? []).length > 0 && (
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Recent Activity</h2>
+              <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>Latest source updates across all projects</p>
+            </div>
+            <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+              All sources <ArrowRight style={{ width: 12, height: 12 }} />
+            </Link>
+          </div>
+          {(summary.recent as any[]).map((s: any, i: number) => (
+            <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 22px', textDecoration: 'none', borderBottom: i < summary.recent.length - 1 ? '1px solid #f8fafc' : 'none', transition: 'background 0.1s' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: STATUS_META[s.status]?.bg ?? '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <Database style={{ width: 16, height: 16, color: STATUS_META[s.status]?.color ?? '#94a3b8' }} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>{safeFromNow(s.updated_at)}</span>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>·</span>
+                    <span style={{ fontSize: 11, color: s.invalid_records > 0 ? '#f59e0b' : '#94a3b8' }}>
+                      {s.valid_records}/{s.total_records} valid{s.invalid_records > 0 ? ` · ${s.invalid_records} errors` : ''}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <StatusPill status={s.status} />
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Extractor Dashboard ────────────────────────────────────────────────────────
 function ExtractorDashboard() {
   const { user } = useAuthStore()
   const [summary, setSummary] = useState<any>(null)
@@ -212,90 +377,79 @@ function ExtractorDashboard() {
 
   useEffect(() => {
     statsApi.sourcesSummary().then(setSummary).finally(() => setLoading(false))
+    const iv = setInterval(() => statsApi.sourcesSummary().then(setSummary), 30_000)
+    return () => clearInterval(iv)
   }, [])
 
-  if (loading) return <DashSkeleton />
+  if (loading) return <Skeleton />
 
-  const myExtracting: any[] = summary?.my_extracting ?? []
-  const needsAction = myExtracting.filter((s: any) => ['needs_fixes', 'changes_requested'].includes(s.status))
-  const inProgress = myExtracting.filter((s: any) => s.status === 'extracting')
+  const mine: any[] = summary?.my_extracting ?? []
+  const needsAction = mine.filter((s: any) => ['needs_fixes','changes_requested'].includes(s.status))
+  const inProgress  = mine.filter((s: any) => s.status === 'extracting')
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {greeting()}, {user?.full_name.split(' ')[0]} 👋
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">Your extraction tasks for today.</p>
-        </div>
-        <Link to="/sources">
-          <button className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition shadow-sm">
-            <Database className="w-4 h-4" /> My Sources
-          </button>
-        </Link>
+    <div style={{ padding: '28px 32px', maxWidth: 1000, margin: '0 auto' }}>
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+          {greeting()}, {user?.full_name?.split(' ')[0]} 👋
+        </h1>
+        <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>Your extraction tasks for today.</p>
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard label="Assigned to Me" value={myExtracting.length} sub="total sources" icon={<Upload className="w-4 h-4" />} color="brand" />
-        <StatCard label="Needs Action" value={needsAction.length} sub="errors to fix" icon={<AlertCircle className="w-4 h-4" />} color="red" />
-        <StatCard label="In Progress" value={inProgress.length} sub="actively extracting" icon={<RefreshCw className="w-4 h-4" />} color="amber" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+        <KpiCard label="Assigned to Me" value={mine.length} sub="total sources" icon={<Upload style={{ width: 18, height: 18 }} />} color="blue" />
+        <KpiCard label="Needs Attention" value={needsAction.length} sub="errors to fix" icon={<AlertCircle style={{ width: 18, height: 18 }} />} color="red" />
+        <KpiCard label="In Progress" value={inProgress.length} sub="actively extracting" icon={<Activity style={{ width: 18, height: 18 }} />} color="amber" />
       </div>
 
       {needsAction.length > 0 && (
-        <Card className="border-red-200">
-          <div className="px-6 py-4 border-b border-red-100 flex items-center gap-2 bg-red-50/50 rounded-t-2xl">
-            <AlertCircle className="w-4 h-4 text-red-500" />
-            <h2 className="text-sm font-semibold text-red-700">Needs Your Attention ({needsAction.length})</h2>
+        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid #fecaca', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <AlertCircle style={{ width: 16, height: 16, color: '#ef4444' }} />
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: '#dc2626', margin: 0 }}>Needs Your Attention ({needsAction.length})</h3>
           </div>
-          <div className="divide-y divide-gray-50">
-            {needsAction.map((s: any) => (
-              <SourceRow key={s.id} source={s} />
-            ))}
-          </div>
-        </Card>
-      )}
-
-      <Card>
-        <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">All My Sources</h2>
-          <Link to="/sources" className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1">
-            Full board <ArrowRight className="w-3 h-3" />
-          </Link>
+          {needsAction.map((s: any, i: number) => (
+            <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', textDecoration: 'none', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.5)', borderBottom: i < needsAction.length - 1 ? '1px solid #fee2e2' : 'none' }}>
+              <div>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+                <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.invalid_records} schema errors · {safeFromNow(s.updated_at)}</p>
+              </div>
+              <StatusPill status={s.status} />
+            </Link>
+          ))}
         </div>
-        {myExtracting.length === 0 ? (
-          <div className="p-12 text-center">
-            <Database className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-            <p className="text-sm font-medium text-gray-700">No sources assigned yet</p>
-            <p className="text-xs text-gray-400 mt-1">An admin will assign you to a source when there's data to extract.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {myExtracting.map((s: any) => <SourceRow key={s.id} source={s} />)}
-          </div>
-        )}
-      </Card>
-
-      {/* Quick guide for new extractors */}
-      {myExtracting.length === 0 && (
-        <Card className="p-6 bg-gradient-to-br from-brand-50 to-indigo-50 border-brand-100">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <Zap className="w-4 h-4 text-brand-600" /> How extraction works
-          </h3>
-          <ol className="space-y-2 text-sm text-gray-600">
-            <li><span className="font-medium text-gray-800">1. Get assigned</span> — an admin adds you to a source with a schema and source website</li>
-            <li><span className="font-medium text-gray-800">2. Extract</span> — pull data from the website however you like (script, manual, tool)</li>
-            <li><span className="font-medium text-gray-800">3. Upload</span> — drop your CSV, Excel, JSON, or PDF directly into the source</li>
-            <li><span className="font-medium text-gray-800">4. Fix errors</span> — the tool validates each row; fix any that don't match the schema</li>
-            <li><span className="font-medium text-gray-800">5. Hand off</span> — once all rows pass validation, it moves to a reviewer automatically</li>
-          </ol>
-        </Card>
       )}
+
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>All My Sources</h3>
+          <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>Full board →</Link>
+        </div>
+        {mine.length === 0 ? (
+          <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>
+            <Database style={{ width: 40, height: 40, margin: '0 auto 12px', opacity: 0.2 }} />
+            <p style={{ fontSize: 13, fontWeight: 600, color: '#64748b', margin: 0 }}>No sources assigned yet</p>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0' }}>An admin will assign you when there's data to extract.</p>
+          </div>
+        ) : mine.map((s: any, i: number) => (
+          <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 20px', textDecoration: 'none', borderBottom: i < mine.length - 1 ? '1px solid #f8fafc' : 'none' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+              <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.valid_records}/{s.total_records} valid · {safeFromNow(s.updated_at)}</p>
+            </div>
+            <StatusPill status={s.status} />
+          </Link>
+        ))}
+      </div>
     </div>
   )
 }
 
-// ─── Reviewer Dashboard ───────────────────────────────────────────────────────
+// ── Reviewer Dashboard ────────────────────────────────────────────────────────
 function ReviewerDashboard() {
   const { user } = useAuthStore()
   const [summary, setSummary] = useState<any>(null)
@@ -303,168 +457,81 @@ function ReviewerDashboard() {
 
   useEffect(() => {
     statsApi.sourcesSummary().then(setSummary).finally(() => setLoading(false))
+    const iv = setInterval(() => statsApi.sourcesSummary().then(setSummary), 30_000)
+    return () => clearInterval(iv)
   }, [])
 
-  if (loading) return <DashSkeleton />
-
-  const myReviewing: any[] = summary?.my_reviewing ?? []
-  const readyCount = myReviewing.filter((s: any) => s.status === 'ready_for_review').length
-  const inReviewCount = myReviewing.filter((s: any) => s.status === 'in_review').length
+  if (loading) return <Skeleton />
+  const mine: any[] = summary?.my_reviewing ?? []
+  const ready = mine.filter((s: any) => s.status === 'ready_for_review')
 
   return (
-    <div className="p-8 space-y-8">
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">
-            {greeting()}, {user?.full_name.split(' ')[0]} 👋
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">Sources waiting for your review.</p>
+    <div style={{ padding: '28px 32px', maxWidth: 1000, margin: '0 auto' }}>
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+          {greeting()}, {user?.full_name?.split(' ')[0]} 👋
+        </h1>
+        <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>Sources waiting for your review.</p>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
+        <KpiCard label="Ready to Review" value={ready.length} sub="waiting for you" icon={<Eye style={{ width: 18, height: 18 }} />} color="purple" />
+        <KpiCard label="In Review" value={mine.filter((s: any) => s.status === 'in_review').length} sub="you've started" icon={<Activity style={{ width: 18, height: 18 }} />} color="blue" />
+        <KpiCard label="Total Assigned" value={mine.length} sub="all review sources" icon={<Database style={{ width: 18, height: 18 }} />} color="green" />
+      </div>
+
+      {ready.length > 0 && (
+        <div style={{ background: '#faf5ff', border: '1px solid #c4b5fd', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid #c4b5fd', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Eye style={{ width: 16, height: 16, color: '#7c3aed' }} />
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', margin: 0 }}>Ready for Your Review ({ready.length})</h3>
+          </div>
+          {ready.map((s: any, i: number) => (
+            <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', textDecoration: 'none', borderBottom: i < ready.length - 1 ? '1px solid #ede9fe' : 'none' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.6)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+              <div>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+                <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.total_records} records · {safeFromNow(s.updated_at)}</p>
+              </div>
+              <StatusPill status={s.status} />
+            </Link>
+          ))}
         </div>
-        <Link to="/sources">
-          <button className="flex items-center gap-2 px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-xl hover:bg-brand-700 transition shadow-sm">
-            <Eye className="w-4 h-4" /> Review Queue
-          </button>
-        </Link>
-      </div>
-
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-        <StatCard label="Ready to Review" value={readyCount} sub="waiting for you" icon={<Eye className="w-4 h-4" />} color="brand" />
-        <StatCard label="In Review" value={inReviewCount} sub="you've started" icon={<Activity className="w-4 h-4" />} color="purple" />
-        <StatCard label="Total Assigned" value={myReviewing.length} sub="all review sources" icon={<Database className="w-4 h-4" />} color="brand" />
-      </div>
-
-      {readyCount > 0 && (
-        <Card className="border-indigo-200">
-          <div className="px-6 py-4 border-b border-indigo-100 bg-indigo-50/40 rounded-t-2xl flex items-center gap-2">
-            <Eye className="w-4 h-4 text-indigo-600" />
-            <h2 className="text-sm font-semibold text-indigo-700">Ready for Your Review ({readyCount})</h2>
-          </div>
-          <div className="divide-y divide-gray-50">
-            {myReviewing.filter((s: any) => s.status === 'ready_for_review').map((s: any) => <SourceRow key={s.id} source={s} />)}
-          </div>
-        </Card>
       )}
 
-      <Card>
-        <div className="px-6 py-4 border-b border-gray-50 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-gray-900">All Review Sources</h2>
-          <Link to="/sources" className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1">
-            Full board <ArrowRight className="w-3 h-3" />
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>All Review Sources</h3>
+          <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>Full board →</Link>
+        </div>
+        {mine.length === 0 ? (
+          <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>
+            <Eye style={{ width: 40, height: 40, margin: '0 auto 12px', opacity: 0.2 }} />
+            <p style={{ fontSize: 13, fontWeight: 600, color: '#64748b', margin: 0 }}>No sources assigned for review</p>
+          </div>
+        ) : mine.map((s: any, i: number) => (
+          <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 20px', textDecoration: 'none', borderBottom: i < mine.length - 1 ? '1px solid #f8fafc' : 'none' }}
+            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+            <div>
+              <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+              <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.approved_records}/{s.total_records} approved · {safeFromNow(s.updated_at)}</p>
+            </div>
+            <StatusPill status={s.status} />
           </Link>
-        </div>
-        {myReviewing.length === 0 ? (
-          <div className="p-12 text-center">
-            <Eye className="w-10 h-10 text-gray-200 mx-auto mb-3" />
-            <p className="text-sm font-medium text-gray-700">No sources assigned for review yet</p>
-            <p className="text-xs text-gray-400 mt-1">You'll be notified when a source is ready for your review.</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-gray-50">
-            {myReviewing.map((s: any) => <SourceRow key={s.id} source={s} />)}
-          </div>
-        )}
-      </Card>
-
-      {myReviewing.length === 0 && (
-        <Card className="p-6 bg-gradient-to-br from-purple-50 to-indigo-50 border-purple-100">
-          <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-2">
-            <Eye className="w-4 h-4 text-purple-600" /> Your review process
-          </h3>
-          <ol className="space-y-2 text-sm text-gray-600">
-            <li><span className="font-medium text-gray-800">1. Source arrives</span> — extractor finishes uploading and fixing validation errors</li>
-            <li><span className="font-medium text-gray-800">2. Open each record</span> — check extracted values against the source website</li>
-            <li><span className="font-medium text-gray-800">3. Approve or send back</span> — fix it yourself or return it to the extractor with a note</li>
-            <li><span className="font-medium text-gray-800">4. Approve all</span> — once every record is verified, mark the whole source as approved</li>
-          </ol>
-        </Card>
-      )}
+        ))}
+      </div>
     </div>
   )
 }
 
-// ─── Shared sub-components ────────────────────────────────────────────────────
-
-function StatusPill({ status }: { status: string }) {
-  const meta = STATUS_META[status]
-  if (!meta) return null
-  return (
-    <span className="text-xs font-medium px-2 py-0.5 rounded-full"
-      style={{ backgroundColor: meta.bg, color: meta.color }}>
-      {meta.label}
-    </span>
-  )
-}
-
-function SourceRow({ source }: { source: any }) {
-  return (
-    <Link to={`/projects/${source.project_id}/sources/${source.id}`}
-      className="flex items-center justify-between px-6 py-4 hover:bg-gray-50/60 transition group">
-      <div className="flex items-center gap-3 min-w-0">
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-          style={{ backgroundColor: STATUS_META[source.status]?.bg ?? '#f8fafc' }}>
-          <Database className="w-4 h-4" style={{ color: STATUS_META[source.status]?.color ?? '#94a3b8' }} />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-gray-900 group-hover:text-brand-700 truncate">{source.name}</p>
-          <p className="text-xs text-gray-400 mt-0.5">
-            {source.valid_records}/{source.total_records} valid
-            {source.invalid_records > 0 && <span className="text-amber-500 ml-1">· {source.invalid_records} need fixes</span>}
-          </p>
-        </div>
-      </div>
-      <div className="flex items-center gap-3 shrink-0 ml-4">
-        <StatusPill status={source.status} />
-        <ArrowRight className="w-3.5 h-3.5 text-gray-300 group-hover:text-brand-500" />
-      </div>
-    </Link>
-  )
-}
-
-function PerfRow({ name, assigned, completed, avgHours, role }: {
-  name: string; assigned: number; completed: number; avgHours: number | null; role: string
-}) {
-  const pct = assigned > 0 ? Math.round(completed / assigned * 100) : 0
-  return (
-    <div className="flex items-center gap-3">
-      <div className={cn(
-        'w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0',
-        role === 'extractor' ? 'bg-emerald-500' : 'bg-purple-500'
-      )}>
-        {name.charAt(0).toUpperCase()}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs font-medium text-gray-800 truncate">{name}</span>
-          <span className="text-xs text-gray-400 shrink-0 ml-2">{completed}/{assigned}</span>
-        </div>
-        <div className="w-full bg-gray-100 rounded-full h-1.5">
-          <div className={cn('h-1.5 rounded-full transition-all duration-700', role === 'extractor' ? 'bg-emerald-500' : 'bg-purple-500')}
-            style={{ width: `${pct}%` }} />
-        </div>
-      </div>
-      <span className="text-xs text-gray-400 shrink-0 w-12 text-right">
-        {avgHours != null ? `${avgHours}h avg` : '—'}
-      </span>
-    </div>
-  )
-}
-
-function DashSkeleton() {
-  return (
-    <div className="p-8 space-y-6">
-      <Skeleton className="h-8 w-64" />
-      <div className="grid grid-cols-4 gap-4">{[1, 2, 3, 4].map(i => <Skeleton key={i} className="h-28" />)}</div>
-      <div className="grid grid-cols-2 gap-6"><Skeleton className="h-64" /><Skeleton className="h-64" /></div>
-      <Skeleton className="h-48" />
-    </div>
-  )
-}
-
-// ─── Smart router: picks the right dashboard based on role ────────────────────
+// ── Router ─────────────────────────────────────────────────────────────────────
 export function DashboardPage() {
   const { user } = useAuthStore()
   if (!user) return null
-
   const roles = new Set(user.roles)
   if (roles.has('org_admin') || roles.has('project_admin') || roles.has('qa_lead')) return <AdminDashboard />
   if (roles.has('reviewer')) return <ReviewerDashboard />

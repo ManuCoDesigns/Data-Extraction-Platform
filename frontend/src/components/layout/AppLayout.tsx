@@ -17,12 +17,13 @@ export function AppLayout() {
   const [notifications, setNotifications] = useState<Notification[]>([])
   const [showNotif, setShowNotif]         = useState(false)
   const [collapsed, setCollapsed]         = useState(false)
+  const [showProfile, setShowProfile]       = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!showNotif) return
     const handler = (e: MouseEvent) => {
-      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setShowNotif(false)
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) { setShowNotif(false); setShowProfile(false) }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
@@ -235,52 +236,100 @@ export function AppLayout() {
             <span style={{ fontWeight: 700, color: '#1e293b' }}>Xtrium</span>
           </div>
 
-          {/* Right side: notifications + user */}
+          {/* Right side: notifications + profile */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }} ref={notifRef}>
+
             {/* Bell */}
-            <button onClick={() => setShowNotif(v => !v)}
-              style={{ width: 36, height: 36, borderRadius: 10, border: '1px solid #e2e8f0', background: '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', color: '#64748b' }}>
-              <Bell style={{ width: 16, height: 16 }} />
-              {unread > 0 && (
-                <span style={{ position: 'absolute', top: 6, right: 6, width: 8, height: 8, background: '#ef4444', borderRadius: '50%', border: '2px solid #fff' }} />
-              )}
-            </button>
-
-            {/* Notification panel */}
-            {showNotif && (
-              <div style={{
-                position: 'absolute', top: 60, right: 24, width: 320, background: '#fff',
-                border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
-                zIndex: 9999, overflow: 'hidden',
-              }}>
-                <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: 0 }}>Notifications</p>
-                  {unread > 0 && <span style={{ fontSize: 10, fontWeight: 700, background: '#ef4444', color: '#fff', padding: '2px 7px', borderRadius: 20 }}>{unread} new</span>}
-                </div>
-                {notifications.length === 0 ? (
-                  <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>All caught up ✓</div>
-                ) : (
-                  <div style={{ maxHeight: 340, overflowY: 'auto' }}>
-                    {notifications.slice(0, 10).map(n => (
-                      <div key={n.id} style={{ padding: '12px 16px', borderBottom: '1px solid #f8fafc', background: n.is_read ? '#fff' : '#f0f9ff' }}>
-                        <p style={{ fontSize: 12, fontWeight: n.is_read ? 400 : 600, color: '#1e293b', margin: '0 0 2px' }}>{n.title}</p>
-                        <p style={{ fontSize: 11, color: '#64748b', margin: 0 }}>{n.body}</p>
-                      </div>
-                    ))}
-                  </div>
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => { setShowNotif(v => !v); setShowProfile(false) }}
+                style={{ width: 36, height: 36, borderRadius: 10, border: '1px solid #e2e8f0', background: showNotif ? '#eff6ff' : '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: showNotif ? '#2563eb' : '#64748b', transition: 'all 0.15s' }}>
+                <Bell style={{ width: 16, height: 16 }} />
+                {unread > 0 && (
+                  <span style={{ position: 'absolute', top: 6, right: 6, width: 8, height: 8, background: '#ef4444', borderRadius: '50%', border: '2px solid #fff' }} />
                 )}
-              </div>
-            )}
+              </button>
 
-            {/* Avatar */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 12px', background: '#f8fafc', borderRadius: 10, border: '1px solid #f1f5f9', cursor: 'pointer' }}>
-              <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#fff' }}>
-                {initial}
-              </div>
-              <div>
-                <p style={{ fontSize: 12, fontWeight: 600, color: '#1e293b', margin: 0, lineHeight: 1.2 }}>{user.full_name}</p>
-                <p style={{ fontSize: 10, color: '#94a3b8', margin: 0 }}>{roleLabel}</p>
-              </div>
+              {showNotif && (
+                <div style={{ position: 'absolute', top: 44, right: 0, width: 340, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 8px 32px rgba(0,0,0,0.12)', zIndex: 9999, overflow: 'hidden' }}>
+                  <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: 0 }}>Notifications</p>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      {unread > 0 && <span style={{ fontSize: 10, fontWeight: 700, background: '#ef4444', color: '#fff', padding: '2px 7px', borderRadius: 20 }}>{unread} new</span>}
+                      {unread > 0 && (
+                        <button onClick={() => notificationsApi.markAllRead().then(() => notificationsApi.list().then(setNotifications))}
+                          style={{ fontSize: 10, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, padding: 0 }}>
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {notifications.length === 0 ? (
+                    <div style={{ padding: 32, textAlign: 'center' }}>
+                      <Bell style={{ width: 32, height: 32, color: '#e2e8f0', margin: '0 auto 8px', display: 'block' }} />
+                      <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>All caught up ✓</p>
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: 360, overflowY: 'auto' }}>
+                      {notifications.map(n => (
+                        <div key={n.id}
+                          onClick={() => !n.is_read && notificationsApi.markRead(n.id).then(() => notificationsApi.list().then(setNotifications))}
+                          style={{ padding: '12px 16px', borderBottom: '1px solid #f8fafc', background: n.is_read ? '#fff' : '#f0f9ff', cursor: n.is_read ? 'default' : 'pointer', transition: 'background 0.1s' }}>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                            {!n.is_read && <div style={{ width: 6, height: 6, background: '#3b82f6', borderRadius: '50%', marginTop: 5, flexShrink: 0 }} />}
+                            <div style={{ flex: 1, paddingLeft: n.is_read ? 16 : 0 }}>
+                              <p style={{ fontSize: 12, fontWeight: n.is_read ? 500 : 700, color: '#1e293b', margin: '0 0 2px' }}>{n.title}</p>
+                              <p style={{ fontSize: 11, color: '#64748b', margin: 0, lineHeight: 1.4 }}>{n.body}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Profile */}
+            <div style={{ position: 'relative' }}>
+              <button onClick={() => { setShowProfile(v => !v); setShowNotif(false) }}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '5px 12px 5px 6px', background: showProfile ? '#eff6ff' : '#f8fafc', borderRadius: 10, border: `1px solid ${showProfile ? '#bfdbfe' : '#f1f5f9'}`, cursor: 'pointer', transition: 'all 0.15s' }}>
+                <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#fff' }}>
+                  {initial}
+                </div>
+                <div style={{ textAlign: 'left' }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: '#1e293b', margin: 0, lineHeight: 1.2 }}>{user.full_name}</p>
+                  <p style={{ fontSize: 10, color: '#94a3b8', margin: 0 }}>{roleLabel}</p>
+                </div>
+              </button>
+
+              {showProfile && (
+                <div style={{ position: 'absolute', top: 44, right: 0, width: 200, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, boxShadow: '0 8px 32px rgba(0,0,0,0.12)', zIndex: 9999, overflow: 'hidden' }}>
+                  <div style={{ padding: '12px 16px', borderBottom: '1px solid #f1f5f9', background: '#f8fafc' }}>
+                    <p style={{ fontSize: 12, fontWeight: 700, color: '#0f172a', margin: 0 }}>{user.full_name}</p>
+                    <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{user.email}</p>
+                  </div>
+                  {[
+                    { label: 'My Profile', to: '/profile', icon: '👤' },
+                    { label: 'Settings', to: '/settings', icon: '⚙️' },
+                    { label: 'Help Guide', to: '/help', icon: '📖' },
+                  ].map(item => (
+                    <a key={item.to} href={item.to} onClick={e => { e.preventDefault(); setShowProfile(false); navigate(item.to) }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', textDecoration: 'none', color: '#374151', fontSize: 13, transition: 'background 0.1s' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+                      <span style={{ fontSize: 14 }}>{item.icon}</span> {item.label}
+                    </a>
+                  ))}
+                  <div style={{ borderTop: '1px solid #f1f5f9' }}>
+                    <button onClick={() => { logout(); navigate('/login') }}
+                      style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', color: '#ef4444', fontSize: 13, textAlign: 'left', transition: 'background 0.1s' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#fef2f2' }}
+                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+                      <LogOut style={{ width: 14, height: 14 }} /> Sign Out
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </header>
