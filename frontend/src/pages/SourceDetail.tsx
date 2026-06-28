@@ -5,9 +5,9 @@ import { JsonRecordViewer } from './JsonRecordViewer'
 import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
-  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Eye
+  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye
 } from 'lucide-react'
-import { sourcesApi, projectsApi, schemasApi, recordsApi } from '@/api/client'
+import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
 import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
@@ -197,8 +197,48 @@ export function SourceDetailPage() {
     }
   }
 
-  const handleUpdateSource = async () => {
+  const [submitting, setSubmitting] = useState(false)
+
+  const handleSubmitSource = async () => {
     if (!sourceId) return
+    setSubmitting(true)
+    try {
+      // Find the job for this source then submit it
+      const jobs = await jobsApi.list({ source_id: sourceId, page_size: 10 })
+      const sourceJobs = (jobs.items || jobs || []).filter((j: any) => j.source_id === sourceId || j.project_id)
+
+      // Try submitting each job that has approved records
+      let submitted = false
+      for (const job of sourceJobs) {
+        try {
+          const resp = await submissionApi.submit(job.id)
+          // Download the file
+          const blob = new Blob([resp.data], { type: 'application/json' })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          const cn = (source as any)?.canonical_name || source?.name?.toLowerCase().replace(/\s+/g, '-') || 'submission'
+          a.download = `${cn}_submission.json`
+          a.click()
+          URL.revokeObjectURL(url)
+          submitted = true
+          toast.success('Submission complete — file downloaded with SHA256 audit trail')
+          load()
+          break
+        } catch { continue }
+      }
+
+      if (!submitted) {
+        toast.error('No approved records found to submit. Approve records first then approve the source.')
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Submission failed')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleUpdateSource = async () => {    if (!sourceId) return
     try {
       await sourcesApi.update(sourceId, {
         name: editSourceForm.name,
@@ -376,6 +416,12 @@ export function SourceDetailPage() {
           {source.status === 'approved' && isAdmin && (
             <Button size="sm" onClick={handleExport}>
               <Download className="w-3.5 h-3.5" /> Export Package
+            </Button>
+          )}
+          {source.status === 'approved' && (
+            <Button size="sm" loading={submitting} onClick={handleSubmitSource}
+              className="!bg-green-600 hover:!bg-green-700">
+              <Send className="w-3.5 h-3.5" /> Submit Records
             </Button>
           )}
           {isAdmin && source.status !== 'approved' && (
