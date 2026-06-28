@@ -40,14 +40,9 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 
 def _delete_jobs_safely(job_ids: list, db) -> None:
     """
-    Delete extraction jobs safely.
-
-    All FK constraints now have ON DELETE CASCADE or ON DELETE SET NULL
-    at the database level (see the Railway SQL migration below), so
-    Postgres handles all child rows automatically when we delete jobs.
-
-    We still explicitly delete extracted_records first for performance
-    (can be thousands of rows — better to batch-delete than let CASCADE handle it).
+    Delete extraction jobs by explicitly clearing every child table first.
+    Does NOT rely on CASCADE constraints — deletes each table directly
+    so this works regardless of what constraints exist in the database.
     """
     if not job_ids:
         return
@@ -57,12 +52,30 @@ def _delete_jobs_safely(job_ids: list, db) -> None:
     placeholders = ", ".join(f":id{i}" for i in range(len(job_ids)))
     params = {f"id{i}": jid for i, jid in enumerate(job_ids)}
 
-    # Delete extracted_records explicitly (potentially large, faster than CASCADE)
-    db.execute(text(f"DELETE FROM extracted_records WHERE job_id IN ({placeholders})"), params)
-    db.flush()
+    # Wipe every table that references extraction_jobs, in order
+    for table, col in [
+        ("audit_log",          "job_id"),
+        ("submission_batches", "job_id"),
+        ("llm_call_log",       "job_id"),
+        ("extracted_records",  "job_id"),
+        ("job_state_history",  "job_id"),
+        ("job_reviewers",      "job_id"),
+    ]:
+        try:
+            db.execute(
+                text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"),
+                params
+            )
+            db.flush()
+        except Exception:
+            db.rollback()
+            raise
 
-    # Delete the jobs — Postgres CASCADE/SET NULL handles all other child tables
-    db.execute(text(f"DELETE FROM extraction_jobs WHERE id IN ({placeholders})"), params)
+    # Now safe — no child rows remain
+    db.execute(
+        text(f"DELETE FROM extraction_jobs WHERE id IN ({placeholders})"),
+        params
+    )
     db.flush()
 
 
