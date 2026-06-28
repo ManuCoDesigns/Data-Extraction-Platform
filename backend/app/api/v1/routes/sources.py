@@ -28,7 +28,7 @@ from app.models.all_models import (
     Source, SourceStatus, Project, ProjectMember, User, Schema, SchemaVersion,
     ExtractionJob, ExtractedRecord, JobStatus, SourceType as FileSourceType,
     ExtractionConfidence, ReviewStatus, AuditLog, AuditAction, Notification,
-    SubmissionBatch,
+    SubmissionBatch, JobStateHistory, JobReviewer, LLMCallLog,
 )
 from app.schemas.api_schemas import (
     SourceCreate, SourceUpdate, SourceOut, SourceUploadSummary,
@@ -37,6 +37,48 @@ from app.schemas.api_schemas import (
 from app.services.schema_validator import validate_record, map_row_to_fields
 
 router = APIRouter(prefix="/sources", tags=["sources"])
+
+def _delete_jobs_safely(job_ids: list, db) -> None:
+    """
+    Delete extraction jobs in the correct FK-safe order.
+    audit_log, submission_batches, llm_call_log, job_state_history, job_reviewers
+    all reference extraction_jobs — they must be removed before the jobs themselves.
+    extracted_records is also removed here.
+
+    Tables with ondelete=CASCADE are handled automatically by Postgres when the
+    FK is CASCADE, but we delete them explicitly to be safe across all environments.
+    """
+    if not job_ids:
+        return
+    # 1. audit_log  (job_id nullable — no CASCADE)
+    db.query(AuditLog).filter(
+        AuditLog.job_id.in_(job_ids)
+    ).delete(synchronize_session=False)
+    # 2. submission_batches  (no CASCADE)
+    db.query(SubmissionBatch).filter(
+        SubmissionBatch.job_id.in_(job_ids)
+    ).delete(synchronize_session=False)
+    # 3. llm_call_log  (no CASCADE)
+    db.query(LLMCallLog).filter(
+        LLMCallLog.job_id.in_(job_ids)
+    ).delete(synchronize_session=False)
+    # 4. extracted_records  (CASCADE — but explicit for safety)
+    db.query(ExtractedRecord).filter(
+        ExtractedRecord.job_id.in_(job_ids)
+    ).delete(synchronize_session=False)
+    # 5. job_state_history  (CASCADE)
+    db.query(JobStateHistory).filter(
+        JobStateHistory.job_id.in_(job_ids)
+    ).delete(synchronize_session=False)
+    # 6. job_reviewers  (CASCADE)
+    db.query(JobReviewer).filter(
+        JobReviewer.job_id.in_(job_ids)
+    ).delete(synchronize_session=False)
+    # 7. Finally safe to delete the jobs
+    db.query(ExtractionJob).filter(
+        ExtractionJob.id.in_(job_ids)
+    ).delete(synchronize_session=False)
+
 
 ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
 # Extensions that go through AI extraction (not mechanical row mapping)
@@ -1182,11 +1224,9 @@ def delete_source(
     source_status = source.status.value
     project_id = source.project_id
 
-    # Delete all records and jobs first
+    # Delete all related data in FK-safe order before deleting the source
     job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
-    if job_ids:
-        db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
-        db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
+    _delete_jobs_safely(job_ids, db)
 
     db.delete(source)
     db.add(AuditLog(
@@ -1591,24 +1631,10 @@ def reset_source(
             raise HTTPException(status_code=403, detail="Only admins can reset sources")
 
     if clear_records:
-        # Deletion order must respect FK constraints:
-        # submission_batches → extraction_jobs → extracted_records
         job_ids = [j.id for j in db.query(ExtractionJob).filter(
             ExtractionJob.source_id == source_id
         ).all()]
-        if job_ids:
-            # 1. Delete submission batches first (FK → extraction_jobs)
-            db.query(SubmissionBatch).filter(
-                SubmissionBatch.job_id.in_(job_ids)
-            ).delete(synchronize_session=False)
-            # 2. Delete extracted records
-            db.query(ExtractedRecord).filter(
-                ExtractedRecord.job_id.in_(job_ids)
-            ).delete(synchronize_session=False)
-        # 3. Now safe to delete extraction jobs
-        db.query(ExtractionJob).filter(
-            ExtractionJob.source_id == source_id
-        ).delete(synchronize_session=False)
+        _delete_jobs_safely(job_ids, db)
 
     source.status = SourceStatus.NOT_STARTED
     source.total_records = 0
@@ -1655,18 +1681,11 @@ def clear_source_records(
 
     deleted_records = 0
     if job_ids:
-        # 1. Delete submission batches first (FK → extraction_jobs)
-        db.query(SubmissionBatch).filter(
-            SubmissionBatch.job_id.in_(job_ids)
-        ).delete(synchronize_session=False)
-        # 2. Delete extracted records
+        # Count records before deleting
         deleted_records = db.query(ExtractedRecord).filter(
             ExtractedRecord.job_id.in_(job_ids)
-        ).delete(synchronize_session=False)
-        # 3. Now safe to delete extraction jobs
-        db.query(ExtractionJob).filter(
-            ExtractionJob.id.in_(job_ids)
-        ).delete(synchronize_session=False)
+        ).count()
+        _delete_jobs_safely(job_ids, db)
 
     # Reset counts
     source.total_records = 0
