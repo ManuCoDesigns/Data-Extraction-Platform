@@ -211,6 +211,107 @@ def delete_project(
     db.commit()
 
 
+
+@router.get("/{project_id}/export-preview")
+def export_preview(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns approved records for preview in the UI before downloading.
+    Groups records by source so the user can browse them.
+    """
+    from app.models.all_models import Source, ExtractionJob, ExtractedRecord, ReviewStatus, SourceStatus
+
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    approved_sources = db.query(Source).filter(
+        Source.project_id == project_id,
+        Source.status == SourceStatus.APPROVED,
+    ).order_by(Source.name).all()
+
+    result = []
+    for source in approved_sources:
+        jobs = db.query(ExtractionJob).filter(
+            ExtractionJob.source_id == source.id
+        ).all()
+        source_records = []
+        for job in jobs:
+            recs = db.query(ExtractedRecord).filter(
+                ExtractedRecord.job_id == job.id,
+                ExtractedRecord.review_status == ReviewStatus.APPROVED,
+            ).all()
+            for r in recs:
+                ef = r.extracted_fields or {}
+                source_records.append({
+                    "record_id":      str(r.id),
+                    "canonical_name": ef.get("canonical_name") or ef.get("company_name") or source.name,
+                    "company_name":   ef.get("company_name") or source.name,
+                    "is_submitted":   bool(getattr(r, "is_submitted", False)),
+                    "fields":         ef,
+                })
+        if source_records:
+            result.append({
+                "source_id":    str(source.id),
+                "source_name":  source.name,
+                "approved_at":  source.approved_at.isoformat() if source.approved_at else None,
+                "record_count": len(source_records),
+                "records":      source_records,
+            })
+
+    return {
+        "project":        project.name,
+        "project_folder": project.name,
+        "total_sources":  len(result),
+        "total_records":  sum(s["record_count"] for s in result),
+        "sources":        result,
+    }
+
+@router.get("/{project_id}/export-debug")
+def export_debug(
+    project_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Debug endpoint — returns JSON showing exactly what the export query finds.
+    Use this to verify data exists before trying to download the ZIP.
+    """
+    from app.models.all_models import Source, ExtractionJob, ExtractedRecord, ReviewStatus, SourceStatus
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    sources = db.query(Source).filter(Source.project_id == project_id).all()
+    result = {
+        "project": project.name,
+        "total_sources": len(sources),
+        "sources": []
+    }
+    for source in sources:
+        jobs = db.query(ExtractionJob).filter(ExtractionJob.source_id == source.id).all()
+        source_info = {
+            "name": source.name,
+            "status": source.status.value,
+            "jobs": len(jobs),
+            "records_per_job": []
+        }
+        for job in jobs:
+            recs = db.query(ExtractedRecord).filter(ExtractedRecord.job_id == job.id).all()
+            approved = [r for r in recs if str(getattr(r.review_status, 'value', r.review_status)) == 'approved']
+            source_info["records_per_job"].append({
+                "job_id": str(job.id),
+                "total_records": len(recs),
+                "approved_records": len(approved),
+                "has_extracted_fields": sum(1 for r in recs if r.extracted_fields)
+            })
+        result["sources"].append(source_info)
+    return result
+
+
 @router.get("/{project_id}/export")
 def export_project(
     project_id: str,
@@ -263,29 +364,73 @@ def export_project(
 
         for job in jobs:
             # Get records for this job
-            rec_q = db.query(ExtractedRecord).filter(
-                ExtractedRecord.job_id == job.id
-            )
+            # Use text query to avoid SQLAlchemy strict enum validation on
+            # historic values like llm_verdict='SKIPPED' that aren't in the enum
+            from sqlalchemy import text as _text
             if status == "approved":
-                rec_q = rec_q.filter(
-                    ExtractedRecord.review_status == ReviewStatus.APPROVED
-                )
+                raw = db.execute(
+                    _text("SELECT id, extracted_fields, review_status, is_submitted, is_schema_valid FROM extracted_records WHERE job_id = :jid AND review_status = 'approved'"),
+                    {"jid": str(job.id)}
+                ).fetchall()
+            else:
+                raw = db.execute(
+                    _text("SELECT id, extracted_fields, review_status, is_submitted, is_schema_valid FROM extracted_records WHERE job_id = :jid"),
+                    {"jid": str(job.id)}
+                ).fetchall()
 
-            for r in rec_q.all():
-                fields = dict(r.extracted_fields) if r.extracted_fields else {}
-                fields["_xtrium"] = {
-                    "source_name":    source.name,
-                    "source_status":  source.status.value,
-                    "review_status":  r.review_status.value if hasattr(r.review_status, "value") else str(r.review_status),
-                    "is_submitted":   bool(r.is_submitted),
-                    "is_schema_valid": bool(r.is_schema_valid),
-                    "exported_at":    datetime.now(timezone.utc).isoformat(),
-                }
-                all_records.append({
-                    "source_name": source.name,
-                    "canonical_name": fields.get("canonical_name") or fields.get("company_name") or source.name,
-                    "data": fields,
-                })
+            import json as _json2
+            for row in raw:
+                r_id, r_ef, r_rs, r_sub, r_valid = row
+                try:
+                    ef = _json2.loads(r_ef) if isinstance(r_ef, str) else (r_ef or {})
+                except Exception:
+                    ef = {}
+                # Wrap as a simple object for the rest of the logic
+                class _R:
+                    pass
+                r = _R()
+                r.id = r_id
+                r.extracted_fields = ef
+                r.review_status = type('RS', (), {'value': str(r_rs)})()
+                r.is_submitted = bool(r_sub)
+                r.is_schema_valid = bool(r_valid)
+                try:
+                    # extracted_fields is a JSON column — could be dict, None, or edge cases
+                    ef = r.extracted_fields
+                    if ef is None:
+                        fields = {}
+                    elif isinstance(ef, dict):
+                        fields = dict(ef)
+                    else:
+                        import json as _j
+                        fields = _j.loads(str(ef)) if ef else {}
+
+                    review_status_str = (
+                        r.review_status.value
+                        if hasattr(r.review_status, "value")
+                        else str(r.review_status)
+                    )
+                    fields["_xtrium"] = {
+                        "source_name":    source.name,
+                        "source_status":  source.status.value,
+                        "review_status":  review_status_str,
+                        "is_submitted":   bool(getattr(r, "is_submitted", False)),
+                        "is_schema_valid": bool(getattr(r, "is_schema_valid", False)),
+                        "exported_at":    datetime.now(timezone.utc).isoformat(),
+                    }
+                    cn = (
+                        fields.get("canonical_name")
+                        or fields.get("company_name")
+                        or source.name
+                    )
+                    all_records.append({
+                        "source_name":    source.name,
+                        "canonical_name": cn,
+                        "data":           fields,
+                    })
+                except Exception as record_err:
+                    # Skip bad records but don't crash the whole export
+                    continue
 
     if not all_records:
         raise HTTPException(
@@ -315,38 +460,42 @@ def export_project(
         if count:
             readme_lines.append(f"- {s.name}: {count} record(s) [{s.status.value}]")
 
+    # ZIP folder = project name (e.g. "Critical Materials Intelligence/")
+    # Files sit directly inside: albemarle-corporation.json, combined.json, README.md
+    project_folder = project.name  # exact project name — no transformation
+    project_slug   = re.sub(r"[^a-z0-9_]", "_", project.name.lower())[:40]
+
     buf = io.BytesIO()
     seen: dict = {}
     combined = []
 
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("README.md", "\n".join(readme_lines))
+        zf.writestr(f"{project_folder}/README.md", "\n".join(readme_lines))
 
         for item in all_records:
-            # Filename = canonical_name, exactly as stored — SOP naming convention
+            # canonical_name is the SOP tracking key — never transform it
             cn = str(item["canonical_name"]).strip()
             cn = cn.replace("/", "-").replace("\\", "-").replace(":", "-").replace("\n", "") or "record"
             if cn in seen:
                 seen[cn] += 1
-                filename_cn = f"{cn}_{seen[cn]}"
+                cn = f"{cn}_{seen[cn]}"
             else:
                 seen[cn] = 0
-                filename_cn = cn
 
             record_json = item["data"]
             combined.append(record_json)
+            # File lives directly inside the project folder
             zf.writestr(
-                f"records/{filename_cn}.json",
+                f"{project_folder}/{cn}.json",
                 _json.dumps(record_json, indent=2, ensure_ascii=False, default=str)
             )
 
         zf.writestr(
-            "combined.json",
+            f"{project_folder}/combined.json",
             _json.dumps(combined, indent=2, ensure_ascii=False, default=str)
         )
 
     buf.seek(0)
-    project_slug = re.sub(r"[^a-z0-9_]", "_", project.name.lower())[:40]
     zip_filename = f"{project_slug}_{status}_{datetime.now().strftime('%Y%m%d')}.zip"
 
     return StreamingResponse(

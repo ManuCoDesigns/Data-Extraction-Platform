@@ -96,7 +96,9 @@ export function JobDetailPage() {
   const isActive = POLL_STATES.includes(job.status)
   const isFailed = FAILED_STATES.includes(job.status)
   const canReview = ['ready_for_review', 'in_review'].includes(job.status)
-  const canSubmit = job.total_approved > 0 && !['submitted'].includes(job.status)
+  // Only show Submit if there are approved records that haven't been submitted yet
+  const pendingSubmitCount = Math.max(0, (job.total_approved || 0) - (job.total_submitted || 0))
+  const canSubmit = pendingSubmitCount > 0 && !['submitted'].includes(job.status)
 
   // LLM stats derived from records
   const llmPass = records.filter(r => r.llm_verdict === 'PASS').length
@@ -152,7 +154,7 @@ export function JobDetailPage() {
           )}
           {canSubmit && (
             <Button onClick={() => setShowSubmit(true)} size="sm">
-              <Send className="w-3.5 h-3.5" /> Submit {job.total_approved} Records
+              <Send className="w-3.5 h-3.5" /> Submit {pendingSubmitCount} Record{pendingSubmitCount !== 1 ? 's' : ''}
             </Button>
           )}
         </div>

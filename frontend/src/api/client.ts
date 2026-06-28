@@ -113,6 +113,8 @@ export const projectsApi = {
     api.post(`/projects/${projectId}/members`, { user_id: userId, role }).then(r => r.data),
   removeMember: (projectId: string, userId: string) =>
     api.delete(`/projects/${projectId}/members/${userId}`).then(r => r.data),
+  exportPreview: (projectId: string) =>
+    api.get(`/projects/${projectId}/export-preview`).then(r => r.data),
   exportProject: async (projectId: string, status = 'all', filename?: string) => {
     const r = await api.get(`/projects/${projectId}/export`, {
       params: { status },

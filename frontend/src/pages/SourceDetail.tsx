@@ -21,11 +21,33 @@ const STEPS = [
   { id: 4, label: 'Submit',  icon: '🚀', desc: 'Deliver records to the client' },
 ]
 
+/**
+ * Derive the active pipeline step from source status + records.
+ *
+ * Step 1 — Upload:   no data, or schema errors, or upload in progress
+ * Step 2 — Review:   records exist, review underway (any review status)
+ * Step 3 — Approve:  all records approved, waiting for explicit source approval
+ * Step 4 — Submit:   source approved, submitting to client
+ * Step 5 — Done:     source approved + all records submitted
+ */
 function getStep(status: string, records: any[]): number {
-  if (!records.length || status === 'not_started' || status === 'extracting' || status === 'needs_fixes') return 1
-  if (status === 'approved') return records.some(r => r.is_submitted) ? 5 : 4
-  const allApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
-  if (allApproved) return 3
+  // Step 1: no records yet, or upload issues
+  if (records.length === 0) return 1
+  if (['not_started', 'extracting', 'needs_fixes'].includes(status)) return 1
+
+  // Done: approved and all submitted
+  if (status === 'approved') {
+    const submitted = records.filter(r => r.is_submitted).length
+    const approvedRecs = records.filter(r => r.review_status === 'approved').length
+    return (submitted > 0 && submitted >= approvedRecs) ? 5 : 4
+  }
+
+  // Step 3: all records individually approved, source not yet approved
+  const allApproved = records.every(r => r.review_status === 'approved')
+  if (allApproved && records.length > 0) return 3
+
+  // Step 2: any other state with records = review in progress
+  // covers: ready_for_review, in_review, changes_requested, llm_verification
   return 2
 }
 
@@ -186,6 +208,8 @@ function PrimaryActionPanel({
   )
 
   // Step 4 — Submit
+  const s4submittedCount = records.filter((r: any) => r.is_submitted).length
+  const pendingSubmit     = records.filter((r: any) => !r.is_submitted && r.review_status === 'approved').length
   if (step === 4) return (
     <div style={{ background: '#fff7ed', border: '2px solid #f97316', borderRadius: 14, padding: '20px 24px' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
@@ -194,18 +218,26 @@ function PrimaryActionPanel({
             🚀 Step 4 of 4 — Submit Records to Client
           </p>
           <p style={{ fontSize: 13, color: '#ea580c', margin: '4px 0 0' }}>
-            Source is approved. Submit to create a signed delivery package with SHA256 audit trail.
+            {pendingSubmit > 0
+              ? `${pendingSubmit} approved record${pendingSubmit !== 1 ? 's' : ''} ready to submit${s4submittedCount > 0 ? ` · ${s4submittedCount} already submitted` : ''}.`
+              : `All ${s4submittedCount} record${s4submittedCount !== 1 ? 's' : ''} have been submitted. Use Unlock Records to re-submit if needed.`}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           {isAdmin && (
             <Button variant="secondary" size="sm" onClick={onExport}>
               <Download className="w-3.5 h-3.5" /> Export Package
             </Button>
           )}
-          <Button size="sm" onClick={onSubmit} style={{ background: '#ea580c', border: 'none', color: '#fff', fontSize: 14, padding: '10px 24px' }}>
-            <Send className="w-4 h-4" /> Submit Records →
-          </Button>
+          {pendingSubmit > 0 ? (
+            <Button size="sm" onClick={onSubmit} style={{ background: '#ea580c', border: 'none', color: '#fff', fontSize: 14, padding: '10px 24px' }}>
+              <Send className="w-4 h-4" /> Submit {pendingSubmit} Record{pendingSubmit !== 1 ? 's' : ''} →
+            </Button>
+          ) : (
+            <span style={{ fontSize: 12, background: '#ecfdf5', color: '#059669', border: '1px solid #6ee7b7', padding: '8px 16px', borderRadius: 20, fontWeight: 700 }}>
+              🎉 All records submitted
+            </span>
+          )}
         </div>
       </div>
     </div>
@@ -235,14 +267,14 @@ function PrimaryActionPanel({
 
 // ── Status meta ────────────────────────────────────────────────────────────────
 const STATUS_META: Record<SourceStatus, { label: string; color: 'gray'|'amber'|'red'|'blue'|'purple'|'green'|'indigo' }> = {
-  not_started:       { label: 'Not Started',      color: 'gray' },
-  extracting:        { label: 'Extracting',       color: 'blue' },
-  needs_fixes:       { label: 'Needs Fixes',       color: 'amber' },
-  ready_for_review:  { label: 'Ready for Review',  color: 'indigo' },
-  in_review:         { label: 'In Review',         color: 'purple' },
-  changes_requested: { label: 'Changes Requested', color: 'red' },
-  llm_verification:  { label: 'LLM Verification',  color: 'purple' },
-  approved:          { label: 'Approved',          color: 'green' },
+  not_started:       { label: 'Not Started',           color: 'gray'   },
+  extracting:        { label: 'Uploading…',             color: 'blue'   },
+  needs_fixes:       { label: 'Schema Errors',          color: 'amber'  },
+  ready_for_review:  { label: 'Awaiting Review',        color: 'indigo' },
+  in_review:         { label: 'In Review',              color: 'purple' },
+  changes_requested: { label: 'Corrections Needed',     color: 'red'    },
+  llm_verification:  { label: 'LLM Check Done',         color: 'purple' },
+  approved:          { label: 'Approved ✓',             color: 'green'  },
 }
 
 type Tab = 'records' | 'details'

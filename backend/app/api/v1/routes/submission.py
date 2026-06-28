@@ -41,7 +41,24 @@ def submit_job(
 
     records = q.all()
     if not records:
-        raise HTTPException(status_code=422, detail="No approved records to submit")
+        # Check WHY — give a clear, accurate error
+        already_submitted = db.query(ExtractedRecord).filter(
+            ExtractedRecord.job_id == job_id,
+            ExtractedRecord.is_submitted == True,
+        ).count()
+        total_approved = db.query(ExtractedRecord).filter(
+            ExtractedRecord.job_id == job_id,
+            ExtractedRecord.review_status == ReviewStatus.APPROVED,
+        ).count()
+        if already_submitted > 0 and already_submitted >= total_approved:
+            raise HTTPException(
+                status_code=422,
+                detail=f"All {already_submitted} record(s) in this job have already been submitted. Use Unlock Records on the source if you need to re-submit."
+            )
+        raise HTTPException(
+            status_code=422,
+            detail="No approved records found. Approve records in the source before submitting."
+        )
 
     # Build payload
     output = {

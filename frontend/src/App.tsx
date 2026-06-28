@@ -7,6 +7,7 @@ import { ProjectsPage } from '@/pages/Projects'
 import { ProjectDetailPage } from '@/pages/ProjectDetail'
 import { SourcesPage } from '@/pages/Sources'
 import { SourceDetailPage } from '@/pages/SourceDetail'
+import { ExportPreviewPage } from '@/pages/ExportPreview'
 import { HelpPage } from '@/pages/Help'
 import { JobsPage } from '@/pages/Jobs'
 import { JobDetailPage } from '@/pages/JobDetail'
@@ -113,6 +114,10 @@ export function App() {
           <Route
             path="projects/:projectId/sources/:sourceId"
             element={<SourceDetailPage />}
+          />
+          <Route
+            path="projects/:projectId/export-preview"
+            element={<ExportPreviewPage />}
           />
 
           <Route path="jobs" element={<Navigate to="/projects" replace />} />

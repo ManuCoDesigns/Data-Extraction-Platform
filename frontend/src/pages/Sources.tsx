@@ -26,11 +26,33 @@ const KANBAN_COLUMNS: SourceStatus[] = [
 ]
 
 // 4-step pipeline view — matches the step wizard in SourceDetail
-const SIMPLE_STEPS: { label: string; statuses: SourceStatus[]; color: string; icon: string }[] = [
-  { label: '1. Upload',   statuses: ['not_started', 'extracting', 'needs_fixes'],              color: 'bg-blue-500',    icon: '📤' },
-  { label: '2. Review',   statuses: ['ready_for_review', 'in_review', 'changes_requested', 'llm_verification'], color: 'bg-purple-500',  icon: '🔍' },
-  { label: '3. Approve',  statuses: ['approved'],                                              color: 'bg-emerald-500', icon: '✅' },
-  { label: '4. Submit',   statuses: [],                                                        color: 'bg-orange-500',  icon: '🚀' },
+// These groups match the 4-step pipeline exactly.
+// Every possible SourceStatus maps to exactly one step — no gaps, no ambiguity.
+const SIMPLE_STEPS: { label: string; statuses: SourceStatus[]; color: string; icon: string; desc: string }[] = [
+  {
+    label: '1. Upload',
+    statuses: ['not_started', 'extracting', 'needs_fixes'],
+    color: 'bg-blue-500', icon: '📤',
+    desc: 'Data not yet uploaded or has schema errors',
+  },
+  {
+    label: '2. Review',
+    statuses: ['ready_for_review', 'in_review', 'changes_requested', 'llm_verification'],
+    color: 'bg-purple-500', icon: '🔍',
+    desc: 'Records being reviewed — approved, pending, or sent back',
+  },
+  {
+    label: '3. Approved',
+    statuses: ['approved'],
+    color: 'bg-emerald-500', icon: '✅',
+    desc: 'All records approved and source locked',
+  },
+  {
+    label: '4. Submitted',
+    statuses: [],   // computed: approved + is_submitted on records
+    color: 'bg-orange-500', icon: '🚀',
+    desc: 'Records delivered to client',
+  },
 ]
 
 /**

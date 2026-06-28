@@ -153,13 +153,60 @@ def _get_source_or_404(source_id: str, db: Session) -> Source:
 
 
 def _recompute_counts(source: Source, db: Session):
+    """Update source counts AND sync status to reflect actual record state.
+    Called after every record change so source status is always accurate.
+    Never touches APPROVED status — that requires an explicit admin action.
+    """
     records = db.query(ExtractedRecord).join(ExtractionJob).filter(
         ExtractionJob.source_id == source.id
     ).all()
-    source.total_records = len(records)
-    source.valid_records = sum(1 for r in records if r.is_schema_valid)
-    source.invalid_records = source.total_records - source.valid_records
-    source.approved_records = sum(1 for r in records if r.review_status == ReviewStatus.APPROVED)
+
+    total    = len(records)
+    valid    = sum(1 for r in records if r.is_schema_valid)
+    invalid  = total - valid
+    approved = sum(1 for r in records if r.review_status == ReviewStatus.APPROVED)
+    rejected = sum(1 for r in records if r.review_status == ReviewStatus.REJECTED)
+    pending  = total - approved - rejected
+
+    source.total_records    = total
+    source.valid_records    = valid
+    source.invalid_records  = invalid
+    source.approved_records = approved
+
+    # Never auto-change an explicitly APPROVED source
+    if source.status == SourceStatus.APPROVED:
+        return
+
+    # No records → not started
+    if total == 0:
+        source.status = SourceStatus.NOT_STARTED
+        return
+
+    # Has schema-invalid records → extractor needs to fix
+    if invalid > 0:
+        source.status = SourceStatus.NEEDS_FIXES
+        return
+
+    # Reviewer sent records back → extractor needs to fix
+    if rejected > 0:
+        source.status = SourceStatus.CHANGES_REQUESTED
+        return
+
+    # All records approved → ready for source approval
+    if approved == total:
+        source.status = SourceStatus.IN_REVIEW
+        return
+
+    # Mix of approved/pending → actively in review
+    if approved > 0 or source.status in (
+        SourceStatus.IN_REVIEW, SourceStatus.LLM_VERIFICATION,
+        SourceStatus.CHANGES_REQUESTED,
+    ):
+        source.status = SourceStatus.IN_REVIEW
+        return
+
+    # All valid, no reviews started yet
+    source.status = SourceStatus.READY_FOR_REVIEW
 
 
 # ─── CRUD ────────────────────────────────────────────────────────────────────
@@ -875,21 +922,21 @@ def review_source_record(
     record.reviewed_by = current_user.id
     record.reviewed_at = datetime.now(timezone.utc)
 
-    if source.status not in (SourceStatus.IN_REVIEW,):
-        source.status = SourceStatus.IN_REVIEW
-        source.review_started_at = source.review_started_at or datetime.now(timezone.utc)
+    # Set review_started_at on first review
+    if not source.review_started_at:
+        source.review_started_at = datetime.now(timezone.utc)
 
-    if payload.action == "reject":
-        source.status = SourceStatus.CHANGES_REQUESTED
-        if source.assigned_extractor_id:
-            db.add(Notification(
-                user_id=source.assigned_extractor_id,
-                title=f"Record sent back in '{source.name}'",
-                body=payload.note or "A reviewer sent a record back for fixes.",
-                link=f"/sources/{source.id}",
-            ))
+    # Notify extractor when record is sent back
+    if payload.action == "reject" and source.assigned_extractor_id:
+        db.add(Notification(
+            user_id=source.assigned_extractor_id,
+            title=f"Record sent back in '{source.name}'",
+            body=payload.note or "A reviewer sent a record back for fixes.",
+            link=f"/sources/{source.id}",
+        ))
 
     db.flush()
+    # _recompute_counts sets the correct status based on all record states
     _recompute_counts(source, db)
     db.commit()
     db.refresh(record)
@@ -1450,11 +1497,12 @@ Required format:
         db.flush()
 
     # Advance source status to llm_verification to reflect this stage ran
-    source.status = SourceStatus.LLM_VERIFICATION
+    # Don't lock source at llm_verification — recompute real status from records
+    _recompute_counts(source, db)
     db.add(AuditLog(
         user_id=current_user.id, project_id=source.project_id,
         action=AuditAction.SOURCE_STATUS_CHANGED,
-        before_value={}, after_value={"status": "llm_verification", "verified": verified_count, "flagged": flagged_count},
+        before_value={}, after_value={"verified": verified_count, "flagged": flagged_count},
     ))
     db.commit()
 

@@ -81,9 +81,11 @@ class ReviewStatus(str, enum.Enum):
 
 
 class LLMVerdict(str, enum.Enum):
-    PASS_ = "PASS"
-    REVIEW = "REVIEW"
-    REJECT = "REJECT"
+    PASS_    = "PASS"
+    REVIEW   = "REVIEW"
+    REJECT   = "REJECT"
+    SKIPPED  = "SKIPPED"  # LLM check was skipped for this record
+    FLAGGED  = "FLAGGED"  # extra safety — DB may have other historic values
 
 
 class AuditAction(str, enum.Enum):

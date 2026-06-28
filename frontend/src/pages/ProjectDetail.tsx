@@ -92,16 +92,11 @@ export function ProjectDetailPage() {
           </Link>
 
           {/* Export Approved — for sharing progress with clients */}
-          <Button variant="secondary" size="sm" onClick={async () => {
-            try {
-              await projectsApi.exportProject(projectId!, 'approved', `${project.name.replace(/[^a-z0-9]/gi,'_')}_approved.zip`)
-              toast.success('Downloaded — approved records only')
-            } catch (err: any) {
-              toast.error(err?.response?.data?.detail || 'No approved records yet')
-            }
-          }}>
-            <Download className="w-3.5 h-3.5" /> Export Approved
-          </Button>
+          <Link to={`/projects/${projectId}/export-preview`}>
+            <Button size="sm" style={{ background: '#10b981', border: 'none', color: '#fff' }}>
+              <Download className="w-3.5 h-3.5" /> Preview & Download Records
+            </Button>
+          </Link>
 
           {/* Export All — everything uploaded so far */}
           <Button variant="secondary" size="sm" onClick={async () => {
