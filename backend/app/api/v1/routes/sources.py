@@ -38,66 +38,47 @@ from app.services.schema_validator import validate_record, map_row_to_fields
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
-def _delete_jobs_safely(job_ids: list, db) -> None:
+def _delete_jobs_safely(job_ids: list, source_id: str, db) -> None:
     """
-    Delete extraction jobs safely.
+    Clean up all child data before deleting extraction_jobs.
+    Uses ORM bulk operations (synchronize_session=False) — same approach
+    as the version that worked, just extended to handle submission_batches
+    and audit_log which now have rows after real submissions were made.
 
-    The audit_log table has a DB trigger that fires ON DELETE of extraction_jobs
-    and inserts a new audit_log row — so deleting audit_log first never works
-    because the trigger re-creates the row during the job deletion.
-
-    Fix: UPDATE audit_log SET job_id = NULL (job_id is nullable) so no FK
-    constraint exists when we delete the jobs. Even if the trigger creates
-    a new audit_log row, it will have job_id = NULL and won't block deletion.
-    We NULL it out twice — before all deletions and again right before deleting
-    extraction_jobs — to catch any rows created mid-sequence.
+    Order:
+      1. NULL audit_log.job_id  (nullable FK, ORM bulk update)
+      2. DELETE submission_batches (no CASCADE)
+      3. DELETE llm_call_log       (no CASCADE)
+      4. DELETE extracted_records  (CASCADE — explicit for performance)
+      5. DELETE extraction_jobs    (by source_id — same as working version)
     """
     if not job_ids:
         return
 
-    from sqlalchemy import text
+    # 1. Null out audit_log references — ORM update, not raw SQL
+    db.query(AuditLog).filter(
+        AuditLog.job_id.in_(job_ids)
+    ).update({'job_id': None}, synchronize_session=False)
 
-    db.expunge_all()
+    # 2. Delete submission_batches
+    db.query(SubmissionBatch).filter(
+        SubmissionBatch.job_id.in_(job_ids)
+    ).delete(synchronize_session=False)
 
-    placeholders = ", ".join(f":id{i}" for i in range(len(job_ids)))
-    params = {f"id{i}": jid for i, jid in enumerate(job_ids)}
+    # 3. Delete llm_call_log
+    db.query(LLMCallLog).filter(
+        LLMCallLog.job_id.in_(job_ids)
+    ).delete(synchronize_session=False)
 
-    # Step 1: NULL out audit_log job_id references (job_id is nullable)
-    # This removes the FK dependency without deleting audit history
-    db.execute(
-        text(f"UPDATE audit_log SET job_id = NULL WHERE job_id IN ({placeholders})"),
-        params
-    )
-    db.flush()
+    # 4. Delete records
+    db.query(ExtractedRecord).filter(
+        ExtractedRecord.job_id.in_(job_ids)
+    ).delete(synchronize_session=False)
 
-    # Step 2: Delete all other child tables
-    for table, col in [
-        ("submission_batches", "job_id"),
-        ("llm_call_log",       "job_id"),
-        ("extracted_records",  "job_id"),
-        ("job_state_history",  "job_id"),
-        ("job_reviewers",      "job_id"),
-    ]:
-        db.execute(
-            text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"),
-            params
-        )
-    db.flush()
-
-    # Step 3: NULL audit_log AGAIN — catches any rows the trigger may have
-    # created during the deletions above
-    db.execute(
-        text(f"UPDATE audit_log SET job_id = NULL WHERE job_id IN ({placeholders})"),
-        params
-    )
-    db.flush()
-
-    # Step 4: Now safe — no FK references remain
-    db.execute(
-        text(f"DELETE FROM extraction_jobs WHERE id IN ({placeholders})"),
-        params
-    )
-    db.flush()
+    # 5. Delete jobs by source_id (matches the working version exactly)
+    db.query(ExtractionJob).filter(
+        ExtractionJob.source_id == source_id
+    ).delete(synchronize_session=False)
 
 
 ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
@@ -1244,9 +1225,9 @@ def delete_source(
     source_status = source.status.value
     project_id = source.project_id
 
-    # Delete all related data in FK-safe order before deleting the source
+    # For delete_source we must remove jobs too — use the full wipe helper
     job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
-    _delete_jobs_safely(job_ids, db)
+    _delete_jobs_safely(job_ids, source_id, db)
 
     db.delete(source)
     db.add(AuditLog(
@@ -1654,7 +1635,7 @@ def reset_source(
         job_ids = [j.id for j in db.query(ExtractionJob).filter(
             ExtractionJob.source_id == source_id
         ).all()]
-        _delete_jobs_safely(job_ids, db)
+        _delete_jobs_safely(job_ids, source_id, db)
 
     source.status = SourceStatus.NOT_STARTED
     source.total_records = 0
@@ -1705,7 +1686,7 @@ def clear_source_records(
         deleted_records = db.query(ExtractedRecord).filter(
             ExtractedRecord.job_id.in_(job_ids)
         ).count()
-        _delete_jobs_safely(job_ids, db)
+        _delete_jobs_safely(job_ids, source_id, db)
 
     # Reset counts
     source.total_records = 0
