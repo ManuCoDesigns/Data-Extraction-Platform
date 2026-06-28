@@ -40,23 +40,16 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 
 def _delete_jobs_safely(job_ids: list, db) -> None:
     """
-    Delete extraction jobs using raw SQL in strict FK order.
-    Raw SQL with db.flush() guarantees each DELETE reaches Postgres
-    before the next one runs - ORM bulk-delete can reorder operations.
-
-    Order (all reference extraction_jobs, must go first):
-      1. audit_log          (no CASCADE)
-      2. submission_batches (no CASCADE)
-      3. llm_call_log       (no CASCADE)
-      4. extracted_records  (CASCADE - explicit for safety)
-      5. job_state_history  (CASCADE - explicit for safety)
-      6. job_reviewers      (CASCADE - explicit for safety)
-      7. extraction_jobs    (now safe)
+    Delete extraction jobs in strict FK order using raw SQL.
+    Each DELETE is flushed immediately so Postgres processes them in sequence.
+    Order: audit_log > submission_batches > llm_call_log >
+           extracted_records > job_state_history > job_reviewers > extraction_jobs
     """
     if not job_ids:
         return
 
-    # Parameterised placeholders to avoid any SQL injection risk
+    from sqlalchemy import text  # inline import — always available, no scope issues
+
     placeholders = ", ".join(f":id{i}" for i in range(len(job_ids)))
     params = {f"id{i}": jid for i, jid in enumerate(job_ids)}
 
@@ -69,11 +62,8 @@ def _delete_jobs_safely(job_ids: list, db) -> None:
         ("job_reviewers",      "job_id"),
         ("extraction_jobs",    "id"),
     ]:
-        db.execute(
-            _sql_text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"),
-            params
-        )
-        db.flush()   # force DELETE to reach Postgres before next table
+        db.execute(text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"), params)
+        db.flush()
 
 
 ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
