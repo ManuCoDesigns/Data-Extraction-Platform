@@ -112,10 +112,10 @@ export function ProjectDetailPage() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Resources', value: resources.length },
-          { label: 'Jobs', value: jobs.length },
-          { label: 'Members', value: members.length },
-          { label: 'Submissions', value: submissions.length },
+          { label: 'Team Members', value: members.length },
+          { label: 'Extraction Jobs', value: jobs.length },
+          { label: 'Records Submitted', value: jobs.reduce((sum: number, j: any) => sum + (j.total_submitted || 0), 0) },
+          { label: 'Records Approved', value: jobs.reduce((sum: number, j: any) => sum + (j.total_approved || 0), 0) },
         ].map(({ label, value }) => (
           <Card key={label} className="p-4 text-center">
             <p className="text-2xl font-bold text-gray-900">{value}</p>
