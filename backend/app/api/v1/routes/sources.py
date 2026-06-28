@@ -930,6 +930,19 @@ def approve_source(
     source.approved_at = datetime.now(timezone.utc)
     source.review_completed_at = source.review_completed_at or datetime.now(timezone.utc)
 
+    # Sync all ExtractionJobs for this source to VALIDATED + update counts
+    approved_count = (
+        db.query(ExtractedRecord)
+        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+        .filter(
+            ExtractionJob.source_id == source_id,
+            ExtractedRecord.review_status == ReviewStatus.APPROVED,
+        ).count()
+    )
+    for job in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all():
+        job.status = JobStatus.VALIDATED
+        job.total_approved = approved_count
+
     db.add(AuditLog(
         user_id=current_user.id, project_id=source.project_id,
         action=AuditAction.SOURCE_APPROVED, after_value={"source_id": source_id},
