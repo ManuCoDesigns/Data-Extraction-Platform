@@ -40,30 +40,30 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 
 def _delete_jobs_safely(job_ids: list, db) -> None:
     """
-    Delete extraction jobs in strict FK order using raw SQL.
-    Each DELETE is flushed immediately so Postgres processes them in sequence.
-    Order: audit_log > submission_batches > llm_call_log >
-           extracted_records > job_state_history > job_reviewers > extraction_jobs
+    Delete extraction jobs safely.
+
+    All FK constraints now have ON DELETE CASCADE or ON DELETE SET NULL
+    at the database level (see the Railway SQL migration below), so
+    Postgres handles all child rows automatically when we delete jobs.
+
+    We still explicitly delete extracted_records first for performance
+    (can be thousands of rows — better to batch-delete than let CASCADE handle it).
     """
     if not job_ids:
         return
 
-    from sqlalchemy import text  # inline import — always available, no scope issues
+    from sqlalchemy import text
 
     placeholders = ", ".join(f":id{i}" for i in range(len(job_ids)))
     params = {f"id{i}": jid for i, jid in enumerate(job_ids)}
 
-    for table, col in [
-        ("audit_log",          "job_id"),
-        ("submission_batches", "job_id"),
-        ("llm_call_log",       "job_id"),
-        ("extracted_records",  "job_id"),
-        ("job_state_history",  "job_id"),
-        ("job_reviewers",      "job_id"),
-        ("extraction_jobs",    "id"),
-    ]:
-        db.execute(text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"), params)
-        db.flush()
+    # Delete extracted_records explicitly (potentially large, faster than CASCADE)
+    db.execute(text(f"DELETE FROM extracted_records WHERE job_id IN ({placeholders})"), params)
+    db.flush()
+
+    # Delete the jobs — Postgres CASCADE/SET NULL handles all other child tables
+    db.execute(text(f"DELETE FROM extraction_jobs WHERE id IN ({placeholders})"), params)
+    db.flush()
 
 
 ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
