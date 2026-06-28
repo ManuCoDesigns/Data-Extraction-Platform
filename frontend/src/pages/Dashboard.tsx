@@ -250,79 +250,111 @@ function AdminDashboard() {
         </div>
       </div>
 
-      {/* Charts + Team */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, marginBottom: 24 }}>
+      {/* Chart + Team — 3-col grid: chart | extractors | reviewers */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 16, marginBottom: 24 }}>
 
-        {/* Bar chart by status */}
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '20px 22px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-          <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>Sources by Status</h2>
-          <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 16px' }}>{total} sources across all projects</p>
+        {/* Bar chart */}
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '18px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 2px' }}>Sources by Status</p>
+          <p style={{ fontSize: 11, color: '#94a3b8', margin: '0 0 12px' }}>{total} total sources</p>
           {chartData.length === 0 ? (
-            <div style={{ height: 200, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 13 }}>
-              No sources yet
-            </div>
+            <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 12 }}>No sources yet</div>
           ) : (
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={chartData} barSize={24} margin={{ top: 4, right: 4, bottom: 4, left: -10 }}>
+            <ResponsiveContainer width="100%" height={160}>
+              <BarChart data={chartData} barSize={18} margin={{ top: 2, right: 2, bottom: 0, left: -20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval={0} />
-                <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
-                <Tooltip contentStyle={{ border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 12, boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }} cursor={{ fill: '#f8fafc' }} />
-                <Bar dataKey="value" radius={[6,6,0,0]} name="Sources">
+                <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval={0} />
+                <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+                <Tooltip contentStyle={{ border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 11 }} cursor={{ fill: '#f8fafc' }} />
+                <Bar dataKey="value" radius={[4,4,0,0]} name="Sources">
                   {chartData.map((d, i) => <Cell key={i} fill={d.color} />)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           )}
-
-          {/* Legend */}
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, marginTop: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 10 }}>
             {chartData.map(d => (
-              <div key={d.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '5px 10px', borderRadius: 8, background: '#f8fafc' }}>
+              <div key={d.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 8px', borderRadius: 6, background: '#f8fafc' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ width: 8, height: 8, borderRadius: 2, background: d.color, flexShrink: 0 }} />
-                  <span style={{ fontSize: 11, color: '#64748b' }}>{d.name}</span>
+                  <div style={{ width: 7, height: 7, borderRadius: 2, background: d.color, flexShrink: 0 }} />
+                  <span style={{ fontSize: 10, color: '#64748b' }}>{d.name}</span>
                 </div>
-                <span style={{ fontSize: 12, fontWeight: 700, color: d.color }}>{d.value}</span>
+                <span style={{ fontSize: 11, fontWeight: 700, color: d.color }}>{d.value}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Team performance */}
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '20px 22px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-          <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>Team Performance</h2>
-          <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 16px' }}>Sources assigned vs completed per member</p>
-
-          {extractors.length === 0 && reviewers.length === 0 ? (
-            <div style={{ height: 200, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, color: '#94a3b8' }}>
-              <Users style={{ width: 32, height: 32, opacity: 0.3 }} />
-              <p style={{ fontSize: 13, margin: 0 }}>Assign sources to see performance data</p>
+        {/* Extractors column */}
+        <div style={{ background: 'linear-gradient(135deg, #ecfdf5, #f0fdf4)', border: '1px solid #6ee7b7', borderRadius: 16, padding: '18px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>⛏️</div>
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 700, color: '#065f46', margin: 0 }}>Extractors</p>
+              <p style={{ fontSize: 10, color: '#6ee7b7', margin: 0 }}>{extractors.length} assigned</p>
             </div>
+          </div>
+          {extractors.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px 0', color: '#6ee7b7', fontSize: 12 }}>No extractors assigned</div>
           ) : (
-            <div style={{ maxHeight: 280, overflowY: 'auto' }}>
-              {extractors.length > 0 && (
-                <div style={{ marginBottom: 16 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#059669' }} />
-                    <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>Extractors</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {extractors.map((e: any) => {
+                const pct = e.sources_count > 0 ? Math.round((e.approved_count / e.sources_count) * 100) : 0
+                return (
+                  <div key={e.user_id} style={{ background: 'rgba(255,255,255,0.7)', borderRadius: 10, padding: '10px 12px', border: '1px solid #a7f3d0' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                        {e.name?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 12, fontWeight: 600, color: '#064e3b', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</p>
+                        <p style={{ fontSize: 10, color: '#6ee7b7', margin: 0 }}>{e.approved_count}/{e.sources_count} done</p>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: '#059669' }}>{pct}%</span>
+                    </div>
+                    <div style={{ background: '#a7f3d0', borderRadius: 99, height: 5, overflow: 'hidden' }}>
+                      <div style={{ background: '#059669', height: '100%', width: `${pct}%`, borderRadius: 99, transition: 'width 0.6s ease' }} />
+                    </div>
                   </div>
-                  {extractors.map((e: any) => (
-                    <PerfRow key={e.user_id} name={e.name} assigned={e.sources_count} completed={e.approved_count} avgHours={e.avg_hours_per_source} role="extractor" />
-                  ))}
-                </div>
-              )}
-              {reviewers.length > 0 && (
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#7c3aed' }} />
-                    <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0 }}>Reviewers</p>
+                )
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Reviewers column */}
+        <div style={{ background: 'linear-gradient(135deg, #faf5ff, #f5f3ff)', border: '1px solid #c4b5fd', borderRadius: 16, padding: '18px 16px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>🔍</div>
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 700, color: '#4c1d95', margin: 0 }}>Reviewers</p>
+              <p style={{ fontSize: 10, color: '#c4b5fd', margin: 0 }}>{reviewers.length} assigned</p>
+            </div>
+          </div>
+          {reviewers.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px 0', color: '#c4b5fd', fontSize: 12 }}>No reviewers assigned</div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {reviewers.map((r: any) => {
+                const pct = r.sources_count > 0 ? Math.round((r.approved_count / r.sources_count) * 100) : 0
+                return (
+                  <div key={r.user_id} style={{ background: 'rgba(255,255,255,0.7)', borderRadius: 10, padding: '10px 12px', border: '1px solid #ddd6fe' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                      <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#7c3aed', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+                        {r.name?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <p style={{ fontSize: 12, fontWeight: 600, color: '#3b0764', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.name}</p>
+                        <p style={{ fontSize: 10, color: '#c4b5fd', margin: 0 }}>{r.approved_count}/{r.sources_count} done</p>
+                      </div>
+                      <span style={{ fontSize: 11, fontWeight: 800, color: '#7c3aed' }}>{pct}%</span>
+                    </div>
+                    <div style={{ background: '#ddd6fe', borderRadius: 99, height: 5, overflow: 'hidden' }}>
+                      <div style={{ background: '#7c3aed', height: '100%', width: `${pct}%`, borderRadius: 99, transition: 'width 0.6s ease' }} />
+                    </div>
                   </div>
-                  {reviewers.map((r: any) => (
-                    <PerfRow key={r.user_id} name={r.name} assigned={r.sources_count} completed={r.approved_count} avgHours={r.avg_hours_per_source} role="reviewer" />
-                  ))}
-                </div>
-              )}
+                )
+              })}
             </div>
           )}
         </div>

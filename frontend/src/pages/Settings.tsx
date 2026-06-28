@@ -1,253 +1,298 @@
 import { useState } from 'react'
-import { Card, Button, Input, Select, Badge, toast } from '@/components/ui'
-import { Settings2, Database, Cloud, Bell, Palette, Shield, Save, CheckCircle2, ExternalLink } from 'lucide-react'
+import { Save, Settings2, Bell, Palette, Cloud, ExternalLink, CheckCircle2, Info } from 'lucide-react'
+import { Button, Input, Select, toast } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 
-type Tab = 'general' | 'storage' | 'notifications' | 'appearance'
+type Tab = 'general' | 'notifications' | 'appearance' | 'storage'
 
-export function SettingsPage() {
-  const { user } = useAuthStore()
-  const [tab, setTab] = useState<Tab>('general')
-  const isAdmin = user?.roles.includes('org_admin')
+const TABS: { id: Tab; icon: any; label: string; adminOnly?: boolean }[] = [
+  { id: 'general',       icon: Settings2, label: 'General' },
+  { id: 'notifications', icon: Bell,      label: 'Notifications' },
+  { id: 'appearance',    icon: Palette,   label: 'Appearance' },
+  { id: 'storage',       icon: Cloud,     label: 'Storage',    adminOnly: true },
+]
 
-  const tabs: { id: Tab; icon: any; label: string; adminOnly?: boolean }[] = [
-    { id: 'general',       icon: Settings2, label: 'General' },
-    { id: 'storage',       icon: Cloud,     label: 'Storage',       adminOnly: true },
-    { id: 'notifications', icon: Bell,      label: 'Notifications' },
-    { id: 'appearance',    icon: Palette,   label: 'Appearance' },
-  ]
-
+function SectionCard({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <div className="p-8 max-w-4xl mx-auto space-y-6 animate-fade-in">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
-        <p className="text-sm text-gray-500 mt-1">Configure platform behaviour and integrations</p>
+    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+      <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9' }}>
+        <p style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>{title}</p>
+        {description && <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>{description}</p>}
       </div>
-
-      <div className="flex gap-6">
-        {/* Sidebar tabs */}
-        <aside className="w-48 shrink-0">
-          <nav className="space-y-1">
-            {tabs.filter(t => !t.adminOnly || isAdmin).map(({ id, icon: Icon, label, adminOnly }) => (
-              <button
-                key={id}
-                onClick={() => setTab(id)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150 ${
-                  tab === id
-                    ? 'bg-brand-50 text-brand-700 shadow-sm'
-                    : 'text-gray-600 hover:bg-gray-100'
-                }`}
-              >
-                <Icon className="w-4 h-4 shrink-0" />
-                <span>{label}</span>
-                {adminOnly && <Badge variant="purple" className="ml-auto text-xs px-1.5 py-0">Admin</Badge>}
-              </button>
-            ))}
-          </nav>
-        </aside>
-
-        {/* Panel */}
-        <div className="flex-1 min-w-0">
-          {tab === 'general'       && <GeneralSettings />}
-          {tab === 'storage'       && <StorageSettings />}
-          {tab === 'notifications' && <NotificationSettings />}
-          {tab === 'appearance'    && <AppearanceSettings />}
-        </div>
+      <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+        {children}
       </div>
     </div>
   )
 }
 
+function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <button onClick={() => onChange(!checked)}
+      style={{ width: 40, height: 22, borderRadius: 99, border: 'none', cursor: 'pointer', position: 'relative', background: checked ? '#2563eb' : '#e2e8f0', transition: 'background 0.2s', flexShrink: 0 }}>
+      <span style={{ position: 'absolute', top: 3, width: 16, height: 16, borderRadius: '50%', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.2)', left: checked ? 21 : 3, transition: 'left 0.2s' }} />
+    </button>
+  )
+}
+
+// ── General Settings ──────────────────────────────────────────────────────────
 function GeneralSettings() {
-  const [form, setForm] = useState({ platform_name: 'Xtrium DataOps', timezone: 'UTC', date_format: 'DD/MM/YYYY' })
-  const save = () => toast.success('Settings saved')
+  const [form, setForm] = useState({ platform_name: 'Xtrium DataOps', timezone: 'Africa/Nairobi', date_format: 'DD/MM/YYYY' })
+  const [saved, setSaved] = useState(false)
+
+  const save = () => { setSaved(true); toast.success('General settings saved'); setTimeout(() => setSaved(false), 2000) }
+
   return (
-    <Card className="p-6 space-y-5">
-      <h2 className="text-base font-semibold text-gray-900">General</h2>
-      <Input label="Platform name" value={form.platform_name} onChange={e => setForm(f => ({ ...f, platform_name: e.target.value }))} />
-      <Select label="Timezone" value={form.timezone} onChange={e => setForm(f => ({ ...f, timezone: e.target.value }))}>
-        <option value="UTC">UTC</option>
-        <option value="Africa/Nairobi">Africa/Nairobi (EAT)</option>
-        <option value="Europe/London">Europe/London</option>
-        <option value="America/New_York">America/New_York</option>
-        <option value="Asia/Dubai">Asia/Dubai</option>
-      </Select>
-      <Select label="Date format" value={form.date_format} onChange={e => setForm(f => ({ ...f, date_format: e.target.value }))}>
-        <option value="DD/MM/YYYY">DD/MM/YYYY</option>
-        <option value="MM/DD/YYYY">MM/DD/YYYY</option>
-        <option value="YYYY-MM-DD">YYYY-MM-DD (ISO)</option>
-      </Select>
-      <div className="pt-2 border-t border-gray-100 flex justify-end">
-        <Button onClick={save}><Save className="w-4 h-4" /> Save Changes</Button>
-      </div>
-    </Card>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <SectionCard title="Platform" description="Basic configuration for the platform display.">
+        <div>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Platform name</label>
+          <input value={form.platform_name} onChange={e => setForm(f => ({ ...f, platform_name: e.target.value }))}
+            style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Timezone</label>
+            <select value={form.timezone} onChange={e => setForm(f => ({ ...f, timezone: e.target.value }))}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none' }}>
+              <option value="Africa/Nairobi">Africa/Nairobi (EAT +3)</option>
+              <option value="UTC">UTC</option>
+              <option value="Europe/London">Europe/London (GMT/BST)</option>
+              <option value="America/New_York">America/New_York (EST/EDT)</option>
+              <option value="Asia/Dubai">Asia/Dubai (GST +4)</option>
+            </select>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Date format</label>
+            <select value={form.date_format} onChange={e => setForm(f => ({ ...f, date_format: e.target.value }))}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none' }}>
+              <option value="DD/MM/YYYY">DD/MM/YYYY</option>
+              <option value="MM/DD/YYYY">MM/DD/YYYY</option>
+              <option value="YYYY-MM-DD">YYYY-MM-DD (ISO 8601)</option>
+            </select>
+          </div>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 4 }}>
+          <button onClick={save}
+            style={{ padding: '8px 20px', background: saved ? '#059669' : '#2563eb', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, transition: 'background 0.2s' }}>
+            {saved ? <><CheckCircle2 style={{ width: 14, height: 14 }} /> Saved</> : <><Save style={{ width: 14, height: 14 }} /> Save Changes</>}
+          </button>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Platform Info" description="Read-only system information.">
+        {[
+          { label: 'Version',   value: 'Xtrium DataOps v2.0' },
+          { label: 'Built by',  value: 'Emmanuel Otieno · otienoemmanuel683@gmail.com' },
+          { label: 'Backend',   value: 'FastAPI + PostgreSQL (Railway)' },
+          { label: 'Frontend',  value: 'React + Vite + TypeScript (Vercel)' },
+          { label: 'AI Engine', value: 'Claude (Anthropic) — extraction + LLM verify' },
+        ].map(({ label, value }) => (
+          <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid #f8fafc', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#64748b', fontWeight: 500 }}>{label}</span>
+            <span style={{ fontSize: 12, color: '#1e293b', fontWeight: 600 }}>{value}</span>
+          </div>
+        ))}
+      </SectionCard>
+    </div>
   )
 }
 
-function StorageSettings() {
-  const [form, setForm] = useState({
-    provider: 'r2',
-    endpoint_url: '',
-    access_key_id: '',
-    secret_access_key: '',
-    bucket: 'xtrium-uploads',
-    region: 'auto',
-  })
-
-  const save = () => toast.info('This panel is a copy-paste helper, not a live integration — set these as actual Railway environment variables')
-
-  const providerHint = form.provider === 'r2'
-    ? 'Cloudflare dashboard → R2 → your bucket → Manage API tokens'
-    : 'AWS Console → IAM → your access key, and S3 → your bucket region'
-
-  return (
-    <Card className="p-6 space-y-5">
-      <div className="flex items-start justify-between">
-        <h2 className="text-base font-semibold text-gray-900">Object Storage</h2>
-        <a href={form.provider === 'r2' ? 'https://developers.cloudflare.com/r2/' : 'https://docs.aws.amazon.com/s3/'} target="_blank" rel="noopener noreferrer"
-          className="flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700">
-          Docs <ExternalLink className="w-3 h-3" />
-        </a>
-      </div>
-
-      <div className="bg-amber-50 border border-amber-100 rounded-xl p-4">
-        <p className="text-sm font-medium text-amber-800">This panel doesn't save anything yet</p>
-        <p className="text-xs text-amber-700 mt-1">
-          There's no backend endpoint wired to this form. Use it to draft the values, then copy the
-          generated block below into your actual Railway environment variables.
-        </p>
-      </div>
-
-      <Select label="Storage provider" value={form.provider} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}>
-        <option value="r2">Cloudflare R2</option>
-        <option value="s3">AWS S3</option>
-      </Select>
-
-      <Input label="Endpoint URL" value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))}
-        placeholder={form.provider === 'r2' ? 'https://<account_id>.r2.cloudflarestorage.com' : 'https://s3.<region>.amazonaws.com'}
-        hint={providerHint} />
-
-      <Input label="Access Key ID" value={form.access_key_id} onChange={e => setForm(f => ({ ...f, access_key_id: e.target.value }))}
-        placeholder="AKIA... or R2 token key" />
-
-      <Input label="Secret Access Key" type="password" value={form.secret_access_key} onChange={e => setForm(f => ({ ...f, secret_access_key: e.target.value }))}
-        placeholder="••••••••" />
-
-      <Input label="Bucket name" value={form.bucket} onChange={e => setForm(f => ({ ...f, bucket: e.target.value }))}
-        hint="Create this bucket with your provider first" />
-
-      <Input label="Region" value={form.region} onChange={e => setForm(f => ({ ...f, region: e.target.value }))}
-        hint="R2 uses 'auto'; AWS S3 needs the real region (e.g. us-east-1)" />
-
-      <div className="bg-gray-50 rounded-xl p-4 border border-gray-100">
-        <p className="text-xs font-semibold text-gray-700 mb-2">Set these in Railway → backend service → Variables:</p>
-        <pre className="text-xs text-gray-600 font-mono whitespace-pre-wrap">
-{`STORAGE_PROVIDER=s3
-S3_ENDPOINT_URL=${form.endpoint_url || '(see hint above)'}
-S3_ACCESS_KEY_ID=${form.access_key_id || 'your-access-key'}
-S3_SECRET_ACCESS_KEY=your-secret-key
-S3_BUCKET_NAME=${form.bucket}
-S3_REGION=${form.region}`}
-        </pre>
-      </div>
-
-      <div className="pt-2 border-t border-gray-100 flex justify-end">
-        <Button onClick={save}><Save className="w-4 h-4" /> Copy Reminder</Button>
-      </div>
-    </Card>
-  )
-}
-
+// ── Notification Settings ─────────────────────────────────────────────────────
 function NotificationSettings() {
   const [prefs, setPrefs] = useState({
-    job_ready:     { inapp: true,  email: false },
-    record_flagged:{ inapp: true,  email: true  },
-    submission:    { inapp: true,  email: true  },
-    llm_failed:    { inapp: true,  email: false },
+    source_ready:    { inapp: true,  email: false, label: 'Source ready for review' },
+    record_rejected: { inapp: true,  email: false, label: 'Record sent back for fixes' },
+    source_approved: { inapp: true,  email: true,  label: 'Source approved' },
+    batch_submitted: { inapp: true,  email: true,  label: 'Records submitted to client' },
+    llm_flagged:     { inapp: true,  email: false, label: 'LLM verification flagged records' },
+    schema_error:    { inapp: true,  email: false, label: 'Schema validation errors on upload' },
   })
-
-  const labels: Record<string, string> = {
-    job_ready:      'Job ready for review',
-    record_flagged: 'Record escalated / flagged',
-    submission:     'Batch submitted',
-    llm_failed:     'LLM review failed',
-  }
 
   const toggle = (key: string, channel: 'inapp' | 'email') => {
     setPrefs(p => ({ ...p, [key]: { ...p[key as keyof typeof p], [channel]: !p[key as keyof typeof p][channel] } }))
   }
 
   return (
-    <Card className="p-6 space-y-5">
-      <h2 className="text-base font-semibold text-gray-900">Notification Preferences</h2>
-      <div className="space-y-1">
-        <div className="grid grid-cols-3 text-xs font-medium text-gray-400 uppercase tracking-wide pb-2 border-b border-gray-100">
-          <span>Event</span>
-          <span className="text-center">In-app</span>
-          <span className="text-center">Email</span>
+    <SectionCard title="Notification Preferences" description="Choose which events trigger notifications.">
+      <div style={{ borderBottom: '1px solid #f1f5f9', paddingBottom: 8, display: 'grid', gridTemplateColumns: '1fr 80px 80px', gap: 8 }}>
+        <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Event</span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', textAlign: 'center' }}>In-app</span>
+        <span style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', textAlign: 'center' }}>Email</span>
+      </div>
+      {Object.entries(prefs).map(([key, val]) => (
+        <div key={key} style={{ display: 'grid', gridTemplateColumns: '1fr 80px 80px', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid #f8fafc' }}>
+          <span style={{ fontSize: 13, color: '#374151' }}>{val.label}</span>
+          <div style={{ display: 'flex', justifyContent: 'center' }}><Toggle checked={val.inapp} onChange={v => toggle(key, 'inapp')} /></div>
+          <div style={{ display: 'flex', justifyContent: 'center' }}><Toggle checked={val.email} onChange={v => toggle(key, 'email')} /></div>
         </div>
-        {Object.entries(prefs).map(([key, val]) => (
-          <div key={key} className="grid grid-cols-3 items-center py-3 border-b border-gray-50 last:border-0">
-            <span className="text-sm text-gray-700">{labels[key]}</span>
-            {(['inapp', 'email'] as const).map(ch => (
-              <div key={ch} className="flex justify-center">
-                <button
-                  onClick={() => toggle(key, ch)}
-                  className={`w-10 h-5.5 rounded-full transition-all duration-200 relative ${val[ch] ? 'bg-brand-600' : 'bg-gray-200'}`}
-                  style={{ height: 22 }}
-                >
-                  <span className={`absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-all duration-200 ${val[ch] ? 'left-5' : 'left-0.5'}`} />
-                </button>
-              </div>
-            ))}
-          </div>
-        ))}
+      ))}
+      <div style={{ display: 'flex', justifyContent: 'flex-end', paddingTop: 8 }}>
+        <button onClick={() => toast.success('Notification preferences saved')}
+          style={{ padding: '8px 20px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Save style={{ width: 14, height: 14 }} /> Save Preferences
+        </button>
       </div>
-      <div className="pt-2 flex justify-end">
-        <Button onClick={() => toast.success('Notification preferences saved')}><Save className="w-4 h-4" /> Save</Button>
-      </div>
-    </Card>
+    </SectionCard>
   )
 }
 
+// ── Appearance ────────────────────────────────────────────────────────────────
 function AppearanceSettings() {
-  const [theme, setTheme] = useState('light')
+  const [theme, setTheme]     = useState('light')
   const [density, setDensity] = useState('comfortable')
 
-  return (
-    <Card className="p-6 space-y-6">
-      <h2 className="text-base font-semibold text-gray-900">Appearance</h2>
+  const THEMES = [
+    { id: 'light', label: 'Light', top: '#fff', bottom: '#f8fafc' },
+    { id: 'dark',  label: 'Dark',  top: '#0f172a', bottom: '#1e293b' },
+    { id: 'auto',  label: 'System', top: '#fff', bottom: '#0f172a' },
+  ]
 
-      <div>
-        <p className="text-sm font-medium text-gray-700 mb-3">Theme</p>
-        <div className="grid grid-cols-3 gap-3">
-          {[
-            { id: 'light', label: 'Light', bg: 'bg-white', border: 'border-gray-200' },
-            { id: 'dark',  label: 'Dark',  bg: 'bg-slate-900', border: 'border-slate-700' },
-            { id: 'auto',  label: 'System', bg: 'bg-gradient-to-br from-white to-slate-900', border: 'border-gray-300' },
-          ].map(t => (
-            <button key={t.id} onClick={() => { setTheme(t.id); toast.info('Theme switching coming soon') }}
-              className={`relative p-3 rounded-xl border-2 transition ${theme === t.id ? 'border-brand-500 ring-2 ring-brand-100' : 'border-gray-200 hover:border-gray-300'}`}>
-              <div className={`h-12 rounded-lg mb-2 ${t.bg} border ${t.border}`} />
-              <p className="text-xs font-medium text-gray-700">{t.label}</p>
-              {theme === t.id && <CheckCircle2 className="absolute top-2 right-2 w-4 h-4 text-brand-600" />}
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <SectionCard title="Theme" description="Choose your preferred colour scheme.">
+        <div style={{ display: 'flex', gap: 12 }}>
+          {THEMES.map(t => (
+            <button key={t.id} onClick={() => { setTheme(t.id); if (t.id !== 'light') toast.info('Dark mode coming soon — stay tuned!') }}
+              style={{ flex: 1, padding: '4px', border: `2px solid ${theme === t.id ? '#2563eb' : '#e2e8f0'}`, borderRadius: 14, background: 'none', cursor: 'pointer', position: 'relative', transition: 'border-color 0.15s' }}>
+              <div style={{ height: 70, borderRadius: 10, overflow: 'hidden', background: `linear-gradient(180deg, ${t.top} 50%, ${t.bottom} 100%)`, border: '1px solid #e2e8f0' }}>
+                {/* Mini sidebar + content preview */}
+                <div style={{ display: 'flex', height: '100%' }}>
+                  <div style={{ width: 24, background: theme === t.id ? '#1e293b' : '#f1f5f9', borderRight: `1px solid ${theme === t.id ? '#334155' : '#e2e8f0'}' ` }} />
+                  <div style={{ flex: 1, padding: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    <div style={{ height: 6, background: '#e2e8f0', borderRadius: 3, width: '70%' }} />
+                    <div style={{ height: 6, background: '#e2e8f0', borderRadius: 3, width: '50%' }} />
+                    <div style={{ height: 6, background: '#bfdbfe', borderRadius: 3, width: '60%', marginTop: 4 }} />
+                  </div>
+                </div>
+              </div>
+              <p style={{ fontSize: 11, fontWeight: 600, color: theme === t.id ? '#2563eb' : '#64748b', margin: '6px 0 2px', textAlign: 'center' }}>{t.label}</p>
+              {theme === t.id && <CheckCircle2 style={{ position: 'absolute', top: 8, right: 8, width: 16, height: 16, color: '#2563eb' }} />}
             </button>
           ))}
         </div>
+      </SectionCard>
+
+      <SectionCard title="Display Density" description="Control spacing and table row height.">
+        <div style={{ display: 'flex', gap: 8 }}>
+          {['Compact', 'Comfortable', 'Spacious'].map(d => (
+            <button key={d} onClick={() => { setDensity(d.toLowerCase()); toast.success(`Density set to ${d}`) }}
+              style={{ flex: 1, padding: '10px', border: `2px solid ${density === d.toLowerCase() ? '#2563eb' : '#e2e8f0'}`, borderRadius: 10, background: density === d.toLowerCase() ? '#eff6ff' : '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600, color: density === d.toLowerCase() ? '#2563eb' : '#64748b', transition: 'all 0.15s' }}>
+              {d}
+            </button>
+          ))}
+        </div>
+      </SectionCard>
+    </div>
+  )
+}
+
+// ── Storage Settings ──────────────────────────────────────────────────────────
+function StorageSettings() {
+  const [form, setForm] = useState({ provider: 'r2', endpoint_url: '', access_key_id: '', bucket: 'xtrium-uploads', region: 'auto' })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 12, padding: '12px 16px', display: 'flex', gap: 10 }}>
+        <Info style={{ width: 16, height: 16, color: '#d97706', flexShrink: 0, marginTop: 1 }} />
+        <div>
+          <p style={{ fontSize: 13, fontWeight: 700, color: '#92400e', margin: '0 0 3px' }}>Set these in Railway environment variables</p>
+          <p style={{ fontSize: 12, color: '#b45309', margin: 0, lineHeight: 1.5 }}>This panel helps you draft values. The actual storage config must be set directly in Railway → backend service → Variables — not through this UI.</p>
+        </div>
       </div>
 
-      <div>
-        <p className="text-sm font-medium text-gray-700 mb-3">Display density</p>
-        <Select value={density} onChange={e => setDensity(e.target.value)}>
-          <option value="compact">Compact</option>
-          <option value="comfortable">Comfortable</option>
-          <option value="spacious">Spacious</option>
-        </Select>
+      <SectionCard title="Object Storage" description="Configure Cloudflare R2 or AWS S3 for file uploads.">
+        <div>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Storage provider</label>
+          <select value={form.provider} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}
+            style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none' }}>
+            <option value="r2">Cloudflare R2 (recommended)</option>
+            <option value="s3">AWS S3</option>
+          </select>
+        </div>
+        <div>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Endpoint URL</label>
+          <input value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))}
+            placeholder={form.provider === 'r2' ? 'https://<account_id>.r2.cloudflarestorage.com' : 'https://s3.<region>.amazonaws.com'}
+            style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Bucket name</label>
+            <input value={form.bucket} onChange={e => setForm(f => ({ ...f, bucket: e.target.value }))}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Region</label>
+            <input value={form.region} onChange={e => setForm(f => ({ ...f, region: e.target.value }))}
+              placeholder="auto (R2) or us-east-1 (S3)"
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard title="Railway Variables Block" description="Copy this directly into Railway → backend → Variables.">
+        <pre style={{ background: '#0f172a', color: '#e2e8f0', borderRadius: 10, padding: '14px 16px', fontSize: 12, fontFamily: 'monospace', margin: 0, lineHeight: 1.8, overflowX: 'auto' }}>
+{`STORAGE_PROVIDER=${form.provider === 'r2' ? 's3' : 's3'}
+S3_ENDPOINT_URL=${form.endpoint_url || '<your-endpoint>'}
+S3_ACCESS_KEY_ID=<paste-from-provider>
+S3_SECRET_ACCESS_KEY=<paste-from-provider>
+S3_BUCKET_NAME=${form.bucket}
+S3_REGION=${form.region}`}
+        </pre>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <a href={form.provider === 'r2' ? 'https://developers.cloudflare.com/r2/' : 'https://docs.aws.amazon.com/s3/'} target="_blank" rel="noopener noreferrer"
+            style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+            <ExternalLink style={{ width: 12, height: 12 }} /> Provider docs
+          </a>
+          <button onClick={() => { navigator.clipboard.writeText(`STORAGE_PROVIDER=s3\nS3_ENDPOINT_URL=${form.endpoint_url || '<your-endpoint>'}\nS3_ACCESS_KEY_ID=<paste>\nS3_SECRET_ACCESS_KEY=<paste>\nS3_BUCKET_NAME=${form.bucket}\nS3_REGION=${form.region}`); toast.success('Copied to clipboard') }}
+            style={{ padding: '7px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#374151' }}>
+            Copy block
+          </button>
+        </div>
+      </SectionCard>
+    </div>
+  )
+}
+
+// ── Main Settings Page ────────────────────────────────────────────────────────
+export function SettingsPage() {
+  const { user } = useAuthStore()
+  const [tab, setTab] = useState<Tab>('general')
+  const isAdmin = user?.roles?.includes('org_admin')
+
+  const visibleTabs = TABS.filter(t => !t.adminOnly || isAdmin)
+
+  return (
+    <div style={{ padding: '32px', maxWidth: 900, margin: '0 auto' }}>
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: 0 }}>Settings</h1>
+        <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>Configure platform behaviour and preferences</p>
       </div>
 
-      <div className="pt-2 border-t border-gray-100 flex justify-end">
-        <Button onClick={() => toast.success('Appearance settings saved')}><Save className="w-4 h-4" /> Save</Button>
+      <div style={{ display: 'flex', gap: 24 }}>
+        {/* Sidebar */}
+        <aside style={{ width: 190, flexShrink: 0 }}>
+          <nav style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {visibleTabs.map(({ id, icon: Icon, label, adminOnly }) => (
+              <button key={id} onClick={() => setTab(id)}
+                style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', borderRadius: 10, border: 'none', cursor: 'pointer', textAlign: 'left', fontSize: 13, fontWeight: 600, transition: 'all 0.15s', background: tab === id ? '#eff6ff' : 'transparent', color: tab === id ? '#2563eb' : '#64748b' }}>
+                <Icon style={{ width: 15, height: 15, flexShrink: 0 }} />
+                {label}
+                {adminOnly && <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 20, background: '#faf5ff', color: '#7c3aed', border: '1px solid #c4b5fd' }}>Admin</span>}
+              </button>
+            ))}
+          </nav>
+        </aside>
+
+        {/* Content */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {tab === 'general'       && <GeneralSettings />}
+          {tab === 'notifications' && <NotificationSettings />}
+          {tab === 'appearance'    && <AppearanceSettings />}
+          {tab === 'storage'       && <StorageSettings />}
+        </div>
       </div>
-    </Card>
+    </div>
   )
 }
