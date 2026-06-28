@@ -238,7 +238,6 @@ def export_project(
 
     sources = db.query(Source).filter(
         Source.project_id == project_id,
-        Source.deleted_at == None
     ).all()
 
     # ExtractedRecord has no direct source_id — must go through ExtractionJob
@@ -370,7 +369,6 @@ def export_project_package(
 
     sources = db.query(Source).filter(
         Source.project_id == project_id,
-        Source.deleted_at == None,
     ).order_by(Source.name).all()
 
     ts_label = datetime.now(timezone.utc).strftime("%d %B %Y, %H:%M UTC")
