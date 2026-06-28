@@ -1622,7 +1622,64 @@ def clear_source_records(
     }
 
 
-# ─── Admin: Dismiss a web check flag on a record ──────────────────────────────
+# ─── Admin: Unlock submitted records (allow re-review and re-submit) ─────────
+
+@router.post("/{source_id}/unlock", status_code=200)
+def unlock_source_records(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin-only: Unlock all submitted records on a source so they can be
+    corrected and re-submitted. Resets is_submitted, submitted_at, and
+    moves the source status back to in_review.
+    """
+    source = _get_source_or_404(source_id, db)
+
+    if not _can_manage_source(current_user, source):
+        raise HTTPException(status_code=403, detail="Only admins can unlock submitted records")
+
+    job_ids = [
+        j.id for j in db.query(ExtractionJob).filter(
+            ExtractionJob.source_id == source_id
+        ).all()
+    ]
+
+    unlocked = 0
+    if job_ids:
+        records = db.query(ExtractedRecord).filter(
+            ExtractedRecord.job_id.in_(job_ids),
+            ExtractedRecord.is_submitted == True,
+        ).all()
+        for r in records:
+            r.is_submitted = False
+            r.submitted_at = None
+            unlocked += 1
+
+        # Reset job submitted counts and status back to validated
+        for job in db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).all():
+            job.total_submitted = 0
+            job.status = JobStatus.VALIDATED
+
+    # Move source back to in_review so it can be re-worked
+    if unlocked > 0:
+        source.status = SourceStatus.IN_REVIEW
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        project_id=source.project_id,
+        action=AuditAction.SOURCE_STATUS_CHANGED,
+        before_value={"status": "approved", "submitted": True},
+        after_value={"status": "in_review", "unlocked_records": unlocked},
+    ))
+    db.commit()
+
+    return {
+        "message": f"Unlocked {unlocked} record(s) — source moved back to In Review",
+        "unlocked": unlocked,
+        "source_id": source_id,
+    }
 
 @router.delete("/{source_id}/records/{record_id}/flags/{flag_index}")
 def dismiss_flag(

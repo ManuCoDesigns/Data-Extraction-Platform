@@ -127,7 +127,12 @@ export const projectsApi = {
   },
   exportPackage: async (projectId: string, projectName = 'project') => {
     const r = await api.get(`/projects/${projectId}/export-package`, { responseType: 'blob' })
-    triggerBrowserDownload(new Blob([r.data], { type: 'application/zip' }), `${projectName.replace(/[^a-z0-9]/gi,'_')}_package.zip`)
+    const url = URL.createObjectURL(new Blob([r.data], { type: 'application/zip' }))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${projectName.replace(/[^a-z0-9]/gi, '_')}_package_${new Date().toISOString().slice(0, 10)}.zip`
+    a.click()
+    URL.revokeObjectURL(url)
   },
 }
 
@@ -137,8 +142,8 @@ export const jobsApi = {
   get: (id: string) => api.get(`/jobs/${id}`).then(r => r.data),
   history: (id: string) => api.get(`/jobs/${id}/history`).then(r => r.data),
   retry: (id: string) => api.post(`/jobs/${id}/retry`).then(r => r.data),
-  delete: (id: string) => api.delete(`/jobs/${id}`).then(r => r.data),
   skipLlm: (id: string) => api.post(`/jobs/${id}/skip-llm`).then(r => r.data),
+  delete: (id: string) => api.delete(`/jobs/${id}`).then(r => r.data),
   upload: (projectId: string, formData: FormData) =>
     api.post(`/jobs/${projectId}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -284,6 +289,8 @@ export const sourcesApi = {
     api.post(`/sources/${id}/reset`, null, { params: { clear_records: clearRecords } }).then(r => r.data),
   clearRecords: (id: string) =>
     api.delete(`/sources/${id}/records`).then(r => r.data),
+  unlockRecords: (id: string) =>
+    api.post(`/sources/${id}/unlock`).then(r => r.data),
   dismissFlag: (sourceId: string, recordId: string, flagIndex: number) =>
     api.delete(`/sources/${sourceId}/records/${recordId}/flags/${flagIndex}`).then(r => r.data),
   schema: (id: string) => api.get(`/sources/${id}/schema`).then(r => r.data),

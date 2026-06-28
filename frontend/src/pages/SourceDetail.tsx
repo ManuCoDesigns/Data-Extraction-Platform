@@ -424,6 +424,22 @@ export function SourceDetailPage() {
               <Send className="w-3.5 h-3.5" /> Submit Records
             </Button>
           )}
+          {source.status === 'approved' && isAdmin && (
+            <Button variant="secondary" size="sm"
+              className="!text-amber-600 !border-amber-200 hover:!bg-amber-50"
+              onClick={async () => {
+                if (!window.confirm(`Unlock all submitted records in "${source.name}"?\n\nThis resets their submitted status so they can be corrected and re-submitted.`)) return
+                try {
+                  const r = await sourcesApi.unlockRecords(sourceId!)
+                  toast.success(r.message || 'Records unlocked — source moved back to In Review')
+                  load()
+                } catch (err: any) {
+                  toast.error(err?.response?.data?.detail || 'Unlock failed')
+                }
+              }}>
+              <RotateCcw className="w-3.5 h-3.5" /> Unlock Records
+            </Button>
+          )}
           {isAdmin && source.status !== 'approved' && (
             <Button variant="secondary" size="sm" onClick={() => setDeleteSourceConfirm(true)}
               className="!text-red-600 !border-red-200 hover:!bg-red-50">
