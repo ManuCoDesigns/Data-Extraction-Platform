@@ -363,73 +363,34 @@ def export_project(
         ).all()
 
         for job in jobs:
-            # Get records for this job
-            # Use text query to avoid SQLAlchemy strict enum validation on
-            # historic values like llm_verdict='SKIPPED' that aren't in the enum
-            from sqlalchemy import text as _text
+            # Back to ORM — safe now that LLMVerdict enum includes SKIPPED + FLAGGED
+            rec_q = db.query(ExtractedRecord).filter(
+                ExtractedRecord.job_id == job.id
+            )
             if status == "approved":
-                raw = db.execute(
-                    _text("SELECT id, extracted_fields, review_status, is_submitted, is_schema_valid FROM extracted_records WHERE job_id = :jid AND review_status = 'approved'"),
-                    {"jid": str(job.id)}
-                ).fetchall()
-            else:
-                raw = db.execute(
-                    _text("SELECT id, extracted_fields, review_status, is_submitted, is_schema_valid FROM extracted_records WHERE job_id = :jid"),
-                    {"jid": str(job.id)}
-                ).fetchall()
+                rec_q = rec_q.filter(
+                    ExtractedRecord.review_status == ReviewStatus.APPROVED
+                )
 
-            import json as _json2
-            for row in raw:
-                r_id, r_ef, r_rs, r_sub, r_valid = row
+            for r in rec_q.all():
                 try:
-                    ef = _json2.loads(r_ef) if isinstance(r_ef, str) else (r_ef or {})
-                except Exception:
-                    ef = {}
-                # Wrap as a simple object for the rest of the logic
-                class _R:
-                    pass
-                r = _R()
-                r.id = r_id
-                r.extracted_fields = ef
-                r.review_status = type('RS', (), {'value': str(r_rs)})()
-                r.is_submitted = bool(r_sub)
-                r.is_schema_valid = bool(r_valid)
-                try:
-                    # extracted_fields is a JSON column — could be dict, None, or edge cases
-                    ef = r.extracted_fields
-                    if ef is None:
-                        fields = {}
-                    elif isinstance(ef, dict):
-                        fields = dict(ef)
-                    else:
-                        import json as _j
-                        fields = _j.loads(str(ef)) if ef else {}
-
-                    review_status_str = (
-                        r.review_status.value
-                        if hasattr(r.review_status, "value")
-                        else str(r.review_status)
-                    )
-                    fields["_xtrium"] = {
+                    ef = dict(r.extracted_fields) if isinstance(r.extracted_fields, dict) else (r.extracted_fields or {})
+                    review_str = r.review_status.value if hasattr(r.review_status, "value") else str(r.review_status)
+                    ef["_xtrium"] = {
                         "source_name":    source.name,
                         "source_status":  source.status.value,
-                        "review_status":  review_status_str,
+                        "review_status":  review_str,
                         "is_submitted":   bool(getattr(r, "is_submitted", False)),
                         "is_schema_valid": bool(getattr(r, "is_schema_valid", False)),
                         "exported_at":    datetime.now(timezone.utc).isoformat(),
                     }
-                    cn = (
-                        fields.get("canonical_name")
-                        or fields.get("company_name")
-                        or source.name
-                    )
+                    cn = ef.get("canonical_name") or ef.get("company_name") or source.name
                     all_records.append({
                         "source_name":    source.name,
                         "canonical_name": cn,
-                        "data":           fields,
+                        "data":           ef,
                     })
-                except Exception as record_err:
-                    # Skip bad records but don't crash the whole export
+                except Exception:
                     continue
 
     if not all_records:
