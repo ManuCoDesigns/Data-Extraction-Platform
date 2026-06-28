@@ -591,7 +591,12 @@ export function HelpPage() {
       <div style={{ marginTop: 40, padding: '20px 24px', background: '#f8fafc', borderRadius: 12, border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
           <p style={{ fontSize: 13, fontWeight: 700, color: '#1e293b', margin: 0 }}>Need more help?</p>
-          <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>Contact the platform team at raghu@xtrium.ai</p>
+          <p style={{ fontSize: 12, color: '#64748b', margin: '4px 0 0', lineHeight: 1.6 }}>
+            Designed & built by <strong style={{ color: '#2563eb' }}>Emmanuel Otieno</strong> — system architect, logic designer, and lead developer.
+          </p>
+          <a href="mailto:otienoemmanuel683@gmail.com" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>
+            otienoemmanuel683@gmail.com
+          </a>
         </div>
         <span style={{ fontSize: 11, color: '#94a3b8' }}>Xtrium DataOps Platform v2.0 · Internal Use Only</span>
       </div>
