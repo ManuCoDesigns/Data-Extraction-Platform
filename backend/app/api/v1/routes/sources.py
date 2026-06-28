@@ -28,7 +28,7 @@ from app.models.all_models import (
     Source, SourceStatus, Project, ProjectMember, User, Schema, SchemaVersion,
     ExtractionJob, ExtractedRecord, JobStatus, SourceType as FileSourceType,
     ExtractionConfidence, ReviewStatus, AuditLog, AuditAction, Notification,
-    SubmissionBatch, JobStateHistory, JobReviewer, LLMCallLog,
+    SubmissionBatch, LLMCallLog,
 )
 from app.schemas.api_schemas import (
     SourceCreate, SourceUpdate, SourceOut, SourceUploadSummary,
@@ -37,49 +37,6 @@ from app.schemas.api_schemas import (
 from app.services.schema_validator import validate_record, map_row_to_fields
 
 router = APIRouter(prefix="/sources", tags=["sources"])
-
-def _delete_jobs_safely(job_ids: list, source_id: str, db) -> None:
-    """
-    Clean up all child data before deleting extraction_jobs.
-    Uses ORM bulk operations (synchronize_session=False) — same approach
-    as the version that worked, just extended to handle submission_batches
-    and audit_log which now have rows after real submissions were made.
-
-    Order:
-      1. NULL audit_log.job_id  (nullable FK, ORM bulk update)
-      2. DELETE submission_batches (no CASCADE)
-      3. DELETE llm_call_log       (no CASCADE)
-      4. DELETE extracted_records  (CASCADE — explicit for performance)
-      5. DELETE extraction_jobs    (by source_id — same as working version)
-    """
-    if not job_ids:
-        return
-
-    # 1. Null out audit_log references — ORM update, not raw SQL
-    db.query(AuditLog).filter(
-        AuditLog.job_id.in_(job_ids)
-    ).update({'job_id': None}, synchronize_session=False)
-
-    # 2. Delete submission_batches
-    db.query(SubmissionBatch).filter(
-        SubmissionBatch.job_id.in_(job_ids)
-    ).delete(synchronize_session=False)
-
-    # 3. Delete llm_call_log
-    db.query(LLMCallLog).filter(
-        LLMCallLog.job_id.in_(job_ids)
-    ).delete(synchronize_session=False)
-
-    # 4. Delete records
-    db.query(ExtractedRecord).filter(
-        ExtractedRecord.job_id.in_(job_ids)
-    ).delete(synchronize_session=False)
-
-    # 5. Delete jobs by source_id (matches the working version exactly)
-    db.query(ExtractionJob).filter(
-        ExtractionJob.source_id == source_id
-    ).delete(synchronize_session=False)
-
 
 ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
 # Extensions that go through AI extraction (not mechanical row mapping)
@@ -197,60 +154,13 @@ def _get_source_or_404(source_id: str, db: Session) -> Source:
 
 
 def _recompute_counts(source: Source, db: Session):
-    """Update source counts AND sync status to reflect actual record state.
-    Called after every record change so source status is always accurate.
-    Never touches APPROVED status — that requires an explicit admin action.
-    """
     records = db.query(ExtractedRecord).join(ExtractionJob).filter(
         ExtractionJob.source_id == source.id
     ).all()
-
-    total    = len(records)
-    valid    = sum(1 for r in records if r.is_schema_valid)
-    invalid  = total - valid
-    approved = sum(1 for r in records if r.review_status == ReviewStatus.APPROVED)
-    rejected = sum(1 for r in records if r.review_status == ReviewStatus.REJECTED)
-    pending  = total - approved - rejected
-
-    source.total_records    = total
-    source.valid_records    = valid
-    source.invalid_records  = invalid
-    source.approved_records = approved
-
-    # Never auto-change an explicitly APPROVED source
-    if source.status == SourceStatus.APPROVED:
-        return
-
-    # No records → not started
-    if total == 0:
-        source.status = SourceStatus.NOT_STARTED
-        return
-
-    # Has schema-invalid records → extractor needs to fix
-    if invalid > 0:
-        source.status = SourceStatus.NEEDS_FIXES
-        return
-
-    # Reviewer sent records back → extractor needs to fix
-    if rejected > 0:
-        source.status = SourceStatus.CHANGES_REQUESTED
-        return
-
-    # All records approved → ready for source approval
-    if approved == total:
-        source.status = SourceStatus.IN_REVIEW
-        return
-
-    # Mix of approved/pending → actively in review
-    if approved > 0 or source.status in (
-        SourceStatus.IN_REVIEW, SourceStatus.LLM_VERIFICATION,
-        SourceStatus.CHANGES_REQUESTED,
-    ):
-        source.status = SourceStatus.IN_REVIEW
-        return
-
-    # All valid, no reviews started yet
-    source.status = SourceStatus.READY_FOR_REVIEW
+    source.total_records = len(records)
+    source.valid_records = sum(1 for r in records if r.is_schema_valid)
+    source.invalid_records = source.total_records - source.valid_records
+    source.approved_records = sum(1 for r in records if r.review_status == ReviewStatus.APPROVED)
 
 
 # ─── CRUD ────────────────────────────────────────────────────────────────────
@@ -966,21 +876,21 @@ def review_source_record(
     record.reviewed_by = current_user.id
     record.reviewed_at = datetime.now(timezone.utc)
 
-    # Set review_started_at on first review
-    if not source.review_started_at:
-        source.review_started_at = datetime.now(timezone.utc)
+    if source.status not in (SourceStatus.IN_REVIEW,):
+        source.status = SourceStatus.IN_REVIEW
+        source.review_started_at = source.review_started_at or datetime.now(timezone.utc)
 
-    # Notify extractor when record is sent back
-    if payload.action == "reject" and source.assigned_extractor_id:
-        db.add(Notification(
-            user_id=source.assigned_extractor_id,
-            title=f"Record sent back in '{source.name}'",
-            body=payload.note or "A reviewer sent a record back for fixes.",
-            link=f"/sources/{source.id}",
-        ))
+    if payload.action == "reject":
+        source.status = SourceStatus.CHANGES_REQUESTED
+        if source.assigned_extractor_id:
+            db.add(Notification(
+                user_id=source.assigned_extractor_id,
+                title=f"Record sent back in '{source.name}'",
+                body=payload.note or "A reviewer sent a record back for fixes.",
+                link=f"/sources/{source.id}",
+            ))
 
     db.flush()
-    # _recompute_counts sets the correct status based on all record states
     _recompute_counts(source, db)
     db.commit()
     db.refresh(record)
@@ -1200,7 +1110,7 @@ def delete_source(
 ):
     """Delete a source and all its jobs and records. Only admins can do this."""
     source = db.query(Source).filter(
-        Source.id == source_id,
+        Source.id == source_id
     ).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -1225,9 +1135,20 @@ def delete_source(
     source_status = source.status.value
     project_id = source.project_id
 
-    # For delete_source we must remove jobs too — use the full wipe helper
+    # Delete all records and jobs first
     job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
-    _delete_jobs_safely(job_ids, source_id, db)
+    if job_ids:
+        db.query(AuditLog).filter(
+            AuditLog.job_id.in_(job_ids)
+        ).update({'job_id': None}, synchronize_session=False)
+        db.query(SubmissionBatch).filter(
+            SubmissionBatch.job_id.in_(job_ids)
+        ).delete(synchronize_session=False)
+        db.query(LLMCallLog).filter(
+            LLMCallLog.job_id.in_(job_ids)
+        ).delete(synchronize_session=False)
+        db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
 
     db.delete(source)
     db.add(AuditLog(
@@ -1539,12 +1460,11 @@ Required format:
         db.flush()
 
     # Advance source status to llm_verification to reflect this stage ran
-    # Don't lock source at llm_verification — recompute real status from records
-    _recompute_counts(source, db)
+    source.status = SourceStatus.LLM_VERIFICATION
     db.add(AuditLog(
         user_id=current_user.id, project_id=source.project_id,
         action=AuditAction.SOURCE_STATUS_CHANGED,
-        before_value={}, after_value={"verified": verified_count, "flagged": flagged_count},
+        before_value={}, after_value={"status": "llm_verification", "verified": verified_count, "flagged": flagged_count},
     ))
     db.commit()
 
@@ -1635,7 +1555,26 @@ def reset_source(
         job_ids = [j.id for j in db.query(ExtractionJob).filter(
             ExtractionJob.source_id == source_id
         ).all()]
-        _delete_jobs_safely(job_ids, source_id, db)
+        if job_ids:
+            # NULL out audit_log.job_id (nullable FK) — preserves audit history
+            db.query(AuditLog).filter(
+                AuditLog.job_id.in_(job_ids)
+            ).update({'job_id': None}, synchronize_session=False)
+            # Delete submission_batches and llm_call_log (non-nullable FKs)
+            db.query(SubmissionBatch).filter(
+                SubmissionBatch.job_id.in_(job_ids)
+            ).delete(synchronize_session=False)
+            db.query(LLMCallLog).filter(
+                LLMCallLog.job_id.in_(job_ids)
+            ).delete(synchronize_session=False)
+            # Delete records
+            db.query(ExtractedRecord).filter(
+                ExtractedRecord.job_id.in_(job_ids)
+            ).delete(synchronize_session=False)
+        # Delete jobs by source_id (same as working version)
+        db.query(ExtractionJob).filter(
+            ExtractionJob.source_id == source_id
+        ).delete(synchronize_session=False)
 
     source.status = SourceStatus.NOT_STARTED
     source.total_records = 0
@@ -1682,11 +1621,22 @@ def clear_source_records(
 
     deleted_records = 0
     if job_ids:
-        # Count records before deleting
+        # NULL audit_log references, delete FK-constrained tables first
+        db.query(AuditLog).filter(
+            AuditLog.job_id.in_(job_ids)
+        ).update({'job_id': None}, synchronize_session=False)
+        db.query(SubmissionBatch).filter(
+            SubmissionBatch.job_id.in_(job_ids)
+        ).delete(synchronize_session=False)
+        db.query(LLMCallLog).filter(
+            LLMCallLog.job_id.in_(job_ids)
+        ).delete(synchronize_session=False)
         deleted_records = db.query(ExtractedRecord).filter(
             ExtractedRecord.job_id.in_(job_ids)
-        ).count()
-        _delete_jobs_safely(job_ids, source_id, db)
+        ).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(
+            ExtractionJob.id.in_(job_ids)
+        ).delete(synchronize_session=False)
 
     # Reset counts
     source.total_records = 0
