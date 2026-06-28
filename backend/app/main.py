@@ -14,6 +14,37 @@ async def lifespan(app: FastAPI):
     if settings.SENTRY_DSN:
         import sentry_sdk
         sentry_sdk.init(dsn=settings.SENTRY_DSN, environment=settings.ENVIRONMENT)
+
+    # ── One-time FK constraint migration ──────────────────────────────────
+    # Fixes missing ON DELETE CASCADE / SET NULL on extraction_jobs children.
+    # Runs on every startup but ALTER TABLE … IF NOT EXISTS means it's a no-op
+    # after the first successful run.
+    try:
+        from app.database import SessionLocal
+        from sqlalchemy import text
+        db = SessionLocal()
+        MIGRATIONS = [
+            # audit_log: preserve history, just null out the job_id
+            "ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_job_id_fkey",
+            "ALTER TABLE audit_log ADD CONSTRAINT audit_log_job_id_fkey "
+            "FOREIGN KEY (job_id) REFERENCES extraction_jobs(id) ON DELETE SET NULL",
+            # submission_batches: cascade delete
+            "ALTER TABLE submission_batches DROP CONSTRAINT IF EXISTS submission_batches_job_id_fkey",
+            "ALTER TABLE submission_batches ADD CONSTRAINT submission_batches_job_id_fkey "
+            "FOREIGN KEY (job_id) REFERENCES extraction_jobs(id) ON DELETE CASCADE",
+            # llm_call_log: cascade delete
+            "ALTER TABLE llm_call_log DROP CONSTRAINT IF EXISTS llm_call_log_job_id_fkey",
+            "ALTER TABLE llm_call_log ADD CONSTRAINT llm_call_log_job_id_fkey "
+            "FOREIGN KEY (job_id) REFERENCES extraction_jobs(id) ON DELETE CASCADE",
+        ]
+        for sql in MIGRATIONS:
+            db.execute(text(sql))
+        db.commit()
+        db.close()
+        print("✓ FK migration applied")
+    except Exception as e:
+        print(f"FK migration skipped: {e}")
+
     yield
 
 
