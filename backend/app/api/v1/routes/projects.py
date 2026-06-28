@@ -219,119 +219,140 @@ def export_project(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Export records from a project as a ZIP.
-    status=all      → every record
-    status=approved → only approved records
-    status=submitted→ only submitted records
-    Partial export is supported — you don't need all sources done.
+    Download all records from a project as a ZIP.
+    
+    ?status=all       → every record from every source
+    ?status=approved  → only sources with status=approved, approved records only
+    
+    Logic:
+      Source has no deleted_at.
+      Records link to sources through ExtractionJob (not directly).
+      Path: Source → ExtractionJob.source_id → ExtractedRecord.job_id
     """
     import io, zipfile, json as _json
     from datetime import datetime, timezone
     from fastapi.responses import StreamingResponse
-    from app.models.all_models import Source, ExtractedRecord, ExtractionJob, ReviewStatus
+    from app.models.all_models import Source, ExtractionJob, ExtractedRecord, ReviewStatus
 
-    project = db.query(Project).filter(
-        Project.id == project_id, Project.deleted_at == None
-    ).first()
+    # 1. Verify project exists
+    project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    sources = db.query(Source).filter(
-        Source.project_id == project_id,
-    ).all()
+    # 2. Get sources — filter to approved only if requested
+    source_q = db.query(Source).filter(Source.project_id == project_id)
+    if status == "approved":
+        from app.models.all_models import SourceStatus as SS
+        source_q = source_q.filter(Source.status == SS.APPROVED)
+    sources = source_q.all()
 
-    # ExtractedRecord has no direct source_id — must go through ExtractionJob
-    all_records = []
-    for source in sources:
-        job_ids = [
-            str(j.id) for j in db.query(ExtractionJob).filter(
-                ExtractionJob.source_id == str(source.id)
-            ).all()
-        ]
-        if not job_ids:
-            continue
-
-        q = db.query(ExtractedRecord).filter(
-            ExtractedRecord.job_id.in_(job_ids)
-        )
-        if status == "approved":
-            q = q.filter(ExtractedRecord.review_status == ReviewStatus.APPROVED)
-        elif status == "submitted":
-            q = q.filter(ExtractedRecord.is_submitted == True)
-
-        for r in q.all():
-            record_data = dict(r.extracted_fields or {})
-            record_data["_xtrium"] = {
-                "record_id": str(r.id),
-                "source_id": str(source.id),
-                "source_name": source.name,
-                "review_status": r.review_status.value if hasattr(r.review_status, 'value') else str(r.review_status),
-                "is_submitted": bool(r.is_submitted),
-                "is_schema_valid": r.is_schema_valid,
-                "exported_at": datetime.now(timezone.utc).isoformat(),
-            }
-            all_records.append(record_data)
-
-    if not all_records:
-        label = {"approved": "approved", "submitted": "submitted"}.get(status, "")
+    if not sources:
         raise HTTPException(
             status_code=404,
-            detail=f"No {label + ' ' if label else ''}records found. "
-                   f"{'Approve or submit records first.' if label else 'Upload data to sources first.'}"
+            detail="No approved sources found in this project. Approve sources first." if status == "approved"
+                   else "No sources found in this project."
         )
 
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    approved_count  = sum(1 for r in all_records if r["_xtrium"]["review_status"] == "approved")
-    submitted_count = sum(1 for r in all_records if r["_xtrium"]["is_submitted"])
+    # 3. Collect records through job_id path (Source has no direct records)
+    all_records = []
+    for source in sources:
+        # Find all extraction jobs for this source
+        jobs = db.query(ExtractionJob).filter(
+            ExtractionJob.source_id == source.id
+        ).all()
 
-    readme = (
-        f"# {project.name} — Xtrium Export\n\n"
-        f"Exported: {ts}\n"
-        f"Filter: {status}\n"
-        f"Total records: {len(all_records)}\n"
-        f"  • Approved: {approved_count}\n"
-        f"  • Submitted: {submitted_count}\n"
-        f"Sources with data: {len([s for s in sources if any(r['_xtrium']['source_id'] == str(s.id) for r in all_records)])}"
-        f" of {len(sources)} total\n\n"
-        f"## Contents\n"
-        f"- `records/` — one JSON per company\n"
-        f"- `combined.json` — all records merged\n"
-        f"- `README.md` — this file\n\n"
-        f"## Records per source\n"
-    )
+        for job in jobs:
+            # Get records for this job
+            rec_q = db.query(ExtractedRecord).filter(
+                ExtractedRecord.job_id == job.id
+            )
+            if status == "approved":
+                rec_q = rec_q.filter(
+                    ExtractedRecord.review_status == ReviewStatus.APPROVED
+                )
+
+            for r in rec_q.all():
+                fields = dict(r.extracted_fields) if r.extracted_fields else {}
+                fields["_xtrium"] = {
+                    "source_name":    source.name,
+                    "source_status":  source.status.value,
+                    "review_status":  r.review_status.value if hasattr(r.review_status, "value") else str(r.review_status),
+                    "is_submitted":   bool(r.is_submitted),
+                    "is_schema_valid": bool(r.is_schema_valid),
+                    "exported_at":    datetime.now(timezone.utc).isoformat(),
+                }
+                all_records.append({
+                    "source_name": source.name,
+                    "canonical_name": fields.get("canonical_name") or fields.get("company_name") or source.name,
+                    "data": fields,
+                })
+
+    if not all_records:
+        raise HTTPException(
+            status_code=404,
+            detail="No records found. Upload data to sources and approve records first."
+        )
+
+    # 4. Build ZIP
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    readme_lines = [
+        f"# {project.name} — Xtrium Export",
+        f"",
+        f"Exported: {ts}",
+        f"Filter:   {status}",
+        f"Records:  {len(all_records)}",
+        f"Sources:  {len(sources)}",
+        f"",
+        f"## Files",
+        f"- records/   one JSON per company (named by canonical_name)",
+        f"- combined.json   all records in one array",
+        f"- README.md   this file",
+        f"",
+        f"## Sources included",
+    ]
     for s in sources:
-        count = sum(1 for r in all_records if r["_xtrium"]["source_id"] == str(s.id))
+        count = sum(1 for r in all_records if r["source_name"] == s.name)
         if count:
-            readme += f"- {s.name}: {count} record(s)\n"
+            readme_lines.append(f"- {s.name}: {count} record(s) [{s.status.value}]")
 
     buf = io.BytesIO()
-    seen_names: dict[str, int] = {}
+    seen: dict = {}
+    combined = []
+
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("README.md", readme)
-        zf.writestr("combined.json", _json.dumps(all_records, indent=2, ensure_ascii=False, default=str))
-        for record in all_records:
-            # Use canonical_name exactly as stored — SOP naming convention.
-            # Never re-transform: the canonical_name IS the tracking key.
-            cn = str(record.get("canonical_name") or record.get("company_name") or "record").strip()
-            # Only strip characters that are truly invalid in ZIP paths
-            cn = cn.replace("/", "-").replace("\\", "-").replace(":", "-").replace("\n", "")
-            if not cn:
-                cn = "record"
-            if cn in seen_names:
-                seen_names[cn] += 1
-                cn = f"{cn}_{seen_names[cn]}"
+        zf.writestr("README.md", "\n".join(readme_lines))
+
+        for item in all_records:
+            # Filename = canonical_name, exactly as stored — SOP naming convention
+            cn = str(item["canonical_name"]).strip()
+            cn = cn.replace("/", "-").replace("\\", "-").replace(":", "-").replace("\n", "") or "record"
+            if cn in seen:
+                seen[cn] += 1
+                filename_cn = f"{cn}_{seen[cn]}"
             else:
-                seen_names[cn] = 0
-            zf.writestr(f"records/{cn}.json", _json.dumps(record, indent=2, ensure_ascii=False, default=str))
+                seen[cn] = 0
+                filename_cn = cn
+
+            record_json = item["data"]
+            combined.append(record_json)
+            zf.writestr(
+                f"records/{filename_cn}.json",
+                _json.dumps(record_json, indent=2, ensure_ascii=False, default=str)
+            )
+
+        zf.writestr(
+            "combined.json",
+            _json.dumps(combined, indent=2, ensure_ascii=False, default=str)
+        )
 
     buf.seek(0)
     project_slug = re.sub(r"[^a-z0-9_]", "_", project.name.lower())[:40]
-    filename = f"{project_slug}_export_{datetime.now().strftime('%Y%m%d')}.zip"
+    zip_filename = f"{project_slug}_{status}_{datetime.now().strftime('%Y%m%d')}.zip"
 
     return StreamingResponse(
         buf,
         media_type="application/zip",
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={"Content-Disposition": f'attachment; filename="{zip_filename}"'},
     )
 
 
