@@ -255,6 +255,7 @@ export interface Source {
   review_started_at?: string
   review_completed_at?: string
   approved_at?: string
+  canonical_name?: string
   created_by: string
 }
 

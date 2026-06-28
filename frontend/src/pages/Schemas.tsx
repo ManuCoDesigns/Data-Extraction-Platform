@@ -28,7 +28,13 @@ export function SchemasPage() {
       projectsApi.list().then((r: any) => setProjects(r.items || r)),
     ]).finally(() => setLoading(false))
 
-  useEffect(() => { load() }, [projectIdFilter])
+  useEffect(() => {
+    load()
+    const iv = setInterval(load, 60_000)
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    return () => { clearInterval(iv); window.removeEventListener('focus', onFocus) }
+  }, [projectIdFilter])
 
   const visible = schemas.filter(s => showArchived ? true : !s.is_archived)
   const projectMap = Object.fromEntries(projects.map(p => [p.id, p.name]))

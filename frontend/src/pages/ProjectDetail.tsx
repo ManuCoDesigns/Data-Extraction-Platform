@@ -50,7 +50,14 @@ export function ProjectDetailPage() {
     ]).finally(() => setLoading(false))
   }
 
-  useEffect(() => { setLoading(true); load() }, [projectId])
+  useEffect(() => {
+    setLoading(true); load()
+    const iv = setInterval(() => load(), 30_000)
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) load() })
+    return () => { clearInterval(iv); window.removeEventListener('focus', onFocus) }
+  }, [projectId])
 
   if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
   if (!project || !user) return <EmptyState title="Project not found" />
@@ -110,18 +117,28 @@ export function ProjectDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        {[
-          { label: 'Team Members', value: members.length },
-          { label: 'Extraction Jobs', value: jobs.length },
-          { label: 'Records Submitted', value: jobs.reduce((sum: number, j: any) => sum + (j.total_submitted || 0), 0) },
-          { label: 'Records Approved', value: jobs.reduce((sum: number, j: any) => sum + (j.total_approved || 0), 0) },
-        ].map(({ label, value }) => (
-          <Card key={label} className="p-4 text-center">
-            <p className="text-2xl font-bold text-gray-900">{value}</p>
-            <p className="text-xs text-gray-500 mt-0.5">{label}</p>
-          </Card>
-        ))}
+      {/* Pipeline overview */}
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '20px 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 16px' }}>
+          Pipeline Progress · {jobs.length} extraction job{jobs.length !== 1 ? 's' : ''}
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+          {[
+            { icon: '📤', step: '1', label: 'Uploaded', desc: 'Records in system', value: jobs.reduce((s: number, j: any) => s + (j.total_extracted || 0), 0), color: '#3b82f6', bg: '#eff6ff' },
+            { icon: '🔍', step: '2', label: 'Approved', desc: 'Records reviewed ✓', value: jobs.reduce((s: number, j: any) => s + (j.total_approved || 0), 0), color: '#8b5cf6', bg: '#faf5ff' },
+            { icon: '✅', step: '3', label: 'Team', desc: 'Members assigned', value: members.length, color: '#10b981', bg: '#f0fdf4' },
+            { icon: '🚀', step: '4', label: 'Submitted', desc: 'Records delivered', value: jobs.reduce((s: number, j: any) => s + (j.total_submitted || 0), 0), color: '#f97316', bg: '#fff7ed' },
+          ].map(({ icon, step, label, desc, value, color, bg }) => (
+            <div key={step} style={{ background: bg, borderRadius: 12, padding: '16px', borderTop: `3px solid ${color}` }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                <span style={{ fontSize: 22 }}>{icon}</span>
+                <span style={{ fontSize: 28, fontWeight: 800, color, lineHeight: 1 }}>{value}</span>
+              </div>
+              <p style={{ fontSize: 12, fontWeight: 700, color, margin: 0 }}>Step {step} · {label}</p>
+              <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{desc}</p>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="border-b border-gray-200 flex gap-6 overflow-x-auto">

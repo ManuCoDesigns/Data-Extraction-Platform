@@ -46,11 +46,15 @@ ROLE_CAPABILITIES: dict[str, set] = {
         Capability.MANAGE_SCHEMAS,
         Capability.UPLOAD_EXTRACTION_JOBS,
         Capability.REVIEW_SUBMISSIONS,
+        Capability.REVIEW_RECORDS,
         Capability.SUBMIT_WORK,
+        Capability.VIEW_ALL_PROJECTS,
     },
     "qa_lead": {
         Capability.REVIEW_SUBMISSIONS,
         Capability.REVIEW_RECORDS,
+        Capability.SUBMIT_WORK,
+        Capability.UPLOAD_EXTRACTION_JOBS,
     },
     "pipeline_operator": {
         Capability.UPLOAD_EXTRACTION_JOBS,

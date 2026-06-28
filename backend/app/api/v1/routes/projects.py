@@ -385,12 +385,15 @@ def export_project_package(
             user_cache[uid] = u.full_name or u.email if u else uid[:8]
         return user_cache[uid]
 
-    # ── Collect all records ───────────────────────────────────────────────────
+    # ── Collect all records (via ExtractionJob — no direct source_id on records) ──
+    from app.models.all_models import ExtractionJob as EJ
     all_records = []
     for source in sources:
+        job_ids = [j.id for j in db.query(EJ).filter(EJ.source_id == str(source.id)).all()]
+        if not job_ids:
+            continue
         recs = db.query(ExtractedRecord).filter(
-            ExtractedRecord.source_id == source.id,
-            ExtractedRecord.deleted_at == None,
+            ExtractedRecord.job_id.in_(job_ids)
         ).all()
         for r in recs:
             d = dict(r.extracted_fields or {})

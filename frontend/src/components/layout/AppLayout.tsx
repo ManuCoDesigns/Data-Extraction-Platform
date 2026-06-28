@@ -60,19 +60,20 @@ export function AppLayout() {
   // Build nav dynamically based on capabilities
   const mainNav = isAdminish
     ? [
-        { to: '/sources',  icon: Database,        label: 'Sources',    exact: false, show: true },
         { to: '/',         icon: LayoutDashboard, label: 'Dashboard',  exact: true,  show: true },
         { to: '/projects', icon: FolderKanban,    label: 'Projects',   exact: false, show: true },
+        { to: '/sources',  icon: Database,        label: 'Sources',    exact: false, show: true },
         { to: '/schemas',  icon: Layers,          label: 'Schemas',    exact: false, show: canManageSchemas },
       ].filter(n => n.show)
     : [
-        { to: '/sources',  icon: Database,        label: 'Sources',    exact: false, show: true },
+        { to: '/',         icon: LayoutDashboard, label: 'Dashboard',  exact: true,  show: true },
         { to: '/projects', icon: FolderKanban,    label: 'Projects',   exact: false, show: true },
+        { to: '/sources',  icon: Database,        label: 'Sources',    exact: false, show: true },
       ].filter(n => n.show)
 
   const adminNav = [
     { to: '/admin/users', icon: Users,    label: 'Users',    show: canManageUsers },
-    { to: '/help',         icon: BookOpen,  label: 'Help & Guide', show: true },
+    { to: '/help',         icon: BookOpen,  label: 'Help Guide', show: true },
     { to: '/settings',    icon: Settings, label: 'Settings', show: canManageUsers },
   ].filter(n => n.show)
 

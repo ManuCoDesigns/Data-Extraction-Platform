@@ -25,12 +25,12 @@ const KANBAN_COLUMNS: SourceStatus[] = [
   'not_started', 'extracting', 'needs_fixes', 'ready_for_review', 'in_review', 'changes_requested', 'approved',
 ]
 
-// Simplified 4-step view of the same columns, for people new to the tool
-const SIMPLE_STEPS: { label: string; statuses: SourceStatus[]; color: string }[] = [
-  { label: '1. To Do',      statuses: ['not_started'],                                    color: 'bg-gray-400' },
-  { label: '2. Extracting', statuses: ['extracting', 'needs_fixes'],                       color: 'bg-blue-500' },
-  { label: '3. In Review',  statuses: ['ready_for_review', 'in_review', 'changes_requested'], color: 'bg-purple-500' },
-  { label: '4. Done',       statuses: ['approved'],                                        color: 'bg-emerald-500' },
+// 4-step pipeline view — matches the step wizard in SourceDetail
+const SIMPLE_STEPS: { label: string; statuses: SourceStatus[]; color: string; icon: string }[] = [
+  { label: '1. Upload',   statuses: ['not_started', 'extracting', 'needs_fixes'],              color: 'bg-blue-500',    icon: '📤' },
+  { label: '2. Review',   statuses: ['ready_for_review', 'in_review', 'changes_requested', 'llm_verification'], color: 'bg-purple-500',  icon: '🔍' },
+  { label: '3. Approve',  statuses: ['approved'],                                              color: 'bg-emerald-500', icon: '✅' },
+  { label: '4. Submit',   statuses: [],                                                        color: 'bg-orange-500',  icon: '🚀' },
 ]
 
 /**
@@ -85,7 +85,16 @@ export function SourcesPage() {
       sourcesPromise.then(setSources),
     ]).finally(() => setLoading(false))
   }
-  useEffect(() => { load() }, [projectId])
+  useEffect(() => {
+    load()
+    // Auto-refresh every 30s so status changes from other users show up
+    const iv = setInterval(load, 30_000)
+    // Also refresh immediately when user returns to this tab
+    const onFocus = () => load()
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) load() })
+    return () => { clearInterval(iv); window.removeEventListener('focus', onFocus) }
+  }, [projectId])
 
   // Load schemas + members whenever the target project changes
   useEffect(() => {
@@ -245,7 +254,7 @@ export function SourcesPage() {
             return (
               <div key={step.label}>
                 <div className="flex items-center gap-2 mb-3 px-1">
-                  <span className={cn('w-2 h-2 rounded-full', step.color)} />
+                  <span style={{ fontSize: 16 }}>{step.icon}</span>
                   <h3 className="text-sm font-semibold text-gray-700">{step.label}</h3>
                   <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full ml-auto">{items.length}</span>
                 </div>
