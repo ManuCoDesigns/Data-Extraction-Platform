@@ -28,6 +28,7 @@ from app.models.all_models import (
     Source, SourceStatus, Project, ProjectMember, User, Schema, SchemaVersion,
     ExtractionJob, ExtractedRecord, JobStatus, SourceType as FileSourceType,
     ExtractionConfidence, ReviewStatus, AuditLog, AuditAction, Notification,
+    SubmissionBatch,
 )
 from app.schemas.api_schemas import (
     SourceCreate, SourceUpdate, SourceOut, SourceUploadSummary,
@@ -1590,14 +1591,21 @@ def reset_source(
             raise HTTPException(status_code=403, detail="Only admins can reset sources")
 
     if clear_records:
-        # ExtractedRecord links to Source through ExtractionJob (no direct source_id)
+        # Deletion order must respect FK constraints:
+        # submission_batches → extraction_jobs → extracted_records
         job_ids = [j.id for j in db.query(ExtractionJob).filter(
             ExtractionJob.source_id == source_id
         ).all()]
         if job_ids:
+            # 1. Delete submission batches first (FK → extraction_jobs)
+            db.query(SubmissionBatch).filter(
+                SubmissionBatch.job_id.in_(job_ids)
+            ).delete(synchronize_session=False)
+            # 2. Delete extracted records
             db.query(ExtractedRecord).filter(
                 ExtractedRecord.job_id.in_(job_ids)
             ).delete(synchronize_session=False)
+        # 3. Now safe to delete extraction jobs
         db.query(ExtractionJob).filter(
             ExtractionJob.source_id == source_id
         ).delete(synchronize_session=False)
@@ -1647,9 +1655,15 @@ def clear_source_records(
 
     deleted_records = 0
     if job_ids:
+        # 1. Delete submission batches first (FK → extraction_jobs)
+        db.query(SubmissionBatch).filter(
+            SubmissionBatch.job_id.in_(job_ids)
+        ).delete(synchronize_session=False)
+        # 2. Delete extracted records
         deleted_records = db.query(ExtractedRecord).filter(
             ExtractedRecord.job_id.in_(job_ids)
         ).delete(synchronize_session=False)
+        # 3. Now safe to delete extraction jobs
         db.query(ExtractionJob).filter(
             ExtractionJob.id.in_(job_ids)
         ).delete(synchronize_session=False)
