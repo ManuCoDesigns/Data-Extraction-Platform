@@ -906,6 +906,9 @@ def approve_source(
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can approve a source")
 
+    user_roles = _user_roles(current_user)
+    is_admin = "org_admin" in user_roles or "project_admin" in user_roles
+
     # Count unapproved records
     pending_or_rejected = (
         db.query(ExtractedRecord)
@@ -916,12 +919,11 @@ def approve_source(
         ).count()
     )
 
-    # Only block if reviewer (not admin) and records are pending
-    is_admin = "org_admin" in user_roles or "project_admin" in user_roles
+    # Admins can approve even with pending records — reviewers cannot
     if pending_or_rejected > 0 and not is_admin:
         raise HTTPException(
             status_code=422,
-            detail=f"{pending_or_rejected} record(s) are not yet approved. Approve them first or ask an admin to override."
+            detail=f"{pending_or_rejected} record(s) not yet approved. Approve them first or ask an admin to override."
         )
 
     source.status = SourceStatus.APPROVED
