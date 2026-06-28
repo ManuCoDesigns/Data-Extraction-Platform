@@ -40,44 +40,40 @@ router = APIRouter(prefix="/sources", tags=["sources"])
 
 def _delete_jobs_safely(job_ids: list, db) -> None:
     """
-    Delete extraction jobs in the correct FK-safe order.
-    audit_log, submission_batches, llm_call_log, job_state_history, job_reviewers
-    all reference extraction_jobs — they must be removed before the jobs themselves.
-    extracted_records is also removed here.
+    Delete extraction jobs using raw SQL in strict FK order.
+    Raw SQL with db.flush() guarantees each DELETE reaches Postgres
+    before the next one runs - ORM bulk-delete can reorder operations.
 
-    Tables with ondelete=CASCADE are handled automatically by Postgres when the
-    FK is CASCADE, but we delete them explicitly to be safe across all environments.
+    Order (all reference extraction_jobs, must go first):
+      1. audit_log          (no CASCADE)
+      2. submission_batches (no CASCADE)
+      3. llm_call_log       (no CASCADE)
+      4. extracted_records  (CASCADE - explicit for safety)
+      5. job_state_history  (CASCADE - explicit for safety)
+      6. job_reviewers      (CASCADE - explicit for safety)
+      7. extraction_jobs    (now safe)
     """
     if not job_ids:
         return
-    # 1. audit_log  (job_id nullable — no CASCADE)
-    db.query(AuditLog).filter(
-        AuditLog.job_id.in_(job_ids)
-    ).delete(synchronize_session=False)
-    # 2. submission_batches  (no CASCADE)
-    db.query(SubmissionBatch).filter(
-        SubmissionBatch.job_id.in_(job_ids)
-    ).delete(synchronize_session=False)
-    # 3. llm_call_log  (no CASCADE)
-    db.query(LLMCallLog).filter(
-        LLMCallLog.job_id.in_(job_ids)
-    ).delete(synchronize_session=False)
-    # 4. extracted_records  (CASCADE — but explicit for safety)
-    db.query(ExtractedRecord).filter(
-        ExtractedRecord.job_id.in_(job_ids)
-    ).delete(synchronize_session=False)
-    # 5. job_state_history  (CASCADE)
-    db.query(JobStateHistory).filter(
-        JobStateHistory.job_id.in_(job_ids)
-    ).delete(synchronize_session=False)
-    # 6. job_reviewers  (CASCADE)
-    db.query(JobReviewer).filter(
-        JobReviewer.job_id.in_(job_ids)
-    ).delete(synchronize_session=False)
-    # 7. Finally safe to delete the jobs
-    db.query(ExtractionJob).filter(
-        ExtractionJob.id.in_(job_ids)
-    ).delete(synchronize_session=False)
+
+    # Parameterised placeholders to avoid any SQL injection risk
+    placeholders = ", ".join(f":id{i}" for i in range(len(job_ids)))
+    params = {f"id{i}": jid for i, jid in enumerate(job_ids)}
+
+    for table, col in [
+        ("audit_log",          "job_id"),
+        ("submission_batches", "job_id"),
+        ("llm_call_log",       "job_id"),
+        ("extracted_records",  "job_id"),
+        ("job_state_history",  "job_id"),
+        ("job_reviewers",      "job_id"),
+        ("extraction_jobs",    "id"),
+    ]:
+        db.execute(
+            _sql_text(f"DELETE FROM {table} WHERE {col} IN ({placeholders})"),
+            params
+        )
+        db.flush()   # force DELETE to reach Postgres before next table
 
 
 ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
