@@ -109,9 +109,9 @@ function StepPipeline({ currentStep }: { currentStep: number }) {
 
 // ── Primary action panel ───────────────────────────────────────────────────────
 function PrimaryActionPanel({
-  step, source, records, isExtractor, isReviewer, isAdmin,
+  step, source, records, isExtractor, isReviewer, isAdmin, isSelfReview,
   onUpload, onReview, onApprove, onSubmit, onExport,
-  scraping, verifying, onScrape, onVerify,
+  scraping, verifying, onScrape, onVerify, onClaim,
 }: any) {
   const pendingCount = records.filter((r: any) => r.review_status === 'pending').length
   const approvedCount = records.filter((r: any) => r.review_status === 'approved').length
@@ -133,6 +133,11 @@ function PrimaryActionPanel({
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {!source.assigned_extractor_id && (
+            <Button size="sm" onClick={onClaim} style={{ background: '#6366f1', border: 'none', color: '#fff' }}>
+              ✋ Claim This Source
+            </Button>
+          )}
           {source.website_url && isExtractor && (
             <Button variant="secondary" size="sm" onClick={onScrape} loading={scraping}>
               <Search className="w-3.5 h-3.5" /> Auto-Scrape Website
@@ -176,10 +181,15 @@ function PrimaryActionPanel({
               <Shield className="w-3.5 h-3.5" /> LLM Verify
             </Button>
           )}
-          {(isReviewer || isAdmin) && (
+          {(isReviewer || isAdmin) && !isSelfReview && (
             <Button size="sm" onClick={onReview} style={{ background: '#7c3aed', border: 'none', color: '#fff' }}>
               <Eye className="w-3.5 h-3.5" /> Review Records →
             </Button>
+          )}
+          {isSelfReview && !isAdmin && (
+            <span style={{ fontSize: 12, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '6px 14px', borderRadius: 20, fontWeight: 600 }}>
+              ⚠ You extracted this — a reviewer must approve
+            </span>
           )}
         </div>
       </div>
@@ -198,10 +208,15 @@ function PrimaryActionPanel({
             All {total} records are approved. Click to lock this source and unlock the Submit step.
           </p>
         </div>
-        {(isReviewer || isAdmin) && (
+        {(isReviewer || isAdmin) && !isSelfReview && (
           <Button size="sm" onClick={onApprove} style={{ background: '#10b981', border: 'none', color: '#fff', fontSize: 14, padding: '10px 24px' }}>
             <CheckCircle className="w-4 h-4" /> Approve Source
           </Button>
+        )}
+        {isSelfReview && !isAdmin && (
+          <span style={{ fontSize: 12, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '8px 16px', borderRadius: 20, fontWeight: 600 }}>
+            ⚠ Cannot approve — you are the extractor
+          </span>
         )}
       </div>
     </div>
@@ -538,6 +553,23 @@ export function SourceDetailPage() {
   const currentStep = getStep(source.status, records)
 
   // Open first pending record for review
+  const [showClaimModal, setShowClaimModal] = useState(false)
+  const [claimReviewerId, setClaimReviewerId] = useState('')
+  const [claiming, setClaiming] = useState(false)
+
+  const handleClaim = async () => {
+    if (!sourceId) return
+    setClaiming(true)
+    try {
+      await sourcesApi.claim(sourceId, claimReviewerId || undefined)
+      toast.success('Source claimed — you are now the extractor')
+      setShowClaimModal(false)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Could not claim source')
+    } finally { setClaiming(false) }
+  }
+
   const handleReviewNext = () => {
     const firstPendingIdx = records.findIndex(r => r.review_status === 'pending')
     if (firstPendingIdx !== -1) setActiveRecordIndex(firstPendingIdx)
@@ -611,6 +643,7 @@ export function SourceDetailPage() {
         isExtractor={isExtractor}
         isReviewer={isReviewer}
         isAdmin={isAdmin}
+        isSelfReview={!isAdmin && !!source.assigned_extractor_id && source.assigned_extractor_id === user?.id}
         onUpload={() => setShowUpload(true)}
         onReview={handleReviewNext}
         onApprove={handleApproveSource}
@@ -620,6 +653,7 @@ export function SourceDetailPage() {
         verifying={verifying}
         onScrape={handleScrape}
         onVerify={handleVerify}
+        onClaim={() => setShowClaimModal(true)}
       />
 
       {/* ── Stats row ─────────────────────────────────────────────────────────── */}
@@ -979,6 +1013,37 @@ export function SourceDetailPage() {
         description="This record will be permanently deleted from the source."
         confirmLabel="Delete Record" variant="danger" loading={deleting}
         onConfirm={handleDeleteRecord} onCancel={() => setDeleteRecord(null)} />
+
+      {/* Claim Source modal */}
+      <Modal open={showClaimModal} onClose={() => setShowClaimModal(false)} title="Claim This Source" description="Assign yourself as the extractor and optionally pick a reviewer.">
+        <div className="space-y-4">
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '12px 16px' }}>
+            <p style={{ fontSize: 13, fontWeight: 600, color: '#1e40af', margin: '0 0 4px' }}>You are claiming: {source?.name}</p>
+            <p style={{ fontSize: 12, color: '#3b82f6', margin: 0 }}>You will be set as the extractor. Pick a reviewer — they will approve your records.</p>
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+              Pick a Reviewer <span style={{ color: '#94a3b8', fontWeight: 400 }}>(recommended)</span>
+            </label>
+            <select value={claimReviewerId} onChange={e => setClaimReviewerId(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none' }}>
+              <option value="">Leave unassigned (admin will pick later)</option>
+              {members.filter(m => m.id !== user?.id).map(m => (
+                <option key={m.id} value={m.id}>{m.full_name}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '10px 14px' }}>
+            <p style={{ fontSize: 12, color: '#dc2626', margin: 0 }}>⚠ Note: You will not be able to approve your own records. The reviewer you pick (or an admin) must approve them.</p>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setShowClaimModal(false)}>Cancel</Button>
+            <Button loading={claiming} onClick={handleClaim} style={{ background: '#6366f1', border: 'none', color: '#fff' }}>
+              ✋ Claim Source
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Edit Source modal */}
       <Modal open={showEditSource} onClose={() => setShowEditSource(false)} title="Edit Source" description="Update the source name, description, or website URL.">

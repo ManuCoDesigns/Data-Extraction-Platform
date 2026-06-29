@@ -30,7 +30,7 @@ export function UsersPage() {
   const [showCreate, setShowCreate] = useState(false)
   const [editUser, setEditUser]     = useState<User | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<User | null>(null)
-  const [form, setForm] = useState({ full_name: '', email: '', password: '', role: 'pipeline_operator', is_active: true })
+  const [form, setForm] = useState({ full_name: '', email: '', password: '', roles: ['pipeline_operator'] as string[], is_active: true })
   const [saving, setSaving]   = useState(false)
   const [deleting, setDeleting] = useState(false)
 
@@ -54,10 +54,10 @@ export function UsersPage() {
     e.preventDefault()
     setSaving(true)
     try {
-      await usersApi.create({ ...form, roles: [form.role] })
-      toast.success(`${form.full_name} added as ${getRoleLabel(form.role)}`)
+      await usersApi.create({ ...form, roles: form.roles })
+      toast.success(`${form.full_name} added with ${form.roles.length} role${form.roles.length !== 1 ? 's' : ''}`)
       setShowCreate(false)
-      setForm({ full_name: '', email: '', password: '', role: 'pipeline_operator', is_active: true })
+      setForm({ full_name: '', email: '', password: '', roles: ['pipeline_operator'], is_active: true })
       load()
     } catch (err: any) { toast.error(err?.response?.data?.detail || 'Failed to create user') }
     finally { setSaving(false) }
@@ -68,7 +68,7 @@ export function UsersPage() {
     if (!editUser) return
     setSaving(true)
     try {
-      await usersApi.update(editUser.id, { full_name: form.full_name, roles: [form.role], is_active: form.is_active, ...(form.password ? { password: form.password } : {}) })
+      await usersApi.update(editUser.id, { full_name: form.full_name, roles: form.roles, is_active: form.is_active, ...(form.password ? { password: form.password } : {}) })
       toast.success('User updated')
       setEditUser(null)
       load()
@@ -86,7 +86,7 @@ export function UsersPage() {
 
   const openEdit = (u: User) => {
     setEditUser(u)
-    setForm({ full_name: u.full_name, email: u.email, password: '', role: u.roles?.[0] || 'read_only', is_active: u.is_active ?? true })
+    setForm({ full_name: u.full_name, email: u.email, password: '', roles: u.roles?.length ? u.roles : ['read_only'], is_active: u.is_active ?? true })
   }
 
   if (loading) return <div className="flex justify-center py-20"><Spinner className="w-8 h-8" /></div>
@@ -146,6 +146,7 @@ export function UsersPage() {
           {filtered.map((u, i) => {
             const role = u.roles?.[0] || 'read_only'
             const cfg  = ROLE_CONFIG[role] || ROLE_CONFIG.read_only
+            // For dual-role users, pick the most privileged role for avatar colour
             const initial = u.full_name?.[0]?.toUpperCase() || '?'
             const avatarColor = AVATAR_COLORS[role] || '#64748b'
             const isActive = u.is_active !== false
@@ -180,9 +181,12 @@ export function UsersPage() {
 
                 {/* Role badge */}
                 <div>
-                  <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}` }}>
-                    {cfg.label}
-                  </span>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {(u.roles?.length ? u.roles : ['read_only']).map(r => {
+                      const rc = ROLE_CONFIG[r] || ROLE_CONFIG.read_only
+                      return <span key={r} style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20, background: rc.bg, color: rc.color, border: `1px solid ${rc.border}` }}>{rc.label}</span>
+                    })}
+                  </div>
                 </div>
 
                 {/* Actions */}
@@ -211,23 +215,30 @@ export function UsersPage() {
           <Input label="Email address" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} required />
           <Input label="Password" type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} required />
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Role</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Roles <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>— select one or more (dual role supported)</span></label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {ROLES.map(role => {
                 const cfg = ROLE_CONFIG[role]
-                const active = form.role === role
+                const active = form.roles.includes(role)
                 return (
-                  <button key={role} type="button" onClick={() => setForm(f => ({ ...f, role }))}
-                    style={{ padding: '10px 12px', border: `2px solid ${active ? cfg.color : '#e2e8f0'}`, borderRadius: 10, background: active ? cfg.bg : '#fff', cursor: 'pointer', textAlign: 'left', transition: 'all 0.15s' }}>
-                    <p style={{ fontSize: 12, fontWeight: 700, color: active ? cfg.color : '#374151', margin: 0 }}>{cfg.label}</p>
-                  </button>
+                  <label key={role} style={{ padding: '10px 12px', border: `2px solid ${active ? cfg.color : '#e2e8f0'}`, borderRadius: 10, background: active ? cfg.bg : '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8, transition: 'all 0.15s' }}>
+                    <input type="checkbox" checked={active} onChange={e => {
+                      setForm(f => ({ ...f, roles: e.target.checked ? [...f.roles, role] : f.roles.filter(r => r !== role) }))
+                    }} style={{ width: 15, height: 15, accentColor: cfg.color }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: active ? cfg.color : '#374151' }}>{cfg.label}</span>
+                  </label>
                 )
               })}
             </div>
+            {form.roles.includes('pipeline_operator') && (form.roles.includes('reviewer') || form.roles.includes('qa_lead')) && (
+              <p style={{ fontSize: 11, color: '#7c3aed', background: '#faf5ff', border: '1px solid #c4b5fd', padding: '6px 10px', borderRadius: 8, marginTop: 8 }}>
+                ⚡ Dual role — this user can extract AND review. They still cannot approve sources they personally extracted.
+              </p>
+            )}
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" type="button" onClick={() => setShowCreate(false)}>Cancel</Button>
-            <Button type="submit" loading={saving} disabled={!form.full_name || !form.email || !form.password}>
+            <Button type="submit" loading={saving} disabled={!form.full_name || !form.email || !form.password || form.roles.length === 0}>
               <Plus className="w-4 h-4" /> Add Member
             </Button>
           </div>
@@ -240,16 +251,18 @@ export function UsersPage() {
           <Input label="Full name" value={form.full_name} onChange={e => setForm(f => ({ ...f, full_name: e.target.value }))} required />
           <Input label="New password (leave blank to keep current)" type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} />
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Role</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 4 }}>Roles <span style={{ fontSize: 11, color: '#94a3b8', fontWeight: 400 }}>— multi-select supported</span></label>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {ROLES.map(role => {
                 const cfg = ROLE_CONFIG[role]
-                const active = form.role === role
+                const active = form.roles.includes(role)
                 return (
-                  <button key={role} type="button" onClick={() => setForm(f => ({ ...f, role }))}
-                    style={{ padding: '10px 12px', border: `2px solid ${active ? cfg.color : '#e2e8f0'}`, borderRadius: 10, background: active ? cfg.bg : '#fff', cursor: 'pointer', textAlign: 'left' }}>
-                    <p style={{ fontSize: 12, fontWeight: 700, color: active ? cfg.color : '#374151', margin: 0 }}>{cfg.label}</p>
-                  </button>
+                  <label key={role} style={{ padding: '10px 12px', border: `2px solid ${active ? cfg.color : '#e2e8f0'}`, borderRadius: 10, background: active ? cfg.bg : '#fff', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input type="checkbox" checked={active} onChange={e => {
+                      setForm(f => ({ ...f, roles: e.target.checked ? [...f.roles, role] : f.roles.filter(r => r !== role) }))
+                    }} style={{ width: 15, height: 15, accentColor: cfg.color }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: active ? cfg.color : '#374151' }}>{cfg.label}</span>
+                  </label>
                 )
               })}
             </div>

@@ -859,6 +859,20 @@ def review_source_record(
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can review records")
 
+    # ── Four-eyes principle: extractor cannot approve their own records ──
+    user_roles_rv = _user_roles(current_user)
+    is_admin_rv = "org_admin" in user_roles_rv or "project_admin" in user_roles_rv
+    if (
+        payload.action == "approve"
+        and source.assigned_extractor_id
+        and str(current_user.id) == str(source.assigned_extractor_id)
+        and not is_admin_rv
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You extracted this source — you cannot approve your own records. A different reviewer must approve them."
+        )
+
     record = (
         db.query(ExtractedRecord)
         .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
@@ -910,6 +924,17 @@ def approve_source(
     user_roles = _user_roles(current_user)
     is_admin = "org_admin" in user_roles or "project_admin" in user_roles
 
+    # ── Four-eyes principle: extractor cannot approve their own source ───
+    if (
+        source.assigned_extractor_id
+        and str(current_user.id) == str(source.assigned_extractor_id)
+        and not is_admin
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail="You extracted this source — you cannot approve it yourself. Ask a reviewer or admin to approve."
+        )
+
     # Count unapproved records
     pending_or_rejected = (
         db.query(ExtractedRecord)
@@ -950,6 +975,84 @@ def approve_source(
     ))
     db.commit()
     db.refresh(source)
+    return _serialize_source(source)
+
+
+# ─── Claim source (extractor self-assignment) ─────────────────────────────────
+
+@router.post("/{source_id}/claim")
+def claim_source(
+    source_id: str,
+    reviewer_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Extractor claims an unassigned source for themselves.
+    Optionally picks a reviewer from the project team.
+    Cannot claim a source already assigned to someone else (unless admin).
+    """
+    source = _get_source_or_404(source_id, db)
+
+    user_roles = _user_roles(current_user)
+    is_admin = "org_admin" in user_roles or "project_admin" in user_roles
+
+    # Only extractors and admins can claim
+    allowed_roles = {"org_admin", "project_admin", "qa_lead", "pipeline_operator"}
+    if not (user_roles & allowed_roles):
+        raise HTTPException(status_code=403, detail="Only extractors and admins can claim sources")
+
+    # Cannot steal a source already claimed by someone else (unless admin)
+    if (
+        source.assigned_extractor_id
+        and str(source.assigned_extractor_id) != str(current_user.id)
+        and not is_admin
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=f"This source is already claimed by another extractor. Ask an admin to reassign it."
+        )
+
+    # Only allow claiming sources that haven't started yet
+    if source.status not in (SourceStatus.NOT_STARTED,) and not is_admin:
+        raise HTTPException(
+            status_code=409,
+            detail="This source already has data — contact an admin to reassign it."
+        )
+
+    # Validate reviewer exists in the project
+    if reviewer_id:
+        from app.models.all_models import ProjectMember as PM2
+        member = db.query(PM2).filter(
+            PM2.project_id == source.project_id,
+            PM2.user_id == reviewer_id
+        ).first()
+        if not member:
+            raise HTTPException(status_code=404, detail="Reviewer not found in this project")
+
+    source.assigned_extractor_id = current_user.id
+    if reviewer_id:
+        source.assigned_reviewer_id = reviewer_id
+
+    db.add(AuditLog(
+        user_id=current_user.id,
+        project_id=source.project_id,
+        action=AuditAction.SOURCE_STATUS_CHANGED,
+        after_value={"claimed_by": str(current_user.id), "reviewer_id": reviewer_id},
+    ))
+    db.commit()
+    db.refresh(source)
+
+    # Notify the chosen reviewer
+    if reviewer_id and reviewer_id != str(current_user.id):
+        db.add(Notification(
+            user_id=reviewer_id,
+            title=f"You've been assigned as reviewer for '{source.name}'",
+            body=f"Please review the records once extraction is complete.",
+            link=f"/projects/{source.project_id}/sources/{source.id}",
+        ))
+        db.commit()
+
     return _serialize_source(source)
 
 

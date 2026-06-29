@@ -257,17 +257,33 @@ def sources_summary(
         if s.status == SourceStatus.APPROVED and s.approved_at and s.approved_at >= week_ago
     )
 
-    # My assigned sources (needs action)
-    my_extracting = [s for s in sources if s.assigned_extractor_id == current_user.id and s.status.value in ("extracting", "needs_fixes", "changes_requested")]
-    my_reviewing = [s for s in sources if s.assigned_reviewer_id == current_user.id and s.status.value in ("ready_for_review", "in_review")]
-
     def _src(s: Source) -> dict:
+        pending = max(0, (s.total_records or 0) - (s.approved_records or 0))
         return {
             "id": s.id, "name": s.name, "project_id": s.project_id,
-            "status": s.status.value, "total_records": s.total_records,
-            "valid_records": s.valid_records, "invalid_records": s.invalid_records,
-            "approved_records": s.approved_records, "updated_at": s.updated_at,
+            "status": s.status.value, "total_records": s.total_records or 0,
+            "valid_records": s.valid_records or 0, "invalid_records": s.invalid_records or 0,
+            "approved_records": s.approved_records or 0,
+            "pending_records": pending,
+            "updated_at": s.updated_at,
         }
+
+    # Dual-role support: show ALL sources where user is extractor OR reviewer
+    # my_extracting — any source where this user is the extractor (needs their action)
+    my_extracting = [
+        s for s in sources
+        if s.assigned_extractor_id == current_user.id
+        and s.status.value not in ("approved",)
+    ]
+    # my_reviewing — ALL sources assigned to this user as reviewer, with pending work
+    # Includes ready_for_review, in_review, changes_requested — anything not yet approved
+    my_reviewing = [
+        s for s in sources
+        if s.assigned_reviewer_id == current_user.id
+        and s.status.value not in ("approved", "not_started")
+    ]
+    # Also include approved sources with pending records (still need final approval)
+    my_review_queue = sorted(my_reviewing, key=lambda s: s.updated_at or s.created_at, reverse=True)
 
     # Recent activity = last 10 updated sources
     recent = sorted(sources, key=lambda s: s.updated_at or s.created_at, reverse=True)[:10]
@@ -276,8 +292,8 @@ def sources_summary(
         "by_status": by_status,
         "total": total,
         "approved_this_week": approved_this_week,
-        "my_extracting": [_src(s) for s in my_extracting[:5]],
-        "my_reviewing": [_src(s) for s in my_reviewing[:5]],
+        "my_extracting": [_src(s) for s in my_extracting],
+        "my_reviewing": [_src(s) for s in my_review_queue],
         "recent": [_src(s) for s in recent],
     }
 

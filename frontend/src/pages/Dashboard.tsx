@@ -535,37 +535,173 @@ function ReviewerDashboard() {
 
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>All Review Sources</h3>
+          <div>
+            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>My Review Queue</h3>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>All sources assigned to you for review</p>
+          </div>
           <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>Full board →</Link>
         </div>
-        {mine.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>
-            <Eye style={{ width: 40, height: 40, margin: '0 auto 12px', opacity: 0.2 }} />
-            <p style={{ fontSize: 13, fontWeight: 600, color: '#64748b', margin: 0 }}>No sources assigned for review</p>
-          </div>
-        ) : mine.map((s: any, i: number) => (
-          <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 20px', textDecoration: 'none', borderBottom: i < mine.length - 1 ? '1px solid #f8fafc' : 'none' }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
-              <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.approved_records}/{s.total_records} approved · {safeFromNow(s.updated_at)}</p>
-            </div>
-            <StatusPill status={s.status} />
-          </Link>
-        ))}
+        <ReviewQueue sources={mine} />
       </div>
     </div>
   )
 }
 
-// ── Router ─────────────────────────────────────────────────────────────────────
+// ── Reviewer Work Queue Table ──────────────────────────────────────────────────
+function ReviewQueue({ sources }: { sources: any[] }) {
+  if (!sources.length) return (
+    <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
+      <p style={{ fontSize: 13, margin: 0 }}>No sources assigned for review yet</p>
+    </div>
+  )
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+            {['Source', 'Status', 'Total', 'Approved', 'Pending', ''].map((h, i) => (
+              <th key={h+i} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sources.map((s, i) => {
+            const pct = s.total_records > 0 ? Math.round((s.approved_records / s.total_records) * 100) : 0
+            const statusM = STATUS_META[s.status]
+            return (
+              <tr key={s.id} style={{ borderBottom: '1px solid #f8fafc' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+                <td style={{ padding: '12px 14px' }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+                  <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{safeFromNow(s.updated_at)}</p>
+                </td>
+                <td style={{ padding: '12px 14px' }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 20, background: (statusM?.color || '#94a3b8') + '15', color: statusM?.color || '#94a3b8' }}>
+                    {statusM?.label || s.status}
+                  </span>
+                </td>
+                <td style={{ padding: '12px 14px', fontWeight: 600, color: '#1e293b' }}>{s.total_records}</td>
+                <td style={{ padding: '12px 14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <div style={{ background: '#e2e8f0', borderRadius: 99, height: 6, width: 60, overflow: 'hidden' }}>
+                      <div style={{ background: '#10b981', height: '100%', width: `${pct}%`, borderRadius: 99 }} />
+                    </div>
+                    <span style={{ fontSize: 12, color: '#059669', fontWeight: 600 }}>{s.approved_records}</span>
+                  </div>
+                </td>
+                <td style={{ padding: '12px 14px' }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: s.pending_records > 0 ? '#dc2626' : '#94a3b8' }}>
+                    {s.pending_records}
+                  </span>
+                </td>
+                <td style={{ padding: '12px 14px' }}>
+                  <Link to={`/projects/${s.project_id}/sources/${s.id}`}
+                    style={{ fontSize: 11, fontWeight: 700, padding: '5px 12px', borderRadius: 8, background: '#eff6ff', color: '#2563eb', textDecoration: 'none', whiteSpace: 'nowrap' }}>
+                    Review →
+                  </Link>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ── Router — dual-role aware ────────────────────────────────────────────────────
 export function DashboardPage() {
   const { user } = useAuthStore()
   if (!user) return null
   const roles = new Set(user.roles)
-  if (roles.has('org_admin') || roles.has('project_admin') || roles.has('qa_lead')) return <AdminDashboard />
-  if (roles.has('reviewer')) return <ReviewerDashboard />
+
+  // Admin roles always get the full admin dashboard
+  if (roles.has('org_admin') || roles.has('project_admin') || roles.has('qa_lead'))
+    return <AdminDashboard />
+
+  // Dual role: has both extractor AND reviewer capabilities
+  const isExtractor = roles.has('pipeline_operator')
+  const isReviewer  = roles.has('reviewer')
+  if (isExtractor && isReviewer) return <DualRoleDashboard />
+  if (isReviewer)  return <ReviewerDashboard />
   return <ExtractorDashboard />
+}
+
+// ── Dual Role Dashboard ─────────────────────────────────────────────────────────
+function DualRoleDashboard() {
+  const { user } = useAuthStore()
+  const [summary, setSummary] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    statsApi.sourcesSummary().then(setSummary).finally(() => setLoading(false))
+    const iv = setInterval(() => statsApi.sourcesSummary().then(setSummary), 30_000)
+    window.addEventListener('focus', () => statsApi.sourcesSummary().then(setSummary))
+    return () => clearInterval(iv)
+  }, [])
+
+  if (loading) return <Skeleton />
+
+  const myExtracting: any[] = summary?.my_extracting ?? []
+  const myReviewing:  any[] = summary?.my_reviewing  ?? []
+  const needsAction = myExtracting.filter((s: any) => ['needs_fixes','changes_requested'].includes(s.status))
+  const pendingReview = myReviewing.filter((s: any) => s.pending_records > 0)
+
+  return (
+    <div style={{ padding: '28px 32px', maxWidth: 1100, margin: '0 auto' }}>
+      <div style={{ marginBottom: 28 }}>
+        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+          {greeting()}, {user?.full_name?.split(' ')[0]} 👋
+        </h1>
+        <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+          <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: '#ecfdf5', color: '#059669', border: '1px solid #6ee7b7' }}>⛏️ Extractor</span>
+          <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20, background: '#faf5ff', color: '#7c3aed', border: '1px solid #c4b5fd' }}>🔍 Reviewer</span>
+          <span style={{ fontSize: 11, color: '#94a3b8', alignSelf: 'center' }}>— Dual role active</span>
+        </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+        <KpiCard label="My Sources" value={myExtracting.length} sub="assigned to extract" icon={<Upload style={{ width: 18, height: 18 }} />} color="blue" />
+        <KpiCard label="Needs Fixes" value={needsAction.length} sub="errors to fix" icon={<AlertCircle style={{ width: 18, height: 18 }} />} color="red" />
+        <KpiCard label="To Review" value={myReviewing.length} sub="assigned to review" icon={<Eye style={{ width: 18, height: 18 }} />} color="purple" />
+        <KpiCard label="Pending Records" value={pendingReview.reduce((s:number,r:any)=>s+r.pending_records,0)} sub="records awaiting approval" icon={<CheckCircle style={{ width: 18, height: 18 }} />} color="amber" />
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        {/* My Extraction Work */}
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16 }}>⛏️</span>
+            <p style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>My Extraction Work</p>
+            <span style={{ fontSize: 11, background: '#eff6ff', color: '#2563eb', padding: '2px 8px', borderRadius: 20, marginLeft: 'auto', fontWeight: 600 }}>{myExtracting.length}</span>
+          </div>
+          {myExtracting.length === 0 ? (
+            <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No sources assigned for extraction</div>
+          ) : myExtracting.map((s: any) => (
+            <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 20px', textDecoration: 'none', borderBottom: '1px solid #f8fafc' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+              <div>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+                <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.total_records} records · {safeFromNow(s.updated_at)}</p>
+              </div>
+              <StatusPill status={s.status} />
+            </Link>
+          ))}
+        </div>
+
+        {/* My Review Queue */}
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+          <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16 }}>🔍</span>
+            <p style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>My Review Queue</p>
+            {pendingReview.length > 0 && <span style={{ fontSize: 11, background: '#fef2f2', color: '#dc2626', padding: '2px 8px', borderRadius: 20, marginLeft: 'auto', fontWeight: 700, border: '1px solid #fecaca' }}>{pendingReview.length} pending</span>}
+          </div>
+          <ReviewQueue sources={myReviewing} />
+        </div>
+      </div>
+    </div>
+  )
 }
