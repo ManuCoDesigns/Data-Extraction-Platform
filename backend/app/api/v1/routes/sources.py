@@ -92,7 +92,8 @@ def _is_assigned_extractor(user: User, source: Source) -> bool:
     roles = _user_roles(user)
     if "project_admin" in roles:
         return True
-    return source.assigned_extractor_id == user.id
+    # Compare as strings to avoid UUID vs str mismatch
+    return str(source.assigned_extractor_id) == str(user.id)
 
 
 def _is_assigned_reviewer(user: User, source: Source) -> bool:
@@ -102,7 +103,7 @@ def _is_assigned_reviewer(user: User, source: Source) -> bool:
     roles = _user_roles(user)
     if "project_admin" in roles or "qa_lead" in roles:
         return True
-    return source.assigned_reviewer_id == user.id
+    return str(source.assigned_reviewer_id) == str(user.id)
 
 
 # ─── Serialization ───────────────────────────────────────────────────────────

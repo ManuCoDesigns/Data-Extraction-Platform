@@ -226,100 +226,136 @@ def sources_summary(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Returns source counts by status + recent activity for the dashboard.
-    Scoped by role: org_admins see everything, others see their accessible projects.
+    Returns source counts + dashboard stats.
+    Wrapped in try/except so it never returns 500 — always returns a valid shape.
     """
-    from app.models.all_models import Source, SourceStatus, ProjectMember
-    from sqlalchemy import func
+    try:
+        from app.models.all_models import (
+            Source, SourceStatus, ProjectMember, ExtractedRecord, ReviewStatus,
+        )
+        from datetime import datetime, timezone, timedelta
 
-    user_roles = {r.role.value for r in current_user.roles}
-    is_admin = "org_admin" in user_roles or "project_admin" in user_roles or "qa_lead" in user_roles
+        user_roles = {r.role.value for r in current_user.roles}
+        is_admin = bool(user_roles & {"org_admin", "project_admin", "qa_lead"})
+        uid = str(current_user.id)
 
-    q = db.query(Source)
-    if not is_admin:
-        accessible = [m.project_id for m in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()]
-        if not accessible:
-            return {"by_status": {}, "total": 0, "approved_this_week": 0, "recent": []}
-        q = q.filter(Source.project_id.in_(accessible))
+        q = db.query(Source)
+        if not is_admin:
+            accessible = [
+                m.project_id for m in
+                db.query(ProjectMember).filter(ProjectMember.user_id == uid).all()
+            ]
+            if not accessible:
+                return _empty_summary()
+            q = q.filter(Source.project_id.in_(accessible))
 
-    sources = q.all()
-    total = len(sources)
+        sources = q.all()
+        total   = len(sources)
 
-    by_status: dict[str, int] = {}
-    for s in sources:
-        key = s.status.value
-        by_status[key] = by_status.get(key, 0) + 1
+        # Status counts
+        by_status: dict = {}
+        for s in sources:
+            k = s.status.value
+            by_status[k] = by_status.get(k, 0) + 1
 
-    from datetime import datetime, timezone, timedelta
-    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
-    approved_this_week = sum(
-        1 for s in sources
-        if s.status == SourceStatus.APPROVED and s.approved_at and s.approved_at >= week_ago
-    )
+        # Approved this week
+        week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+        approved_this_week = sum(
+            1 for s in sources
+            if s.status == SourceStatus.APPROVED
+            and s.approved_at and s.approved_at >= week_ago
+        )
 
-    def _src(s: Source) -> dict:
-        pending = max(0, (s.total_records or 0) - (s.approved_records or 0))
+        # Helper to serialise a source
+        def _s(s: Source) -> dict:
+            tot  = s.total_records    or 0
+            appr = s.approved_records or 0
+            return {
+                "id": str(s.id), "name": s.name,
+                "project_id": str(s.project_id),
+                "status": s.status.value,
+                "total_records": tot,
+                "valid_records":   s.valid_records   or 0,
+                "invalid_records": s.invalid_records or 0,
+                "approved_records": appr,
+                "pending_records": max(0, tot - appr),
+                "updated_at": s.updated_at,
+                "assigned_extractor_id": str(s.assigned_extractor_id) if s.assigned_extractor_id else None,
+                "assigned_reviewer_id":  str(s.assigned_reviewer_id)  if s.assigned_reviewer_id  else None,
+            }
+
+        # My extraction work
+        my_extracting = [_s(s) for s in sources if str(s.assigned_extractor_id) == uid]
+
+        # My reviewer queue (all assigned, not yet approved)
+        my_reviewing = sorted(
+            [_s(s) for s in sources
+             if str(s.assigned_reviewer_id) == uid
+             and s.status.value != "not_started"],
+            key=lambda s: s["updated_at"] or "", reverse=True
+        )
+
+        # Available to claim (no extractor, not started)
+        available = [_s(s) for s in sources
+                     if not s.assigned_extractor_id
+                     and s.status.value == "not_started"][:20]
+
+        # Reviewer contribution — records personally approved/rejected
+        my_approved_records = db.query(ExtractedRecord).filter(
+            ExtractedRecord.reviewed_by == uid,
+            ExtractedRecord.review_status == ReviewStatus.APPROVED,
+        ).count()
+
+        my_approved_this_week = db.query(ExtractedRecord).filter(
+            ExtractedRecord.reviewed_by == uid,
+            ExtractedRecord.review_status == ReviewStatus.APPROVED,
+            ExtractedRecord.reviewed_at >= week_ago,
+        ).count()
+
+        my_pending_total = sum(s["pending_records"] for s in my_reviewing)
+
+        # Extractor contribution
+        ext_sources = [s for s in sources if str(s.assigned_extractor_id) == uid]
+        total_extracted      = sum(s.total_records    or 0 for s in ext_sources)
+        total_ext_approved   = sum(s.approved_records or 0 for s in ext_sources)
+        total_ext_errors     = sum(s.invalid_records  or 0 for s in ext_sources)
+
+        # Recent activity
+        recent = sorted(sources, key=lambda s: s.updated_at or s.created_at, reverse=True)[:10]
+
         return {
-            "id": s.id, "name": s.name, "project_id": s.project_id,
-            "status": s.status.value, "total_records": s.total_records or 0,
-            "valid_records": s.valid_records or 0, "invalid_records": s.invalid_records or 0,
-            "approved_records": s.approved_records or 0,
-            "pending_records": pending,
-            "updated_at": s.updated_at,
+            "by_status":            by_status,
+            "total":                total,
+            "approved_this_week":   approved_this_week,
+            "my_extracting":        my_extracting,
+            "my_reviewing":         my_reviewing,
+            "available":            available,
+            "my_approved_records":  my_approved_records,
+            "my_approved_this_week": my_approved_this_week,
+            "my_pending_total":     my_pending_total,
+            "total_extracted":      total_extracted,
+            "total_ext_approved":   total_ext_approved,
+            "total_ext_errors":     total_ext_errors,
+            "total_ext_sources":    len(ext_sources),
+            "recent":               [_s(s) for s in recent],
         }
 
-    # My extraction work (all statuses except approved)
-    my_extracting = [
-        s for s in sources
-        if s.assigned_extractor_id == current_user.id
-    ]
-    # My review queue — all sources assigned to me as reviewer, not yet approved
-    my_reviewing = sorted(
-        [s for s in sources if s.assigned_reviewer_id == current_user.id
-         and s.status.value not in ("not_started",)],
-        key=lambda s: s.updated_at or s.created_at, reverse=True
-    )
-    # Available to claim — no extractor assigned, not started, in accessible projects
-    available = [
-        s for s in sources
-        if not s.assigned_extractor_id
-        and s.status.value == "not_started"
-    ]
+    except Exception as exc:
+        # Never let the dashboard 500 — log and return safe empty shape
+        import traceback, logging
+        logging.getLogger(__name__).error("sources-summary error: %s", traceback.format_exc())
+        return _empty_summary()
 
-    # Reviewer contribution stats — records this user has personally approved
-    from app.models.all_models import ExtractedRecord, ExtractionJob, ReviewStatus as RS
-    from datetime import timedelta
-    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
 
-    my_approved_records = db.query(ExtractedRecord).filter(
-        ExtractedRecord.reviewed_by == current_user.id,
-        ExtractedRecord.review_status == RS.APPROVED,
-    ).count()
-
-    my_approved_this_week = db.query(ExtractedRecord).filter(
-        ExtractedRecord.reviewed_by == current_user.id,
-        ExtractedRecord.review_status == RS.APPROVED,
-        ExtractedRecord.reviewed_at >= week_ago,
-    ).count()
-
-    # Total records pending across my assigned reviewer sources
-    my_pending_total = sum(s.pending_records for s in [_src(s) for s in my_reviewing])
-
-    # Recent activity = last 10 updated sources
-    recent = sorted(sources, key=lambda s: s.updated_at or s.created_at, reverse=True)[:10]
-
+def _empty_summary() -> dict:
     return {
-        "by_status": by_status,
-        "total": total,
-        "approved_this_week": approved_this_week,
-        "my_extracting": [_src(s) for s in my_extracting],
-        "my_reviewing": [_src(s) for s in my_reviewing],
-        "available": [_src(s) for s in available[:20]],  # unclaimed sources
-        "my_approved_records": my_approved_records,
-        "my_approved_this_week": my_approved_this_week,
-        "my_pending_total": my_pending_total,
-        "recent": [_src(s) for s in recent],
+        "by_status": {}, "total": 0, "approved_this_week": 0,
+        "my_extracting": [], "my_reviewing": [], "available": [],
+        "my_approved_records": 0, "my_approved_this_week": 0, "my_pending_total": 0,
+        "total_extracted": 0, "total_ext_approved": 0, "total_ext_errors": 0,
+        "total_ext_sources": 0, "recent": [],
     }
+
 
 
 @notifications_router.post("/read-all")

@@ -120,20 +120,23 @@ function PrimaryActionPanel({
   const isExtractorOnly = isExtractor && !isReviewer && !isAdmin
 
   // Extractors see steps 2-4 as "waiting for reviewer"
+  // BUT at step 2 they can still run LLM verify and re-upload if needed
   if (isExtractorOnly && step >= 2 && step <= 4) return (
     <div style={{ background: '#f8fafc', border: '2px solid #e2e8f0', borderRadius: 14, padding: '20px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-        <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>🔍</div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
+        <div style={{ width: 44, height: 44, borderRadius: '50%', background: step === 2 ? '#eff6ff' : '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>
+          {step === 2 ? '🔍' : step === 3 ? '✅' : '🚀'}
+        </div>
         <div style={{ flex: 1 }}>
           <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', margin: 0 }}>
-            {step === 2 ? 'Your upload is complete — waiting for reviewer'
+            {step === 2 ? 'Records uploaded — awaiting reviewer'
               : step === 3 ? 'All records approved — reviewer to approve source'
               : 'Source approved — reviewer to submit records'}
           </p>
           <p style={{ fontSize: 13, color: '#64748b', margin: '5px 0 0' }}>
-            {step === 2 && `${records.length} record${records.length !== 1 ? 's' : ''} uploaded. The reviewer assigned to this source will review and approve each record. You will be notified if any records are sent back for fixes.`}
-            {step === 3 && 'All records have been individually approved. The assigned reviewer will now approve the source as a whole.'}
-            {step === 4 && 'The reviewer will submit the approved records to complete the delivery.'}
+            {step === 2 && `${records.length} record${records.length !== 1 ? 's' : ''} uploaded and valid. You can still run LLM Verify or re-upload before the reviewer starts. You will be notified if records are sent back.`}
+            {step === 3 && 'All records individually approved. The reviewer will approve the source.'}
+            {step === 4 && 'The reviewer will submit the approved records to complete delivery.'}
           </p>
         </div>
         {source.assigned_reviewer_name && (
@@ -143,6 +146,24 @@ function PrimaryActionPanel({
           </div>
         )}
       </div>
+      {/* Extractor can still run LLM verify and re-upload at step 2 */}
+      {step === 2 && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 14, borderTop: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
+          {source.website_url && records.length > 0 && (
+            <Button variant="secondary" size="sm" onClick={onVerify} loading={verifying}>
+              <Shield className="w-3.5 h-3.5" /> LLM Verify vs Website
+            </Button>
+          )}
+          {source.website_url && (
+            <Button variant="secondary" size="sm" onClick={onScrape} loading={scraping}>
+              <Search className="w-3.5 h-3.5" /> Re-Scrape Website
+            </Button>
+          )}
+          <Button variant="secondary" size="sm" onClick={onUpload}>
+            <Upload className="w-3.5 h-3.5" /> Re-Upload Data
+          </Button>
+        </div>
+      )}
     </div>
   )
 
