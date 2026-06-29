@@ -324,7 +324,7 @@ export function SourcesPage() {
                   <h3 className="text-sm font-semibold text-gray-700">{step.label}</h3>
                   <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full ml-auto">{items.length}</span>
                 </div>
-                <div className="space-y-3.5 min-h-[60px]">
+                <div className="min-h-[60px]">
                   {items.length === 0 ? (
                     <p className="text-xs text-gray-300 px-1">Nothing here</p>
                   ) : items.map(s => (
@@ -353,7 +353,7 @@ export function SourcesPage() {
                   </div>
                   <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{items.length}</span>
                 </div>
-                <div className="space-y-3.5 min-h-[60px]">
+                <div className="min-h-[60px]">
                   {items.map(s => <SourceCard key={s.id} source={s} projectId={s.project_id} projectName={isGlobal ? projectMap[s.project_id] : undefined} />)}
                 </div>
               </div>
@@ -485,95 +485,148 @@ export function SourcesPage() {
 
 function SourceCard({ source, projectId, projectName }: { source: Source; projectId: string; projectName?: string }) {
   const { user } = useAuthStore()
-  const roles = new Set(user?.roles ?? [])
-  const isAdmin    = roles.has('org_admin') || roles.has('project_admin') || roles.has('qa_lead')
+  const roles       = new Set(user?.roles ?? [])
+  const isAdmin     = roles.has('org_admin') || roles.has('project_admin') || roles.has('qa_lead')
   const isExtractor = roles.has('pipeline_operator')
   const isReviewer  = roles.has('reviewer')
+  const myId        = user?.id
 
-  const myId            = user?.id
-  const claimedByMe     = source.assigned_extractor_id && source.assigned_extractor_id === myId
-  const claimedByOther  = source.assigned_extractor_id && source.assigned_extractor_id !== myId
-  const available       = !source.assigned_extractor_id && source.status === 'not_started'
-  const myReview        = source.assigned_reviewer_id === myId
-  const inExtractPhase  = ['not_started','extracting','needs_fixes'].includes(source.status)
+  const claimedByMe    = !!source.assigned_extractor_id && source.assigned_extractor_id === myId
+  const claimedByOther = !!source.assigned_extractor_id && source.assigned_extractor_id !== myId
+  const available      = !source.assigned_extractor_id && source.status === 'not_started'
+  const myReview       = source.assigned_reviewer_id === myId
+  const inExtractPhase = ['not_started','extracting','needs_fixes'].includes(source.status)
+  const isLocked       = !isAdmin && isExtractor && !isReviewer && claimedByOther && inExtractPhase
 
-  // Locked: claimed by someone else AND I'm a pure extractor (no admin/reviewer perms)
-  const isLocked = !isAdmin && isExtractor && !isReviewer && claimedByOther && inExtractPhase
+  // Decide badge label + colour
+  const badge = isLocked         ? null
+    : available && isExtractor && !isAdmin ? { label: '✋ Claim',   bg: '#10b981' }
+    : claimedByMe                          ? { label: '⛏ Mine',    bg: '#2563eb' }
+    : myReview && isReviewer && !isAdmin   ? { label: '🔍 Review', bg: '#7c3aed' }
+    : null
 
-  const cardContent = (
-    <Card hover={!isLocked} className={cn(
-      'relative transition-all duration-150 space-y-2.5',
-      isLocked ? 'pt-9 px-3.5 pb-3.5' : 'p-3.5',
-      isLocked ? 'opacity-50 cursor-not-allowed bg-gray-50' : '',
-      available && isExtractor && !isAdmin ? 'ring-2 ring-emerald-400 ring-offset-1' : '',
-      claimedByMe ? 'ring-2 ring-blue-400 ring-offset-1' : '',
-      myReview && isReviewer && !isAdmin ? 'ring-2 ring-purple-400 ring-offset-1' : '',
-    )}>
-      {/* Lock band */}
+  // Ring colour around card
+  const ring = isLocked              ? 'none'
+    : available && isExtractor && !isAdmin ? '2px solid #10b981'
+    : claimedByMe                          ? '2px solid #2563eb'
+    : myReview && isReviewer && !isAdmin   ? '2px solid #7c3aed'
+    : 'none'
+
+  const inner = (
+    <div style={{
+      position: 'relative',
+      background: isLocked ? '#f8fafc' : '#fff',
+      border: `1px solid ${isLocked ? '#e2e8f0' : '#e8ecf0'}`,
+      outline: ring,
+      outlineOffset: 2,
+      borderRadius: 14,
+      padding: isLocked ? '34px 14px 14px' : '14px',
+      boxShadow: isLocked ? 'none' : '0 1px 3px rgba(0,0,0,0.06)',
+      opacity: isLocked ? 0.65 : 1,
+      cursor: isLocked ? 'not-allowed' : 'pointer',
+      transition: 'box-shadow 0.15s, border-color 0.15s',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 6,
+      marginBottom: 10,
+    }}>
+
+      {/* Claimed band — full-width strip when locked */}
       {isLocked && (
-        <div className="absolute top-0 left-0 right-0 flex items-center gap-1.5 px-3 py-1.5"
-          style={{ background: '#f1f5f9', borderBottom: '1px solid #cbd5e1', borderRadius: '12px 12px 0 0' }}>
-          <Lock className="w-3 h-3 text-slate-500" />
-          <span className="text-xs font-bold text-slate-500 truncate">
-            Claimed · {source.assigned_extractor_name ?? 'another user'}
+        <div style={{
+          position: 'absolute', top: 0, left: 0, right: 0,
+          background: '#e2e8f0',
+          borderRadius: '14px 14px 0 0',
+          padding: '5px 12px',
+          display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+          <Lock style={{ width: 11, height: 11, color: '#64748b', flexShrink: 0 }} />
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#475569', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            Claimed by {source.assigned_extractor_name ?? 'another user'}
           </span>
         </div>
       )}
-      {available && isExtractor && !isAdmin && (
-        <span className="absolute top-2.5 right-2.5 text-xs font-bold bg-emerald-500 text-white px-2 py-0.5 rounded-full">
-          ✋ Claim
-        </span>
-      )}
-      {claimedByMe && !isLocked && (
-        <span className="absolute top-2.5 right-2.5 text-xs font-bold bg-blue-500 text-white px-2 py-0.5 rounded-full">
-          Mine
-        </span>
-      )}
-      {myReview && isReviewer && !isAdmin && !claimedByMe && (
-        <span className="absolute top-2.5 right-2.5 text-xs font-bold bg-purple-500 text-white px-2 py-0.5 rounded-full">
-          🔍 Review
-        </span>
+
+      {/* Status badge — top-right solid pill */}
+      {badge && (
+        <div style={{
+          position: 'absolute', top: 10, right: 10, zIndex: 2,
+          background: badge.bg, color: '#fff',
+          fontSize: 10, fontWeight: 700,
+          padding: '2px 8px', borderRadius: 99,
+          letterSpacing: '0.02em',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.15)',
+        }}>
+          {badge.label}
+        </div>
       )}
 
       {projectName && (
-        <p className="text-xs text-brand-600 font-medium flex items-center gap-1">
-          <ArrowUpRight className="w-3 h-3" /> {projectName}
+        <p style={{ fontSize: 11, color: '#6366f1', fontWeight: 600, margin: 0,
+          display: 'flex', alignItems: 'center', gap: 3 }}>
+          <ArrowUpRight style={{ width: 11, height: 11 }} /> {projectName}
         </p>
       )}
-      <p className={cn('text-sm font-semibold leading-snug line-clamp-2', isLocked ? 'text-gray-400' : 'text-gray-900')}>{source.name}</p>
 
-
+      {/* Source name — reserve space for badge */}
+      <p style={{ fontSize: 13, fontWeight: 600, lineHeight: 1.4, margin: 0,
+        color: isLocked ? '#94a3b8' : '#1e293b',
+        paddingRight: badge ? 52 : 0,
+        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+      }}>{source.name}</p>
 
       {!isLocked && source.website_url && (
-        <p className="text-xs text-gray-400 flex items-center gap-1 truncate">
-          <Globe className="w-3 h-3 shrink-0" /> {source.website_url.replace(/^https?:\/\//, '')}
+        <p style={{ fontSize: 11, color: '#94a3b8', margin: 0, overflow: 'hidden',
+          textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          display: 'flex', alignItems: 'center', gap: 4 }}>
+          <Globe style={{ width: 11, height: 11, flexShrink: 0 }} />
+          {source.website_url.replace(/^https?:\/\//, '')}
         </p>
       )}
+
       {!isLocked && source.total_records > 0 && (
-        <div className="flex items-center gap-1.5 text-xs">
-          <span className="text-emerald-600 font-medium">{source.valid_records}</span>
-          <span className="text-gray-300">/</span>
-          <span className="text-gray-500">{source.total_records}</span>
-          <span className="text-gray-400">valid</span>
-          {source.invalid_records > 0 && <AlertCircle className="w-3 h-3 text-amber-500 ml-auto" />}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+          <span style={{ color: '#059669', fontWeight: 600 }}>{source.valid_records}</span>
+          <span style={{ color: '#e2e8f0' }}>/</span>
+          <span style={{ color: '#64748b' }}>{source.total_records}</span>
+          <span style={{ color: '#94a3b8' }}>valid</span>
+          {source.invalid_records > 0 && (
+            <AlertCircle style={{ width: 11, height: 11, color: '#f59e0b', marginLeft: 'auto' }} />
+          )}
         </div>
       )}
-      <div className="flex items-center justify-between pt-1.5 border-t border-gray-50">
-        {!isLocked && source.assigned_extractor_name ? (
-          <div className="flex items-center gap-1.5">
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        paddingTop: 8, borderTop: '1px solid #f1f5f9', marginTop: 2 }}>
+        {isLocked ? (
+          <span style={{ fontSize: 11, color: '#94a3b8', display: 'flex', alignItems: 'center', gap: 3 }}>
+            <Lock style={{ width: 11, height: 11 }} /> Not available
+          </span>
+        ) : source.assigned_extractor_name ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
             <Avatar name={source.assigned_extractor_name} size="sm" />
-            <span className="text-xs text-gray-500 truncate max-w-[100px]">{source.assigned_extractor_name}</span>
+            <span style={{ fontSize: 11, color: '#64748b', overflow: 'hidden',
+              textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 90 }}>
+              {source.assigned_extractor_name}
+            </span>
           </div>
-        ) : isLocked ? (
-          <span className="text-xs text-gray-300 flex items-center gap-1"><Lock className="w-3 h-3" /> Not available</span>
         ) : (
-          <span className="text-xs text-gray-300 flex items-center gap-1"><UserIcon className="w-3 h-3" /> Unassigned</span>
+          <span style={{ fontSize: 11, color: '#cbd5e1', display: 'flex', alignItems: 'center', gap: 3 }}>
+            <UserIcon style={{ width: 11, height: 11 }} /> Unassigned
+          </span>
         )}
-        <span className="text-xs text-gray-300">{safeFromNow(source.updated_at, false)}</span>
+        <span style={{ fontSize: 11, color: '#cbd5e1' }}>{safeFromNow(source.updated_at, false)}</span>
       </div>
-    </Card>
+    </div>
   )
 
-  if (isLocked) return <div title={`Claimed by ${source.assigned_extractor_name}`}>{cardContent}</div>
-  return <Link to={`/projects/${projectId}/sources/${source.id}`}>{cardContent}</Link>
+  if (isLocked) return <div>{inner}</div>
+  return (
+    <Link to={`/projects/${projectId}/sources/${source.id}`}
+      style={{ display: 'block', textDecoration: 'none' }}
+      onMouseEnter={e => { const d = (e.currentTarget as HTMLElement).firstElementChild as HTMLElement; if (d) { d.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'; d.style.borderColor = '#c7d2fe' } }}
+      onMouseLeave={e => { const d = (e.currentTarget as HTMLElement).firstElementChild as HTMLElement; if (d) { d.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)'; d.style.borderColor = '#e8ecf0' } }}>
+      {inner}
+    </Link>
+  )
 }
