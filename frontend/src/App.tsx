@@ -52,14 +52,12 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
-// Sources is the entire job for extractors/reviewers/QA — skip Dashboard
-// for them and land directly on the global Sources board. Admins still get
-// the fuller Dashboard since they need the project-wide overview.
+// Everyone lands on their role-specific dashboard.
+// DashboardPage internally routes to Admin / Reviewer / Extractor / DualRole view.
 function IndexRoute() {
   const { user } = useAuthStore()
   if (!user) return null
-  const isAdminish = hasCapability(user.roles, 'manage_schemas') || hasCapability(user.roles, 'manage_users')
-  return isAdminish ? <DashboardPage /> : <SourcesPage />
+  return <DashboardPage />
 }
 
 export function App() {
