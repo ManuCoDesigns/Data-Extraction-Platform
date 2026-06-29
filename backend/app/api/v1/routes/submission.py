@@ -134,7 +134,7 @@ def dashboard_stats(
     current_user: User = Depends(get_current_user),
 ):
     user_roles = {r.role.value for r in current_user.roles}
-    is_admin = "org_admin" in user_roles
+    is_admin = "org_admin" in user_roles or "project_admin" in user_roles or "qa_lead" in user_roles
 
     job_q = db.query(ExtractionJob)
     if not is_admin:
@@ -233,7 +233,7 @@ def sources_summary(
     from sqlalchemy import func
 
     user_roles = {r.role.value for r in current_user.roles}
-    is_admin = "org_admin" in user_roles
+    is_admin = "org_admin" in user_roles or "project_admin" in user_roles or "qa_lead" in user_roles
 
     q = db.query(Source)
     if not is_admin:

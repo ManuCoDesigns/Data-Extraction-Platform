@@ -162,12 +162,18 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(new Date())
 
-  const load = useCallback(() =>
-    Promise.all([
-      statsApi.sourcesSummary().then(setSummary),
-      sourcesApi.performanceStats().then(setPerf),
-    ]).then(() => setLastRefresh(new Date()))
-     .finally(() => setLoading(false)), [])
+  const load = useCallback(() => {
+    // Load independently — performanceStats failure should not kill the summary
+    statsApi.sourcesSummary()
+      .then(setSummary)
+      .catch(() => {})
+    sourcesApi.performanceStats()
+      .then(setPerf)
+      .catch(() => {})
+    return statsApi.sourcesSummary()
+      .then(d => { setSummary(d); setLastRefresh(new Date()) })
+      .finally(() => setLoading(false))
+  }, [])
 
   useEffect(() => {
     load()
