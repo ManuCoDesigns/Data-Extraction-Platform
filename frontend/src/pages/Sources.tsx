@@ -2,7 +2,8 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   Plus, Globe, Database, LayoutGrid, Table as TableIcon,
-  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2
+  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2,
+  Lock, CheckCircle2, RefreshCw
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -64,8 +65,12 @@ export function SourcesPage() {
   const { projectId } = useParams<{ projectId: string }>()
   const navigate = useNavigate()
   const { user } = useAuthStore()
-  const canManage = useCapability('manage_projects')
-  const isGlobal = !projectId
+  const canManage  = useCapability('manage_projects')
+  const isGlobal   = !projectId
+  const roles      = new Set(user?.roles ?? [])
+  const isAdmin    = roles.has('org_admin') || roles.has('project_admin') || roles.has('qa_lead')
+  const isExtractor = roles.has('pipeline_operator') && !roles.has('org_admin') && !roles.has('project_admin')
+  const isReviewer  = roles.has('reviewer') && !roles.has('org_admin') && !roles.has('project_admin')
 
   const [project, setProject] = useState<Project | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
@@ -215,6 +220,45 @@ export function SourcesPage() {
             </div>
           </div>
         </Card>
+      )}
+
+      {/* Role-aware priority strip */}
+      {isExtractor && !isReviewer && (
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {/* My sources */}
+          {sources.filter(s => s.assigned_extractor_id === user?.id).length > 0 && (
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12, padding: '12px 16px' }}>
+              <div className="flex items-center justify-between mb-2">
+                <p style={{ fontSize: 12, fontWeight: 700, color: '#1d4ed8', margin: 0 }}>⛏️ My Sources ({sources.filter(s => s.assigned_extractor_id === user?.id).length})</p>
+                <button onClick={() => setMineOnly(true)} style={{ fontSize: 11, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600 }}>Filter ↓</button>
+              </div>
+              <p style={{ fontSize: 11, color: '#3b82f6', margin: 0 }}>Sources assigned to you — upload data, run LLM verify, fix errors</p>
+            </div>
+          )}
+          {/* Available */}
+          {sources.filter(s => !s.assigned_extractor_id && s.status === 'not_started').length > 0 && (
+            <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 12, padding: '12px 16px' }}>
+              <p style={{ fontSize: 12, fontWeight: 700, color: '#065f46', margin: '0 0 4px' }}>✋ Available to Claim ({sources.filter(s => !s.assigned_extractor_id && s.status === 'not_started').length})</p>
+              <p style={{ fontSize: 11, color: '#059669', margin: 0 }}>Open any green-ringed card below and click "Claim This Source"</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {isReviewer && !isExtractor && (
+        <div style={{ background: '#faf5ff', border: '1px solid #c4b5fd', borderRadius: 12, padding: '12px 16px' }}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p style={{ fontSize: 12, fontWeight: 700, color: '#5b21b6', margin: '0 0 2px' }}>
+                🔍 My Review Queue ({sources.filter(s => s.assigned_reviewer_id === user?.id && ['ready_for_review','in_review','changes_requested'].includes(s.status)).length} pending)
+              </p>
+              <p style={{ fontSize: 11, color: '#7c3aed', margin: 0 }}>Purple-ringed cards are your assigned review sources — click to open and review records</p>
+            </div>
+            <button onClick={() => setMineOnly(true)} style={{ fontSize: 11, color: '#7c3aed', background: '#ede9fe', border: '1px solid #c4b5fd', borderRadius: 8, padding: '5px 12px', cursor: 'pointer', fontWeight: 600, whiteSpace: 'nowrap' }}>
+              Show mine only
+            </button>
+          </div>
+        </div>
       )}
 
       {/* Controls */}
@@ -440,41 +484,99 @@ export function SourcesPage() {
 }
 
 function SourceCard({ source, projectId, projectName }: { source: Source; projectId: string; projectName?: string }) {
-  return (
-    <Link to={`/projects/${projectId}/sources/${source.id}`}>
-      <Card hover className="p-3.5 space-y-2.5">
-        {projectName && (
-          <p className="text-xs text-brand-600 font-medium flex items-center gap-1">
-            <ArrowUpRight className="w-3 h-3" /> {projectName}
-          </p>
-        )}
-        <p className="text-sm font-semibold text-gray-900 leading-snug line-clamp-2">{source.name}</p>
-        {source.website_url && (
-          <p className="text-xs text-gray-400 flex items-center gap-1 truncate">
-            <Globe className="w-3 h-3 shrink-0" /> {source.website_url.replace(/^https?:\/\//, '')}
-          </p>
-        )}
-        {source.total_records > 0 && (
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-emerald-600 font-medium">{source.valid_records}</span>
-            <span className="text-gray-300">/</span>
-            <span className="text-gray-500">{source.total_records}</span>
-            <span className="text-gray-400">valid</span>
-            {source.invalid_records > 0 && <AlertCircle className="w-3 h-3 text-amber-500 ml-auto" />}
-          </div>
-        )}
-        <div className="flex items-center justify-between pt-1.5 border-t border-gray-50">
-          {source.assigned_extractor_name ? (
-            <div className="flex items-center gap-1.5">
-              <Avatar name={source.assigned_extractor_name} size="sm" />
-              <span className="text-xs text-gray-500 truncate max-w-[100px]">{source.assigned_extractor_name}</span>
-            </div>
-          ) : (
-            <span className="text-xs text-gray-300 flex items-center gap-1"><UserIcon className="w-3 h-3" /> Unassigned</span>
-          )}
-          <span className="text-xs text-gray-300">{safeFromNow(source.updated_at, false)}</span>
+  const { user } = useAuthStore()
+  const roles = new Set(user?.roles ?? [])
+  const isAdmin    = roles.has('org_admin') || roles.has('project_admin') || roles.has('qa_lead')
+  const isExtractor = roles.has('pipeline_operator')
+  const isReviewer  = roles.has('reviewer')
+
+  const myId            = user?.id
+  const claimedByMe     = source.assigned_extractor_id && source.assigned_extractor_id === myId
+  const claimedByOther  = source.assigned_extractor_id && source.assigned_extractor_id !== myId
+  const available       = !source.assigned_extractor_id && source.status === 'not_started'
+  const myReview        = source.assigned_reviewer_id === myId
+  const inExtractPhase  = ['not_started','extracting','needs_fixes'].includes(source.status)
+
+  // Locked: claimed by someone else AND I'm a pure extractor (no admin/reviewer perms)
+  const isLocked = !isAdmin && isExtractor && !isReviewer && claimedByOther && inExtractPhase
+
+  const cardContent = (
+    <Card hover={!isLocked} className={cn(
+      'p-3.5 space-y-2.5 relative transition-all duration-150',
+      isLocked ? 'opacity-50 cursor-not-allowed bg-gray-50' : '',
+      available && isExtractor && !isAdmin ? 'ring-2 ring-emerald-400 ring-offset-1' : '',
+      claimedByMe ? 'ring-2 ring-blue-400 ring-offset-1' : '',
+      myReview && isReviewer && !isAdmin ? 'ring-2 ring-purple-400 ring-offset-1' : '',
+    )}>
+      {/* Lock overlay for claimed-by-others */}
+      {isLocked && (
+        <div className="absolute top-2 right-2 flex items-center gap-1 bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full text-xs font-semibold">
+          <Lock className="w-2.5 h-2.5" /> Claimed
         </div>
-      </Card>
-    </Link>
+      )}
+      {/* Available badge */}
+      {available && isExtractor && !isAdmin && (
+        <div className="absolute top-2 right-2 flex items-center gap-1 bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-xs font-semibold border border-emerald-200">
+          ✋ Available
+        </div>
+      )}
+      {/* My source badge */}
+      {claimedByMe && !isLocked && (
+        <div className="absolute top-2 right-2 flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-semibold border border-blue-200">
+          Mine
+        </div>
+      )}
+      {/* My review badge */}
+      {myReview && isReviewer && !isAdmin && (
+        <div className="absolute top-2 right-2 flex items-center gap-1 bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full text-xs font-semibold border border-purple-200">
+          🔍 Review
+        </div>
+      )}
+
+      {projectName && (
+        <p className="text-xs text-brand-600 font-medium flex items-center gap-1">
+          <ArrowUpRight className="w-3 h-3" /> {projectName}
+        </p>
+      )}
+      <p className={cn('text-sm font-semibold leading-snug line-clamp-2', isLocked ? 'text-gray-400' : 'text-gray-900')}>{source.name}</p>
+
+      {/* Locked: show who claimed it */}
+      {isLocked && source.assigned_extractor_name && (
+        <p className="text-xs text-gray-400 flex items-center gap-1">
+          <UserIcon className="w-3 h-3" /> Claimed by {source.assigned_extractor_name}
+        </p>
+      )}
+
+      {!isLocked && source.website_url && (
+        <p className="text-xs text-gray-400 flex items-center gap-1 truncate">
+          <Globe className="w-3 h-3 shrink-0" /> {source.website_url.replace(/^https?:\/\//, '')}
+        </p>
+      )}
+      {!isLocked && source.total_records > 0 && (
+        <div className="flex items-center gap-1.5 text-xs">
+          <span className="text-emerald-600 font-medium">{source.valid_records}</span>
+          <span className="text-gray-300">/</span>
+          <span className="text-gray-500">{source.total_records}</span>
+          <span className="text-gray-400">valid</span>
+          {source.invalid_records > 0 && <AlertCircle className="w-3 h-3 text-amber-500 ml-auto" />}
+        </div>
+      )}
+      <div className="flex items-center justify-between pt-1.5 border-t border-gray-50">
+        {!isLocked && source.assigned_extractor_name ? (
+          <div className="flex items-center gap-1.5">
+            <Avatar name={source.assigned_extractor_name} size="sm" />
+            <span className="text-xs text-gray-500 truncate max-w-[100px]">{source.assigned_extractor_name}</span>
+          </div>
+        ) : isLocked ? (
+          <span className="text-xs text-gray-300 flex items-center gap-1"><Lock className="w-3 h-3" /> Not available</span>
+        ) : (
+          <span className="text-xs text-gray-300 flex items-center gap-1"><UserIcon className="w-3 h-3" /> Unassigned</span>
+        )}
+        <span className="text-xs text-gray-300">{safeFromNow(source.updated_at, false)}</span>
+      </div>
+    </Card>
   )
+
+  if (isLocked) return <div title={`Claimed by ${source.assigned_extractor_name}`}>{cardContent}</div>
+  return <Link to={`/projects/${projectId}/sources/${source.id}`}>{cardContent}</Link>
 }
