@@ -412,11 +412,17 @@ function ExtractorDashboard() {
   const { user } = useAuthStore()
   const [summary, setSummary] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [lastRefresh, setLastRefresh] = useState(new Date())
+
+  const load = () => statsApi.sourcesSummary()
+    .then(d => { setSummary(d); setLastRefresh(new Date()) })
+    .finally(() => setLoading(false))
 
   useEffect(() => {
-    statsApi.sourcesSummary().then(setSummary).finally(() => setLoading(false))
-    const iv = setInterval(() => statsApi.sourcesSummary().then(setSummary), 30_000)
-    return () => clearInterval(iv)
+    load()
+    const iv = setInterval(load, 30_000)
+    window.addEventListener('focus', load)
+    return () => { clearInterval(iv); window.removeEventListener('focus', load) }
   }, [])
 
   if (loading) return <Skeleton />
@@ -429,58 +435,67 @@ function ExtractorDashboard() {
   const pct = totalExtracted > 0 ? Math.round((totalApproved / totalExtracted) * 100) : 0
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1000, margin: '0 auto' }}>
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-          {greeting()}, {user?.full_name?.split(' ')[0]} 👋
-        </h1>
-        <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>Your extraction tasks for today.</p>
+    <div style={{ padding: '28px 32px', maxWidth: 1280, margin: '0 auto' }}>
+
+      {/* Header — same style as admin */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+            {greeting()}, {user?.full_name?.split(' ')[0]} 👋
+          </h1>
+          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
+            Your extraction workspace · Last updated {lastRefresh.toLocaleTimeString()}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={load}
+            style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <RefreshCw style={{ width: 14, height: 14 }} /> Refresh
+          </button>
+          <Link to="/sources" style={{ padding: '8px 16px', background: 'linear-gradient(135deg, #2563eb, #4f46e5)', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Database style={{ width: 14, height: 14 }} /> All Sources
+          </Link>
+        </div>
       </div>
 
+      {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
         <KpiCard label="My Sources" value={mine.length} sub="assigned to me" icon={<Upload style={{ width: 18, height: 18 }} />} color="blue" />
         <KpiCard label="Records Uploaded" value={totalExtracted} sub={`${pct}% approved by reviewer`} icon={<Database style={{ width: 18, height: 18 }} />} color="purple" />
-        <KpiCard label="Needs Fixes" value={needsAction.length} sub="errors or sent back" icon={<AlertCircle style={{ width: 18, height: 18 }} />} color="red" />
+        <KpiCard label="Needs Fixes" value={needsAction.length} sub="errors or sent back by reviewer" icon={<AlertCircle style={{ width: 18, height: 18 }} />} color="red" />
         <KpiCard label="Available to Claim" value={available.length} sub="unassigned sources" icon={<Activity style={{ width: 18, height: 18 }} />} color="green" />
       </div>
 
-      {/* Available to claim */}
-      {available.length > 0 && (
-        <div style={{ background: 'linear-gradient(135deg, #ecfdf5, #f0fdf4)', border: '2px solid #6ee7b7', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 16 }}>✋</span>
-              <h3 style={{ fontSize: 13, fontWeight: 700, color: '#065f46', margin: 0 }}>Available to Claim ({available.length})</h3>
-            </div>
-            <span style={{ fontSize: 11, color: '#059669', fontWeight: 600 }}>Open a source → Claim This Source</span>
-          </div>
-          {available.slice(0, 5).map((s: any, i: number) => (
-            <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 20px', textDecoration: 'none', borderBottom: i < Math.min(available.length, 5) - 1 ? '1px solid #d1fae5' : 'none' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.6)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
-              <div>
-                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
-                <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>No extractor · {safeFromNow(s.updated_at)}</p>
-              </div>
-              <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 20, background: '#059669', color: '#fff' }}>Claim →</span>
-            </Link>
-          ))}
-        </div>
-      )}
-
+      {/* Needs attention — urgent panel */}
       {needsAction.length > 0 && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #fecaca', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <AlertCircle style={{ width: 16, height: 16, color: '#ef4444' }} />
-            <h3 style={{ fontSize: 13, fontWeight: 700, color: '#dc2626', margin: 0 }}>Needs Your Attention ({needsAction.length})</h3>
+        <div style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)', marginBottom: 20 }}>
+          <div style={{ padding: '16px 22px', borderBottom: '1px solid #fee2e2', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <AlertCircle style={{ width: 16, height: 16, color: '#ef4444' }} />
+              <div>
+                <h2 style={{ fontSize: 14, fontWeight: 700, color: '#dc2626', margin: 0 }}>Needs Your Attention</h2>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>Reviewer sent these back — fix and re-upload</p>
+              </div>
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 700, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '4px 12px', borderRadius: 20 }}>
+              {needsAction.length} source{needsAction.length !== 1 ? 's' : ''}
+            </span>
           </div>
           {needsAction.map((s: any, i: number) => (
             <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', textDecoration: 'none', background: i % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.5)', borderBottom: i < needsAction.length - 1 ? '1px solid #fee2e2' : 'none' }}>
-              <div>
-                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
-                <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.invalid_records} schema errors · {safeFromNow(s.updated_at)}</p>
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 22px', textDecoration: 'none', borderBottom: i < needsAction.length - 1 ? '1px solid #fef2f2' : 'none', transition: 'background 0.1s' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#fef2f2' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: '#fef2f2', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <AlertCircle style={{ width: 16, height: 16, color: '#ef4444' }} />
+                </div>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+                  <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>
+                    {s.invalid_records > 0 ? `${s.invalid_records} schema errors` : 'Changes requested'} · {safeFromNow(s.updated_at)}
+                  </p>
+                </div>
               </div>
               <StatusPill status={s.status} />
             </Link>
@@ -489,47 +504,71 @@ function ExtractorDashboard() {
       )}
 
       {/* Available to claim */}
-      {(summary?.available ?? []).length > 0 && (
-        <div style={{ background: '#fff', border: '1px solid #c4b5fd', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)', marginBottom: 20 }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #ede9fe', background: '#faf5ff', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 16 }}>✋</span>
-            <h3 style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', margin: 0 }}>Available to Claim ({summary.available.length})</h3>
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 0 auto' }}>No extractor assigned yet — claim one to start</p>
+      {available.length > 0 && (
+        <div style={{ background: '#fff', border: '1px solid #6ee7b7', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)', marginBottom: 20 }}>
+          <div style={{ padding: '16px 22px', borderBottom: '1px solid #d1fae5', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div>
+              <h2 style={{ fontSize: 14, fontWeight: 700, color: '#065f46', margin: 0 }}>Available to Claim</h2>
+              <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>No extractor assigned — open a source and click Claim This Source</p>
+            </div>
+            <span style={{ fontSize: 12, fontWeight: 700, background: '#ecfdf5', color: '#059669', border: '1px solid #6ee7b7', padding: '4px 12px', borderRadius: 20 }}>
+              {available.length} available
+            </span>
           </div>
-          {(summary.available as any[]).map((s: any, i: number) => (
+          {available.slice(0, 6).map((s: any, i: number) => (
             <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 20px', textDecoration: 'none', borderBottom: i < summary.available.length - 1 ? '1px solid #f8fafc' : 'none' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#faf5ff' }}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 22px', textDecoration: 'none', borderBottom: i < Math.min(available.length, 6) - 1 ? '1px solid #f0fdf4' : 'none', transition: 'background 0.1s' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f0fdf4' }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
-              <div>
-                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
-                <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.total_records} records</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 10, background: '#ecfdf5', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, fontSize: 16 }}>✋</div>
+                <div>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+                  <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>Not started · {safeFromNow(s.updated_at)}</p>
+                </div>
               </div>
-              <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 20, background: '#eff6ff', color: '#6366f1', border: '1px solid #c7d2fe' }}>✋ Claim →</span>
+              <span style={{ fontSize: 12, fontWeight: 700, padding: '5px 14px', borderRadius: 8, background: '#059669', color: '#fff' }}>Claim →</span>
             </Link>
           ))}
         </div>
       )}
 
+      {/* My sources list — same style as admin Recent Activity */}
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>My Sources</h3>
-          <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>Full board →</Link>
+        <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>My Sources</h2>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>All sources currently assigned to you</p>
+          </div>
+          <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            Full board <ArrowRight style={{ width: 12, height: 12 }} />
+          </Link>
         </div>
         {mine.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>
-            <Database style={{ width: 40, height: 40, margin: '0 auto 12px', opacity: 0.2 }} />
-            <p style={{ fontSize: 13, fontWeight: 600, color: '#64748b', margin: 0 }}>No sources claimed yet</p>
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0' }}>Claim a source above or wait to be assigned by an admin.</p>
+          <div style={{ padding: 56, textAlign: 'center' }}>
+            <Database style={{ width: 40, height: 40, margin: '0 auto 12px', color: '#e2e8f0' }} />
+            <p style={{ fontSize: 14, fontWeight: 600, color: '#64748b', margin: 0 }}>No sources assigned yet</p>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 0' }}>Claim a source above or ask an admin to assign you.</p>
           </div>
         ) : mine.map((s: any, i: number) => (
           <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
-            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 20px', textDecoration: 'none', borderBottom: i < mine.length - 1 ? '1px solid #f8fafc' : 'none' }}
+            style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 22px', textDecoration: 'none', borderBottom: i < mine.length - 1 ? '1px solid #f8fafc' : 'none', transition: 'background 0.1s' }}
             onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
             onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
-            <div>
-              <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
-              <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.valid_records}/{s.total_records} valid · {safeFromNow(s.updated_at)}</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: STATUS_META[s.status]?.bg ?? '#f8fafc', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <Upload style={{ width: 16, height: 16, color: STATUS_META[s.status]?.color ?? '#94a3b8' }} />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</p>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 2 }}>
+                  <span style={{ fontSize: 11, color: '#94a3b8' }}>{safeFromNow(s.updated_at)}</span>
+                  <span style={{ fontSize: 11, color: '#94a3b8' }}>·</span>
+                  <span style={{ fontSize: 11, color: s.invalid_records > 0 ? '#f59e0b' : '#94a3b8' }}>
+                    {s.valid_records}/{s.total_records} valid{s.invalid_records > 0 ? ` · ${s.invalid_records} errors` : ''}
+                  </span>
+                </div>
+              </div>
             </div>
             <StatusPill status={s.status} />
           </Link>
@@ -608,12 +647,17 @@ function ReviewerDashboard() {
   const { user } = useAuthStore()
   const [summary, setSummary] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [lastRefresh, setLastRefresh] = useState(new Date())
+
+  const load = () => statsApi.sourcesSummary()
+    .then(d => { setSummary(d); setLastRefresh(new Date()) })
+    .finally(() => setLoading(false))
 
   useEffect(() => {
-    statsApi.sourcesSummary().then(setSummary).finally(() => setLoading(false))
-    const iv = setInterval(() => statsApi.sourcesSummary().then(setSummary), 30_000)
-    window.addEventListener('focus', () => statsApi.sourcesSummary().then(setSummary))
-    return () => clearInterval(iv)
+    load()
+    const iv = setInterval(load, 30_000)
+    window.addEventListener('focus', load)
+    return () => { clearInterval(iv); window.removeEventListener('focus', load) }
   }, [])
 
   if (loading) return <Skeleton />
@@ -632,19 +676,25 @@ function ReviewerDashboard() {
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1200, margin: '0 auto' }}>
 
-      {/* Header */}
+      {/* Header — matches admin */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
             {greeting()}, {user?.full_name?.split(' ')[0]} 👋
           </h1>
           <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-            Your review dashboard · Last updated {new Date().toLocaleTimeString()}
+            Your review workspace · Last updated {lastRefresh.toLocaleTimeString()}
           </p>
         </div>
-        <Link to="/sources" style={{ padding: '8px 16px', background: 'linear-gradient(135deg, #7c3aed, #6366f1)', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Eye style={{ width: 14, height: 14 }} /> All Sources
-        </Link>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={load}
+            style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10, cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <RefreshCw style={{ width: 14, height: 14 }} /> Refresh
+          </button>
+          <Link to="/sources" style={{ padding: '8px 16px', background: 'linear-gradient(135deg, #7c3aed, #6366f1)', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Eye style={{ width: 14, height: 14 }} /> All Sources
+          </Link>
+        </div>
       </div>
 
       {/* KPI Cards */}
@@ -692,20 +742,18 @@ function ReviewerDashboard() {
         </div>
       </div>
 
-      {/* Review queue table — full list */}
+      {/* Review queue table */}
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
         <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
-            <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>My Review Queue</h2>
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>All My Assigned Sources</h2>
             <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>
-              Sources assigned to you · click any row to open
+              Click any row to open and start reviewing
             </p>
           </div>
-          {ready.length > 0 && (
-            <span style={{ fontSize: 12, fontWeight: 700, background: '#faf5ff', color: '#7c3aed', border: '1px solid #c4b5fd', padding: '4px 12px', borderRadius: 20 }}>
-              {ready.length} ready to start →
-            </span>
-          )}
+          <Link to="/sources" style={{ fontSize: 12, color: '#7c3aed', textDecoration: 'none', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            Full board <ArrowRight style={{ width: 12, height: 12 }} />
+          </Link>
         </div>
         <ReviewQueue sources={mine} />
       </div>
