@@ -331,6 +331,9 @@ export function SourceDetailPage() {
   const [activeRecordIndex, setActiveRecordIndex] = useState<number | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [showAdminActions, setShowAdminActions] = useState(false)
+  const [showClaimModal, setShowClaimModal]     = useState(false)
+  const [claimReviewerId, setClaimReviewerId]   = useState('')
+  const [claiming, setClaiming]                 = useState(false)
 
   const load = () => {
     if (!projectId || !sourceId) return
@@ -553,10 +556,6 @@ export function SourceDetailPage() {
   const currentStep = getStep(source.status, records)
 
   // Open first pending record for review
-  const [showClaimModal, setShowClaimModal] = useState(false)
-  const [claimReviewerId, setClaimReviewerId] = useState('')
-  const [claiming, setClaiming] = useState(false)
-
   const handleClaim = async () => {
     if (!sourceId) return
     setClaiming(true)
