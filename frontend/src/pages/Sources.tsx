@@ -324,7 +324,7 @@ export function SourcesPage() {
                   <h3 className="text-sm font-semibold text-gray-700">{step.label}</h3>
                   <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full ml-auto">{items.length}</span>
                 </div>
-                <div className="space-y-2.5 min-h-[60px]">
+                <div className="space-y-3 min-h-[60px]">
                   {items.length === 0 ? (
                     <p className="text-xs text-gray-300 px-1">Nothing here</p>
                   ) : items.map(s => (
@@ -353,7 +353,7 @@ export function SourcesPage() {
                   </div>
                   <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{items.length}</span>
                 </div>
-                <div className="space-y-2.5 min-h-[60px]">
+                <div className="space-y-3 min-h-[60px]">
                   {items.map(s => <SourceCard key={s.id} source={s} projectId={s.project_id} projectName={isGlobal ? projectMap[s.project_id] : undefined} />)}
                 </div>
               </div>
@@ -502,16 +502,18 @@ function SourceCard({ source, projectId, projectName }: { source: Source; projec
 
   const cardContent = (
     <Card hover={!isLocked} className={cn(
-      'p-3.5 space-y-2.5 relative transition-all duration-150',
+      'relative transition-all duration-150 space-y-2.5',
+      isLocked ? 'pt-8 px-3.5 pb-3.5' : 'p-3.5',
       isLocked ? 'opacity-50 cursor-not-allowed bg-gray-50' : '',
       available && isExtractor && !isAdmin ? 'ring-2 ring-emerald-400 ring-offset-1' : '',
       claimedByMe ? 'ring-2 ring-blue-400 ring-offset-1' : '',
       myReview && isReviewer && !isAdmin ? 'ring-2 ring-purple-400 ring-offset-1' : '',
     )}>
-      {/* Lock overlay for claimed-by-others */}
+      {/* Lock band — full-width colour strip across top of card */}
       {isLocked && (
-        <div className="absolute top-2 right-2 flex items-center gap-1 bg-gray-200 text-gray-500 px-2 py-0.5 rounded-full text-xs font-semibold">
-          <Lock className="w-2.5 h-2.5" /> Claimed
+        <div className="absolute top-0 left-0 right-0 flex items-center gap-1.5 bg-gray-100 border-b border-gray-200 px-3 py-1" style={{ borderRadius: '12px 12px 0 0' }}>
+          <Lock className="w-3 h-3 text-gray-400" />
+          <span className="text-xs font-semibold text-gray-400">Claimed by {source.assigned_extractor_name ?? 'another extractor'}</span>
         </div>
       )}
       {/* Available badge */}
@@ -540,12 +542,7 @@ function SourceCard({ source, projectId, projectName }: { source: Source; projec
       )}
       <p className={cn('text-sm font-semibold leading-snug line-clamp-2', isLocked ? 'text-gray-400' : 'text-gray-900')}>{source.name}</p>
 
-      {/* Locked: show who claimed it */}
-      {isLocked && source.assigned_extractor_name && (
-        <p className="text-xs text-gray-400 flex items-center gap-1">
-          <UserIcon className="w-3 h-3" /> Claimed by {source.assigned_extractor_name}
-        </p>
-      )}
+
 
       {!isLocked && source.website_url && (
         <p className="text-xs text-gray-400 flex items-center gap-1 truncate">

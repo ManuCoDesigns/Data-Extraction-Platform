@@ -414,16 +414,19 @@ function ExtractorDashboard() {
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(new Date())
 
-  const load = () => statsApi.sourcesSummary()
-    .then(d => { setSummary(d); setLastRefresh(new Date()) })
-    .finally(() => setLoading(false))
+  const load = useCallback(() => {
+    statsApi.sourcesSummary()
+      .then(d => { setSummary(d); setLastRefresh(new Date()) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
 
   useEffect(() => {
     load()
     const iv = setInterval(load, 30_000)
     window.addEventListener('focus', load)
     return () => { clearInterval(iv); window.removeEventListener('focus', load) }
-  }, [])
+  }, [load])
 
   if (loading) return <Skeleton />
 
@@ -649,16 +652,19 @@ function ReviewerDashboard() {
   const [loading, setLoading] = useState(true)
   const [lastRefresh, setLastRefresh] = useState(new Date())
 
-  const load = () => statsApi.sourcesSummary()
-    .then(d => { setSummary(d); setLastRefresh(new Date()) })
-    .finally(() => setLoading(false))
+  const load = useCallback(() => {
+    statsApi.sourcesSummary()
+      .then(d => { setSummary(d); setLastRefresh(new Date()) })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
 
   useEffect(() => {
     load()
     const iv = setInterval(load, 30_000)
     window.addEventListener('focus', load)
     return () => { clearInterval(iv); window.removeEventListener('focus', load) }
-  }, [])
+  }, [load])
 
   if (loading) return <Skeleton />
 
