@@ -415,9 +415,12 @@ function ExtractorDashboard() {
 
   if (loading) return <Skeleton />
 
-  const mine: any[] = summary?.my_extracting ?? []
-  const needsAction = mine.filter((s: any) => ['needs_fixes','changes_requested'].includes(s.status))
-  const inProgress  = mine.filter((s: any) => s.status === 'extracting')
+  const mine: any[]      = summary?.my_extracting ?? []
+  const available: any[] = summary?.available ?? []
+  const needsAction      = mine.filter((s: any) => ['needs_fixes','changes_requested'].includes(s.status))
+  const totalExtracted   = summary?.total_extracted ?? mine.reduce((s: number, r: any) => s + r.total_records, 0)
+  const totalApproved    = summary?.total_ext_approved ?? mine.reduce((s: number, r: any) => s + r.approved_records, 0)
+  const pct = totalExtracted > 0 ? Math.round((totalApproved / totalExtracted) * 100) : 0
 
   return (
     <div style={{ padding: '28px 32px', maxWidth: 1000, margin: '0 auto' }}>
@@ -428,11 +431,37 @@ function ExtractorDashboard() {
         <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>Your extraction tasks for today.</p>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-        <KpiCard label="Assigned to Me" value={mine.length} sub="total sources" icon={<Upload style={{ width: 18, height: 18 }} />} color="blue" />
-        <KpiCard label="Needs Attention" value={needsAction.length} sub="errors to fix" icon={<AlertCircle style={{ width: 18, height: 18 }} />} color="red" />
-        <KpiCard label="In Progress" value={inProgress.length} sub="actively extracting" icon={<Activity style={{ width: 18, height: 18 }} />} color="amber" />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+        <KpiCard label="My Sources" value={mine.length} sub="assigned to me" icon={<Upload style={{ width: 18, height: 18 }} />} color="blue" />
+        <KpiCard label="Records Uploaded" value={totalExtracted} sub={`${pct}% approved by reviewer`} icon={<Database style={{ width: 18, height: 18 }} />} color="purple" />
+        <KpiCard label="Needs Fixes" value={needsAction.length} sub="errors or sent back" icon={<AlertCircle style={{ width: 18, height: 18 }} />} color="red" />
+        <KpiCard label="Available to Claim" value={available.length} sub="unassigned sources" icon={<Activity style={{ width: 18, height: 18 }} />} color="green" />
       </div>
+
+      {/* Available to claim */}
+      {available.length > 0 && (
+        <div style={{ background: 'linear-gradient(135deg, #ecfdf5, #f0fdf4)', border: '2px solid #6ee7b7', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid #a7f3d0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 16 }}>✋</span>
+              <h3 style={{ fontSize: 13, fontWeight: 700, color: '#065f46', margin: 0 }}>Available to Claim ({available.length})</h3>
+            </div>
+            <span style={{ fontSize: 11, color: '#059669', fontWeight: 600 }}>Open a source → Claim This Source</span>
+          </div>
+          {available.slice(0, 5).map((s: any, i: number) => (
+            <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 20px', textDecoration: 'none', borderBottom: i < Math.min(available.length, 5) - 1 ? '1px solid #d1fae5' : 'none' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.6)' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+              <div>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+                <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>No extractor · {safeFromNow(s.updated_at)}</p>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 20, background: '#059669', color: '#fff' }}>Claim →</span>
+            </Link>
+          ))}
+        </div>
+      )}
 
       {needsAction.length > 0 && (
         <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
@@ -453,16 +482,39 @@ function ExtractorDashboard() {
         </div>
       )}
 
+      {/* Available to claim */}
+      {(summary?.available ?? []).length > 0 && (
+        <div style={{ background: '#fff', border: '1px solid #c4b5fd', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)', marginBottom: 20 }}>
+          <div style={{ padding: '14px 20px', borderBottom: '1px solid #ede9fe', background: '#faf5ff', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span style={{ fontSize: 16 }}>✋</span>
+            <h3 style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', margin: 0 }}>Available to Claim ({summary.available.length})</h3>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '0 0 0 auto' }}>No extractor assigned yet — claim one to start</p>
+          </div>
+          {(summary.available as any[]).map((s: any, i: number) => (
+            <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
+              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '11px 20px', textDecoration: 'none', borderBottom: i < summary.available.length - 1 ? '1px solid #f8fafc' : 'none' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#faf5ff' }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+              <div>
+                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
+                <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.total_records} records</p>
+              </div>
+              <span style={{ fontSize: 11, fontWeight: 700, padding: '4px 12px', borderRadius: 20, background: '#eff6ff', color: '#6366f1', border: '1px solid #c7d2fe' }}>✋ Claim →</span>
+            </Link>
+          ))}
+        </div>
+      )}
+
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>All My Sources</h3>
+          <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>My Sources</h3>
           <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>Full board →</Link>
         </div>
         {mine.length === 0 ? (
           <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>
             <Database style={{ width: 40, height: 40, margin: '0 auto 12px', opacity: 0.2 }} />
-            <p style={{ fontSize: 13, fontWeight: 600, color: '#64748b', margin: 0 }}>No sources assigned yet</p>
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0' }}>An admin will assign you when there's data to extract.</p>
+            <p style={{ fontSize: 13, fontWeight: 600, color: '#64748b', margin: 0 }}>No sources claimed yet</p>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0' }}>Claim a source above or wait to be assigned by an admin.</p>
           </div>
         ) : mine.map((s: any, i: number) => (
           <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
@@ -481,77 +533,11 @@ function ExtractorDashboard() {
   )
 }
 
-// ── Reviewer Dashboard ────────────────────────────────────────────────────────
-function ReviewerDashboard() {
-  const { user } = useAuthStore()
-  const [summary, setSummary] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    statsApi.sourcesSummary().then(setSummary).finally(() => setLoading(false))
-    const iv = setInterval(() => statsApi.sourcesSummary().then(setSummary), 30_000)
-    return () => clearInterval(iv)
-  }, [])
-
-  if (loading) return <Skeleton />
-  const mine: any[] = summary?.my_reviewing ?? []
-  const ready = mine.filter((s: any) => s.status === 'ready_for_review')
-
-  return (
-    <div style={{ padding: '28px 32px', maxWidth: 1000, margin: '0 auto' }}>
-      <div style={{ marginBottom: 28 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-          {greeting()}, {user?.full_name?.split(' ')[0]} 👋
-        </h1>
-        <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>Sources waiting for your review.</p>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16, marginBottom: 24 }}>
-        <KpiCard label="Ready to Review" value={ready.length} sub="waiting for you" icon={<Eye style={{ width: 18, height: 18 }} />} color="purple" />
-        <KpiCard label="In Review" value={mine.filter((s: any) => s.status === 'in_review').length} sub="you've started" icon={<Activity style={{ width: 18, height: 18 }} />} color="blue" />
-        <KpiCard label="Total Assigned" value={mine.length} sub="all review sources" icon={<Database style={{ width: 18, height: 18 }} />} color="green" />
-      </div>
-
-      {ready.length > 0 && (
-        <div style={{ background: '#faf5ff', border: '1px solid #c4b5fd', borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}>
-          <div style={{ padding: '14px 20px', borderBottom: '1px solid #c4b5fd', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Eye style={{ width: 16, height: 16, color: '#7c3aed' }} />
-            <h3 style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', margin: 0 }}>Ready for Your Review ({ready.length})</h3>
-          </div>
-          {ready.map((s: any, i: number) => (
-            <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', textDecoration: 'none', borderBottom: i < ready.length - 1 ? '1px solid #ede9fe' : 'none' }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.6)' }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
-              <div>
-                <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{s.name}</p>
-                <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{s.total_records} records · {safeFromNow(s.updated_at)}</p>
-              </div>
-              <StatusPill status={s.status} />
-            </Link>
-          ))}
-        </div>
-      )}
-
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-        <div style={{ padding: '16px 20px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <h3 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>My Review Queue</h3>
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>All sources assigned to you for review</p>
-          </div>
-          <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', fontWeight: 600 }}>Full board →</Link>
-        </div>
-        <ReviewQueue sources={mine} />
-      </div>
-    </div>
-  )
-}
-
 // ── Reviewer Work Queue Table ──────────────────────────────────────────────────
 function ReviewQueue({ sources }: { sources: any[] }) {
   if (!sources.length) return (
     <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>
-      <p style={{ fontSize: 13, margin: 0 }}>No sources assigned for review yet</p>
+      <p style={{ fontSize: 13, margin: 0 }}>No sources in your review queue</p>
     </div>
   )
   return (
@@ -577,7 +563,8 @@ function ReviewQueue({ sources }: { sources: any[] }) {
                   <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{safeFromNow(s.updated_at)}</p>
                 </td>
                 <td style={{ padding: '12px 14px' }}>
-                  <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 20, background: (statusM?.color || '#94a3b8') + '15', color: statusM?.color || '#94a3b8' }}>
+                  <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 8px', borderRadius: 20,
+                    background: ((statusM?.color || '#94a3b8') + '15'), color: statusM?.color || '#94a3b8' }}>
                     {statusM?.label || s.status}
                   </span>
                 </td>
@@ -606,6 +593,116 @@ function ReviewQueue({ sources }: { sources: any[] }) {
           })}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// ── Reviewer Dashboard ─────────────────────────────────────────────────────────
+function ReviewerDashboard() {
+  const { user } = useAuthStore()
+  const [summary, setSummary] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    statsApi.sourcesSummary().then(setSummary).finally(() => setLoading(false))
+    const iv = setInterval(() => statsApi.sourcesSummary().then(setSummary), 30_000)
+    window.addEventListener('focus', () => statsApi.sourcesSummary().then(setSummary))
+    return () => clearInterval(iv)
+  }, [])
+
+  if (loading) return <Skeleton />
+
+  const mine: any[]          = summary?.my_reviewing ?? []
+  const approvedRecords: number = summary?.my_approved_records ?? 0
+  const approvedThisWeek: number = summary?.my_approved_this_week ?? 0
+  const pendingTotal: number = summary?.my_pending_total ?? 0
+  const ready = mine.filter((s: any) => s.status === 'ready_for_review')
+  const inProgress = mine.filter((s: any) => s.status === 'in_review')
+  const totalAssigned = mine.length
+  const totalReviewed = approvedRecords
+  const pctDone = (totalAssigned > 0 || approvedRecords > 0)
+    ? Math.round((approvedRecords / Math.max(approvedRecords + pendingTotal, 1)) * 100) : 0
+
+  return (
+    <div style={{ padding: '28px 32px', maxWidth: 1200, margin: '0 auto' }}>
+
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+            {greeting()}, {user?.full_name?.split(' ')[0]} 👋
+          </h1>
+          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
+            Your review dashboard · Last updated {new Date().toLocaleTimeString()}
+          </p>
+        </div>
+        <Link to="/sources" style={{ padding: '8px 16px', background: 'linear-gradient(135deg, #7c3aed, #6366f1)', border: 'none', borderRadius: 10, cursor: 'pointer', fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Eye style={{ width: 14, height: 14 }} /> All Sources
+        </Link>
+      </div>
+
+      {/* KPI Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+        <KpiCard label="Records Reviewed" value={approvedRecords} sub="approved by you total"
+          icon={<CheckCircle style={{ width: 18, height: 18 }} />} color="green"
+          trend={{ value: approvedThisWeek, label: 'this week' }} />
+        <KpiCard label="Pending Records" value={pendingTotal} sub="still need your review"
+          icon={<Clock style={{ width: 18, height: 18 }} />} color="amber" />
+        <KpiCard label="Ready to Review" value={ready.length} sub="sources waiting for you"
+          icon={<Eye style={{ width: 18, height: 18 }} />} color="purple" />
+        <KpiCard label="In Progress" value={inProgress.length} sub="you've started reviewing"
+          icon={<Activity style={{ width: 18, height: 18 }} />} color="blue" />
+      </div>
+
+      {/* Contribution progress bar */}
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '20px 24px', marginBottom: 24, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <div>
+            <p style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Your Review Progress</p>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>
+              {approvedRecords} records approved · {pendingTotal} still pending across {totalAssigned} source{totalAssigned !== 1 ? 's' : ''}
+            </p>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <p style={{ fontSize: 32, fontWeight: 800, color: '#7c3aed', margin: 0, lineHeight: 1 }}>{pctDone}%</p>
+            <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>complete</p>
+          </div>
+        </div>
+        <div style={{ background: '#f1f5f9', borderRadius: 99, height: 12, overflow: 'hidden' }}>
+          <div style={{ background: 'linear-gradient(90deg, #7c3aed, #6366f1)', height: '100%', borderRadius: 99, width: `${pctDone}%`, transition: 'width 0.8s ease' }} />
+        </div>
+        <div style={{ display: 'flex', gap: 20, marginTop: 12 }}>
+          {[
+            { label: 'Ready', count: ready.length, color: '#6366f1' },
+            { label: 'In Review', count: inProgress.length, color: '#7c3aed' },
+            { label: 'Approved This Week', count: approvedThisWeek, color: '#059669' },
+            { label: 'Total Approved', count: approvedRecords, color: '#10b981' },
+          ].map(s => (
+            <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: s.color }} />
+              <span style={{ fontSize: 11, color: '#64748b' }}>{s.label}: <strong style={{ color: s.color }}>{s.count}</strong></span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Review queue table — full list */}
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+        <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div>
+            <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>My Review Queue</h2>
+            <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>
+              Sources assigned to you · click any row to open
+            </p>
+          </div>
+          {ready.length > 0 && (
+            <span style={{ fontSize: 12, fontWeight: 700, background: '#faf5ff', color: '#7c3aed', border: '1px solid #c4b5fd', padding: '4px 12px', borderRadius: 20 }}>
+              {ready.length} ready to start →
+            </span>
+          )}
+        </div>
+        <ReviewQueue sources={mine} />
+      </div>
     </div>
   )
 }

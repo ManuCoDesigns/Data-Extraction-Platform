@@ -117,84 +117,141 @@ function PrimaryActionPanel({
   const approvedCount = records.filter((r: any) => r.review_status === 'approved').length
   const submittedCount = records.filter((r: any) => r.is_submitted).length
   const total = records.length
+  const isExtractorOnly = isExtractor && !isReviewer && !isAdmin
 
-  // Step 1 — Upload
-  if (step === 1) return (
-    <div style={{ background: '#eff6ff', border: '2px solid #3b82f6', borderRadius: 14, padding: '20px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <p style={{ fontSize: 15, fontWeight: 700, color: '#1e40af', margin: 0 }}>
-            📤 Step 1 of 4 — Upload Company Data
-          </p>
-          <p style={{ fontSize: 13, color: '#3b82f6', margin: '4px 0 0' }}>
-            {records.length === 0
-              ? 'No data yet. Upload a file or auto-scrape the company website to get started.'
-              : `${records.length} records uploaded but some need fixing. Review errors or re-upload.`}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {!source.assigned_extractor_id && (
-            <Button size="sm" onClick={onClaim} style={{ background: '#6366f1', border: 'none', color: '#fff' }}>
-              ✋ Claim This Source
-            </Button>
-          )}
-          {source.website_url && isExtractor && (
-            <Button variant="secondary" size="sm" onClick={onScrape} loading={scraping}>
-              <Search className="w-3.5 h-3.5" /> Auto-Scrape Website
-            </Button>
-          )}
-          {isExtractor && (
-            <Button size="sm" onClick={onUpload} style={{ background: '#2563eb', border: 'none', color: '#fff' }}>
-              <Upload className="w-3.5 h-3.5" />
-              {records.length > 0 ? 'Re-Upload Data' : 'Upload Data'}
-            </Button>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-
-  // Step 2 — Review records
-  if (step === 2) return (
-    <div style={{ background: '#faf5ff', border: '2px solid #8b5cf6', borderRadius: 14, padding: '20px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+  // Extractors see steps 2-4 as "waiting for reviewer"
+  if (isExtractorOnly && step >= 2 && step <= 4) return (
+    <div style={{ background: '#f8fafc', border: '2px solid #e2e8f0', borderRadius: 14, padding: '20px 24px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ width: 44, height: 44, borderRadius: '50%', background: '#eff6ff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>🔍</div>
         <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 15, fontWeight: 700, color: '#5b21b6', margin: 0 }}>
-            🔍 Step 2 of 4 — Review Each Record
+          <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', margin: 0 }}>
+            {step === 2 ? 'Your upload is complete — waiting for reviewer'
+              : step === 3 ? 'All records approved — reviewer to approve source'
+              : 'Source approved — reviewer to submit records'}
           </p>
-          <p style={{ fontSize: 13, color: '#7c3aed', margin: '4px 0 8px' }}>
-            {pendingCount > 0
-              ? `${pendingCount} record${pendingCount !== 1 ? 's' : ''} still pending review · ${approvedCount} of ${total} approved`
-              : `All ${total} records approved — ready to approve the source`}
+          <p style={{ fontSize: 13, color: '#64748b', margin: '5px 0 0' }}>
+            {step === 2 && `${records.length} record${records.length !== 1 ? 's' : ''} uploaded. The reviewer assigned to this source will review and approve each record. You will be notified if any records are sent back for fixes.`}
+            {step === 3 && 'All records have been individually approved. The assigned reviewer will now approve the source as a whole.'}
+            {step === 4 && 'The reviewer will submit the approved records to complete the delivery.'}
           </p>
-          {/* Progress bar */}
-          <div style={{ background: '#ede9fe', borderRadius: 99, height: 8, overflow: 'hidden', maxWidth: 300 }}>
-            <div style={{ background: '#8b5cf6', height: '100%', borderRadius: 99, width: `${total > 0 ? Math.round((approvedCount / total) * 100) : 0}%`, transition: 'width 0.5s ease' }} />
+        </div>
+        {source.assigned_reviewer_name && (
+          <div style={{ textAlign: 'right', flexShrink: 0, padding: '8px 14px', background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0' }}>
+            <p style={{ fontSize: 10, color: '#94a3b8', margin: '0 0 2px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Reviewer</p>
+            <p style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', margin: 0 }}>{source.assigned_reviewer_name}</p>
           </div>
-          <p style={{ fontSize: 11, color: '#7c3aed', margin: '4px 0 0' }}>
-            {total > 0 ? Math.round((approvedCount / total) * 100) : 0}% complete
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {source.website_url && isReviewer && (
-            <Button variant="secondary" size="sm" onClick={onVerify} loading={verifying}>
-              <Shield className="w-3.5 h-3.5" /> LLM Verify
-            </Button>
-          )}
-          {(isReviewer || isAdmin) && !isSelfReview && (
-            <Button size="sm" onClick={onReview} style={{ background: '#7c3aed', border: 'none', color: '#fff' }}>
-              <Eye className="w-3.5 h-3.5" /> Review Records →
-            </Button>
-          )}
-          {isSelfReview && !isAdmin && (
-            <span style={{ fontSize: 12, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '6px 14px', borderRadius: 20, fontWeight: 600 }}>
-              ⚠ You extracted this — a reviewer must approve
-            </span>
-          )}
-        </div>
+        )}
       </div>
     </div>
   )
+
+  // Step 1 — Extractor zone: upload, scrape, LLM verify, fix errors
+  if (step === 1) {
+    const hasValidRecords = records.length > 0 && records.every((r: any) => r.is_schema_valid)
+    return (
+      <div style={{ background: '#eff6ff', border: '2px solid #3b82f6', borderRadius: 14, padding: '20px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div>
+            <p style={{ fontSize: 15, fontWeight: 700, color: '#1e40af', margin: 0 }}>
+              📤 Upload & Prepare Data
+            </p>
+            <p style={{ fontSize: 13, color: '#3b82f6', margin: '4px 0 0' }}>
+              {records.length === 0
+                ? 'No data yet — upload a file or auto-scrape the company website.'
+                : hasValidRecords
+                  ? `${records.length} records uploaded and valid — once done, the reviewer will take over from here.`
+                  : `${records.length} records uploaded — fix schema errors before handing to reviewer.`}
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {!source.assigned_extractor_id && (
+              <Button size="sm" onClick={onClaim} style={{ background: '#6366f1', border: 'none', color: '#fff' }}>
+                ✋ Claim This Source
+              </Button>
+            )}
+            {source.website_url && isExtractor && (
+              <Button variant="secondary" size="sm" onClick={onScrape} loading={scraping}>
+                <Search className="w-3.5 h-3.5" /> Auto-Scrape
+              </Button>
+            )}
+            {source.website_url && isExtractor && records.length > 0 && (
+              <Button variant="secondary" size="sm" onClick={onVerify} loading={verifying}>
+                <Shield className="w-3.5 h-3.5" /> LLM Verify
+              </Button>
+            )}
+            {isExtractor && (
+              <Button size="sm" onClick={onUpload} style={{ background: '#2563eb', border: 'none', color: '#fff' }}>
+                <Upload className="w-3.5 h-3.5" />
+                {records.length > 0 ? 'Re-Upload' : 'Upload Data'}
+              </Button>
+            )}
+          </div>
+        </div>
+        {hasValidRecords && !isAdmin && !isReviewer && (
+          <div style={{ marginTop: 12, padding: '10px 14px', background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 10, fontSize: 12, color: '#065f46', fontWeight: 500 }}>
+            ✅ Data looks good — your job is done here. The assigned reviewer will review and approve the records.
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Step 2 — Reviewer zone only
+  if (step === 2) {
+    // Extractor sees "handed off" message, not the review controls
+    const isExtractorOnly = isExtractor && !isReviewer && !isAdmin
+    if (isExtractorOnly && !isSelfReview) return (
+      <div style={{ background: '#f0fdf4', border: '2px solid #6ee7b7', borderRadius: 14, padding: '20px 24px' }}>
+        <p style={{ fontSize: 15, fontWeight: 700, color: '#065f46', margin: '0 0 4px' }}>
+          ✅ Data handed to reviewer
+        </p>
+        <p style={{ fontSize: 13, color: '#059669', margin: 0 }}>
+          Your extraction work is done. The reviewer is now checking each record.
+          You'll be notified if anything needs fixing.
+        </p>
+      </div>
+    )
+    return (
+      <div style={{ background: '#faf5ff', border: '2px solid #8b5cf6', borderRadius: 14, padding: '20px 24px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontSize: 15, fontWeight: 700, color: '#5b21b6', margin: 0 }}>
+              🔍 Review Each Record
+            </p>
+            <p style={{ fontSize: 13, color: '#7c3aed', margin: '4px 0 8px' }}>
+              {pendingCount > 0
+                ? `${pendingCount} record${pendingCount !== 1 ? 's' : ''} still pending · ${approvedCount} of ${total} approved`
+                : `All ${total} records approved — approve the source to continue`}
+            </p>
+            <div style={{ background: '#ede9fe', borderRadius: 99, height: 8, overflow: 'hidden', maxWidth: 300 }}>
+              <div style={{ background: '#8b5cf6', height: '100%', borderRadius: 99, width: `${total > 0 ? Math.round((approvedCount / total) * 100) : 0}%`, transition: 'width 0.5s ease' }} />
+            </div>
+            <p style={{ fontSize: 11, color: '#7c3aed', margin: '4px 0 0' }}>
+              {total > 0 ? Math.round((approvedCount / total) * 100) : 0}% complete
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {source.website_url && (isReviewer || isAdmin) && (
+              <Button variant="secondary" size="sm" onClick={onVerify} loading={verifying}>
+                <Shield className="w-3.5 h-3.5" /> LLM Verify
+              </Button>
+            )}
+            {(isReviewer || isAdmin) && !isSelfReview && (
+              <Button size="sm" onClick={onReview} style={{ background: '#7c3aed', border: 'none', color: '#fff' }}>
+                <Eye className="w-3.5 h-3.5" /> Review Records →
+              </Button>
+            )}
+            {isSelfReview && !isAdmin && (
+              <span style={{ fontSize: 12, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '6px 14px', borderRadius: 20, fontWeight: 600 }}>
+                ⚠ You extracted this — a reviewer must approve
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   // Step 3 — Approve source
   if (step === 3) return (

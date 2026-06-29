@@ -1414,8 +1414,13 @@ async def llm_verify_source(
     and what the website actually says.
     """
     source = _get_source_or_404(source_id, db)
-    if not _is_assigned_reviewer(current_user, source):
-        raise HTTPException(status_code=403, detail="Access denied")
+    # Extractors can also run LLM verify — they know the data best
+    can_verify = (
+        _is_assigned_reviewer(current_user, source)
+        or _is_assigned_extractor(current_user, source)
+    )
+    if not can_verify:
+        raise HTTPException(status_code=403, detail="Only the assigned extractor, reviewer, or admin can run LLM verification")
 
     if not source.website_url:
         raise HTTPException(status_code=422, detail="No website URL — cannot verify without a source to check against.")

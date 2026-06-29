@@ -268,22 +268,42 @@ def sources_summary(
             "updated_at": s.updated_at,
         }
 
-    # Dual-role support: show ALL sources where user is extractor OR reviewer
-    # my_extracting — any source where this user is the extractor (needs their action)
+    # My extraction work (all statuses except approved)
     my_extracting = [
         s for s in sources
         if s.assigned_extractor_id == current_user.id
-        and s.status.value not in ("approved",)
     ]
-    # my_reviewing — ALL sources assigned to this user as reviewer, with pending work
-    # Includes ready_for_review, in_review, changes_requested — anything not yet approved
-    my_reviewing = [
+    # My review queue — all sources assigned to me as reviewer, not yet approved
+    my_reviewing = sorted(
+        [s for s in sources if s.assigned_reviewer_id == current_user.id
+         and s.status.value not in ("not_started",)],
+        key=lambda s: s.updated_at or s.created_at, reverse=True
+    )
+    # Available to claim — no extractor assigned, not started, in accessible projects
+    available = [
         s for s in sources
-        if s.assigned_reviewer_id == current_user.id
-        and s.status.value not in ("approved", "not_started")
+        if not s.assigned_extractor_id
+        and s.status.value == "not_started"
     ]
-    # Also include approved sources with pending records (still need final approval)
-    my_review_queue = sorted(my_reviewing, key=lambda s: s.updated_at or s.created_at, reverse=True)
+
+    # Reviewer contribution stats — records this user has personally approved
+    from app.models.all_models import ExtractedRecord, ExtractionJob, ReviewStatus as RS
+    from datetime import timedelta
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+
+    my_approved_records = db.query(ExtractedRecord).filter(
+        ExtractedRecord.reviewed_by == current_user.id,
+        ExtractedRecord.review_status == RS.APPROVED,
+    ).count()
+
+    my_approved_this_week = db.query(ExtractedRecord).filter(
+        ExtractedRecord.reviewed_by == current_user.id,
+        ExtractedRecord.review_status == RS.APPROVED,
+        ExtractedRecord.reviewed_at >= week_ago,
+    ).count()
+
+    # Total records pending across my assigned reviewer sources
+    my_pending_total = sum(s.pending_records for s in [_src(s) for s in my_reviewing])
 
     # Recent activity = last 10 updated sources
     recent = sorted(sources, key=lambda s: s.updated_at or s.created_at, reverse=True)[:10]
@@ -293,7 +313,11 @@ def sources_summary(
         "total": total,
         "approved_this_week": approved_this_week,
         "my_extracting": [_src(s) for s in my_extracting],
-        "my_reviewing": [_src(s) for s in my_review_queue],
+        "my_reviewing": [_src(s) for s in my_reviewing],
+        "available": [_src(s) for s in available[:20]],  # unclaimed sources
+        "my_approved_records": my_approved_records,
+        "my_approved_this_week": my_approved_this_week,
+        "my_pending_total": my_pending_total,
         "recent": [_src(s) for s in recent],
     }
 
