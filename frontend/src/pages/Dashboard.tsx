@@ -62,27 +62,25 @@ function KpiCard({ label, value, sub, icon, color, trend }: {
     amber:  { bg: '#fffbeb', icon: '#d97706', text: '#b45309' },
   }[color] ?? { bg: '#f8fafc', icon: '#64748b', text: '#475569' }
   return (
-    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
-      padding: '20px 22px', position: 'relative', overflow: 'hidden',
-      boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
-      <div style={{ position: 'absolute', top: -12, right: -12, width: 64, height: 64,
-        borderRadius: '50%', background: C.bg, opacity: 0.7 }} />
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 12 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 12, background: C.bg,
+    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14,
+      padding: '16px 18px', position: 'relative', overflow: 'hidden',
+      boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <div style={{ width: 34, height: 34, borderRadius: 10, background: C.bg,
           display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.icon }}>
           {icon}
         </div>
         {trend && trend.value > 0 && (
-          <span style={{ fontSize: 11, fontWeight: 700, color: '#059669',
-            background: '#ecfdf5', padding: '2px 8px', borderRadius: 20 }}>
+          <span style={{ fontSize: 10, fontWeight: 700, color: '#059669',
+            background: '#ecfdf5', padding: '2px 7px', borderRadius: 20 }}>
             +{trend.value} {trend.label}
           </span>
         )}
       </div>
-      <p style={{ fontSize: 28, fontWeight: 800, color: '#0f172a', margin: 0, lineHeight: 1 }}>
+      <p style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0, lineHeight: 1 }}>
         {value}
       </p>
-      <p style={{ fontSize: 13, fontWeight: 600, color: C.text, margin: '4px 0 2px' }}>{label}</p>
+      <p style={{ fontSize: 12, fontWeight: 600, color: C.text, margin: '3px 0 1px' }}>{label}</p>
       <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>{sub}</p>
     </div>
   )
@@ -94,9 +92,9 @@ function DashHeader({ name, sub, onRefresh, actionTo, actionLabel, actionColor =
 }) {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-      marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
+      marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
       <div>
-        <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+        <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>
           {greeting()}, {name} 👋
         </h1>
         <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>{sub}</p>
@@ -122,7 +120,7 @@ function DashHeader({ name, sub, onRefresh, actionTo, actionLabel, actionColor =
 
 function Skeleton() {
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ padding: '22px 28px', maxWidth: 1140, margin: '0 auto' }}>
       {[1,2,3].map(i => (
         <div key={i} style={{ background: '#f1f5f9', borderRadius: 16, height: i === 1 ? 32 : 120,
           marginBottom: 16, animation: 'pulse 1.5s ease-in-out infinite' }} />
@@ -138,7 +136,7 @@ function SectionCard({ title, sub, badge, badgeColor = '#2563eb', linkTo, childr
   return (
     <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
       overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.05)', marginBottom: 20 }}>
-      <div style={{ padding: '16px 22px', borderBottom: '1px solid #f1f5f9',
+      <div style={{ padding: '13px 20px', borderBottom: '1px solid #f1f5f9',
         display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>{title}</h2>
@@ -180,7 +178,7 @@ function SourceRow({ s, i, total }: { s: any; i: number; total: number }) {
   return (
     <Link to={`/projects/${s.project_id}/sources/${s.id}`}
       style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '13px 22px', textDecoration: 'none',
+        padding: '11px 20px', textDecoration: 'none',
         borderBottom: i < total - 1 ? '1px solid #f8fafc' : 'none', transition: 'background 0.1s' }}
       onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
@@ -341,7 +339,7 @@ function AdminDashboard() {
   const reviewers  = perf?.reviewers  ?? []
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ padding: '22px 28px', maxWidth: 1140, margin: '0 auto' }}>
       <DashHeader
         name={user?.full_name?.split(' ')[0] ?? ''}
         sub={`Extraction operation at a glance · Last updated ${lastRefresh.toLocaleTimeString()}`}
@@ -349,7 +347,7 @@ function AdminDashboard() {
         actionIcon={<Database style={{ width: 14, height: 14 }} />}
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18 }}>
         <KpiCard label="Total Sources"  value={total}         sub="across all projects"        icon={<Database style={{ width: 18, height: 18 }} />}    color="blue"   />
         <KpiCard label="In Progress"    value={inProgress}    sub="uploading or in review"     icon={<Activity style={{ width: 18, height: 18 }} />}    color="purple" />
         <KpiCard label="Approved"       value={approvedCount} sub={`${total > 0 ? Math.round(approvedCount/total*100) : 0}% complete`} icon={<CheckCircle style={{ width: 18, height: 18 }} />} color="green" trend={{ value: summary?.approved_this_week ?? 0, label: 'this week' }} />
@@ -358,10 +356,10 @@ function AdminDashboard() {
 
       {/* Pipeline funnel */}
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
-        padding: '20px 22px', marginBottom: 24, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+        padding: '16px 20px', marginBottom: 18, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <div>
-            <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Extraction Pipeline</h2>
+            <h2 style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: 0 }}>Extraction Pipeline</h2>
             <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>Sources moving through the workflow</p>
           </div>
           <Link to="/sources" style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none',
@@ -393,7 +391,7 @@ function AdminDashboard() {
       </div>
 
       {/* Chart + Team */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 1fr', gap: 12, marginBottom: 18 }}>
         {/* Bar chart */}
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
           padding: '18px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
@@ -401,7 +399,7 @@ function AdminDashboard() {
           <p style={{ fontSize: 11, color: '#94a3b8', margin: '0 0 12px' }}>{total} total</p>
           {chartData.length === 0
             ? <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 12 }}>No data yet</div>
-            : <ResponsiveContainer width="100%" height={160}>
+            : <ResponsiveContainer width="100%" height={140}>
                 <BarChart data={chartData} barSize={18} margin={{ top: 2, right: 2, bottom: 0, left: -20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
                   <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval={0} />
@@ -541,7 +539,7 @@ function ExtractorDashboard() {
   const pct                 = totalExtracted > 0 ? Math.round((totalApproved / totalExtracted) * 100) : 0
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ padding: '22px 28px', maxWidth: 1140, margin: '0 auto' }}>
       <DashHeader
         name={user?.full_name?.split(' ')[0] ?? ''}
         sub={`Your extraction workspace · Last updated ${lastRefresh.toLocaleTimeString()}`}
@@ -549,7 +547,7 @@ function ExtractorDashboard() {
         actionIcon={<Database style={{ width: 14, height: 14 }} />}
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18 }}>
         <KpiCard label="My Sources"         value={mine.length}       sub="assigned to me"              icon={<Upload style={{ width: 18, height: 18 }} />}    color="blue"   />
         <KpiCard label="Records Uploaded"   value={totalExtracted}    sub={`${pct}% approved by reviewer`} icon={<Database style={{ width: 18, height: 18 }} />} color="purple" />
         <KpiCard label="Needs Fixes"        value={needsAction.length} sub="errors or sent back"        icon={<AlertCircle style={{ width: 18, height: 18 }} />} color="red"    />
@@ -563,7 +561,7 @@ function ExtractorDashboard() {
           {needsAction.map((s: any, i: number) => (
             <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '13px 22px', textDecoration: 'none',
+                padding: '11px 20px', textDecoration: 'none',
                 borderBottom: i < needsAction.length - 1 ? '1px solid #fef2f2' : 'none', transition: 'background 0.1s' }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#fef2f2' }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
@@ -592,7 +590,7 @@ function ExtractorDashboard() {
           {available.slice(0, 6).map((s: any, i: number) => (
             <Link key={s.id} to={`/projects/${s.project_id}/sources/${s.id}`}
               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '13px 22px', textDecoration: 'none',
+                padding: '11px 20px', textDecoration: 'none',
                 borderBottom: i < Math.min(available.length, 6) - 1 ? '1px solid #f0fdf4' : 'none', transition: 'background 0.1s' }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f0fdf4' }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
@@ -641,7 +639,7 @@ function ReviewerDashboard() {
     ? Math.round((approvedRecords / (approvedRecords + pendingTotal)) * 100) : 0
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ padding: '22px 28px', maxWidth: 1140, margin: '0 auto' }}>
       <DashHeader
         name={user?.full_name?.split(' ')[0] ?? ''}
         sub={`Your review workspace · Last updated ${lastRefresh.toLocaleTimeString()}`}
@@ -650,7 +648,7 @@ function ReviewerDashboard() {
         actionIcon={<Eye style={{ width: 14, height: 14 }} />}
       />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18 }}>
         <KpiCard label="Records Approved" value={approvedRecords} sub="approved by you total"
           icon={<CheckCircle style={{ width: 18, height: 18 }} />} color="green"
           trend={{ value: approvedThisWeek, label: 'this week' }} />
@@ -664,7 +662,7 @@ function ReviewerDashboard() {
 
       {/* Progress bar */}
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
-        padding: '20px 24px', marginBottom: 20, boxShadow: '0 1px 4px rgba(0,0,0,0.05)' }}>
+        padding: '16px 20px', marginBottom: 16, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
           <div>
             <p style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Your Review Progress</p>
@@ -673,7 +671,7 @@ function ReviewerDashboard() {
             </p>
           </div>
           <div style={{ textAlign: 'right' }}>
-            <p style={{ fontSize: 32, fontWeight: 800, color: '#7c3aed', margin: 0, lineHeight: 1 }}>{pctDone}%</p>
+            <p style={{ fontSize: 26, fontWeight: 800, color: '#7c3aed', margin: 0, lineHeight: 1 }}>{pctDone}%</p>
             <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>complete</p>
           </div>
         </div>
@@ -717,11 +715,11 @@ function DualRoleDashboard() {
   const pendingReview       = myReviewing.filter((s: any) => (s.pending_records ?? 0) > 0)
 
   return (
-    <div style={{ padding: '28px 32px', maxWidth: 1280, margin: '0 auto' }}>
+    <div style={{ padding: '22px 28px', maxWidth: 1140, margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-        marginBottom: 28, flexWrap: 'wrap', gap: 12 }}>
+        marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h1 style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>
             {greeting()}, {user?.full_name?.split(' ')[0] ?? ''} 👋
           </h1>
           <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
@@ -749,7 +747,7 @@ function DualRoleDashboard() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 18 }}>
         <KpiCard label="My Sources"     value={myExtracting.length}  sub="assigned to extract"  icon={<Upload style={{ width: 18, height: 18 }} />}       color="blue"   />
         <KpiCard label="Needs Fixes"    value={needsAction.length}   sub="errors to fix"        icon={<AlertCircle style={{ width: 18, height: 18 }} />}   color="red"    />
         <KpiCard label="To Review"      value={myReviewing.length}   sub="assigned to review"   icon={<Eye style={{ width: 18, height: 18 }} />}           color="purple" />

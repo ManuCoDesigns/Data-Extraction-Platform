@@ -314,7 +314,7 @@ export function SourcesPage() {
           <EmptyState title="No sources assigned yet" description="An admin will assign you to a source when there's data to extract or review." />
         )
       ) : view === 'simple' ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {SIMPLE_STEPS.map(step => {
             const items = filtered.filter(s => step.statuses.includes(s.status))
             return (
@@ -324,7 +324,7 @@ export function SourcesPage() {
                   <h3 className="text-sm font-semibold text-gray-700">{step.label}</h3>
                   <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full ml-auto">{items.length}</span>
                 </div>
-                <div className="space-y-3 min-h-[60px]">
+                <div className="space-y-3.5 min-h-[60px]">
                   {items.length === 0 ? (
                     <p className="text-xs text-gray-300 px-1">Nothing here</p>
                   ) : items.map(s => (
@@ -353,7 +353,7 @@ export function SourcesPage() {
                   </div>
                   <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{items.length}</span>
                 </div>
-                <div className="space-y-3 min-h-[60px]">
+                <div className="space-y-3.5 min-h-[60px]">
                   {items.map(s => <SourceCard key={s.id} source={s} projectId={s.project_id} projectName={isGlobal ? projectMap[s.project_id] : undefined} />)}
                 </div>
               </div>
@@ -503,36 +503,36 @@ function SourceCard({ source, projectId, projectName }: { source: Source; projec
   const cardContent = (
     <Card hover={!isLocked} className={cn(
       'relative transition-all duration-150 space-y-2.5',
-      isLocked ? 'pt-8 px-3.5 pb-3.5' : 'p-3.5',
+      isLocked ? 'pt-9 px-3.5 pb-3.5' : 'p-3.5',
       isLocked ? 'opacity-50 cursor-not-allowed bg-gray-50' : '',
       available && isExtractor && !isAdmin ? 'ring-2 ring-emerald-400 ring-offset-1' : '',
       claimedByMe ? 'ring-2 ring-blue-400 ring-offset-1' : '',
       myReview && isReviewer && !isAdmin ? 'ring-2 ring-purple-400 ring-offset-1' : '',
     )}>
-      {/* Lock band — full-width colour strip across top of card */}
+      {/* Lock band */}
       {isLocked && (
-        <div className="absolute top-0 left-0 right-0 flex items-center gap-1.5 bg-gray-100 border-b border-gray-200 px-3 py-1" style={{ borderRadius: '12px 12px 0 0' }}>
-          <Lock className="w-3 h-3 text-gray-400" />
-          <span className="text-xs font-semibold text-gray-400">Claimed by {source.assigned_extractor_name ?? 'another extractor'}</span>
+        <div className="absolute top-0 left-0 right-0 flex items-center gap-1.5 px-3 py-1.5"
+          style={{ background: '#f1f5f9', borderBottom: '1px solid #cbd5e1', borderRadius: '12px 12px 0 0' }}>
+          <Lock className="w-3 h-3 text-slate-500" />
+          <span className="text-xs font-bold text-slate-500 truncate">
+            Claimed · {source.assigned_extractor_name ?? 'another user'}
+          </span>
         </div>
       )}
-      {/* Available badge */}
       {available && isExtractor && !isAdmin && (
-        <div className="absolute top-2 right-2 flex items-center gap-1 bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full text-xs font-semibold border border-emerald-200">
-          ✋ Available
-        </div>
+        <span className="absolute top-2.5 right-2.5 text-xs font-bold bg-emerald-500 text-white px-2 py-0.5 rounded-full">
+          ✋ Claim
+        </span>
       )}
-      {/* My source badge */}
       {claimedByMe && !isLocked && (
-        <div className="absolute top-2 right-2 flex items-center gap-1 bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full text-xs font-semibold border border-blue-200">
+        <span className="absolute top-2.5 right-2.5 text-xs font-bold bg-blue-500 text-white px-2 py-0.5 rounded-full">
           Mine
-        </div>
+        </span>
       )}
-      {/* My review badge */}
-      {myReview && isReviewer && !isAdmin && (
-        <div className="absolute top-2 right-2 flex items-center gap-1 bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full text-xs font-semibold border border-purple-200">
+      {myReview && isReviewer && !isAdmin && !claimedByMe && (
+        <span className="absolute top-2.5 right-2.5 text-xs font-bold bg-purple-500 text-white px-2 py-0.5 rounded-full">
           🔍 Review
-        </div>
+        </span>
       )}
 
       {projectName && (
