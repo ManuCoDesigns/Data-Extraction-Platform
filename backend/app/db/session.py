@@ -10,6 +10,15 @@ engine_kwargs = {"connect_args": connect_args} if is_sqlite else {
     "pool_pre_ping": True,
     "pool_size": 10,
     "max_overflow": 20,
+    # Recycle connections before Railway's Postgres proxy can silently
+    # kill them server-side (seen as psycopg2.OperationalError: "server
+    # closed the connection unexpectedly"). 280s keeps us safely under
+    # most 5-minute proxy idle timeouts.
+    "pool_recycle": 280,
+    # Fail fast instead of hanging if the pool is exhausted (avoids the
+    # 46s -> 300s creeping timeouts seen when every worker is waiting
+    # on a connection that never frees up).
+    "pool_timeout": 10,
 }
 
 engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
