@@ -55,8 +55,28 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
 // Everyone lands on their role-specific dashboard.
 // DashboardPage internally routes to Admin / Reviewer / Extractor / DualRole view.
 function IndexRoute() {
-  const { user } = useAuthStore()
-  if (!user) return null
+  const { user, isLoading } = useAuthStore()
+
+  if (isLoading) return (
+    <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center',
+      background: '#f8fafc', flexDirection: 'column', gap: 16 }}>
+      <div style={{ position: 'relative', width: 48, height: 48 }}>
+        <div style={{ width: 48, height: 48, borderRadius: '50%', border: '3px solid #e2e8f0',
+          borderTopColor: '#2563eb', animation: 'spin 0.9s linear infinite' }} />
+      </div>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', margin: 0 }}>
+          ⚡ Xtrium DataOps
+        </p>
+        <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0' }}>
+          Connecting to server — first load may take up to 30 seconds
+        </p>
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    </div>
+  )
+
+  if (!user) return <Navigate to="/login" replace />
   return <DashboardPage />
 }
 
@@ -65,6 +85,18 @@ export function App() {
 
   useEffect(() => {
     fetchMe()
+
+    // Keep Railway backend warm — ping /ping every 4 minutes
+    // This prevents the 60-90 second cold start that users experience
+    const BACKEND = (import.meta.env.VITE_API_URL || 'https://xtrium-platform-production.up.railway.app/api/v1')
+      .replace('/api/v1', '')
+    const ping = () => fetch(`${BACKEND}/ping`).catch(() =>
+      // Fallback: try /health if /ping not available yet
+      fetch(`${BACKEND}/health`).catch(() => {})
+    )
+    ping()  // immediately on load
+    const iv = setInterval(ping, 4 * 60 * 1000)
+    return () => clearInterval(iv)
   }, [fetchMe])
 
   return (

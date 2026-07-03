@@ -103,14 +103,18 @@ export function SourcesPage() {
     assigned_extractor_id: '', assigned_reviewer_id: '',
   })
 
+  const [serverWarmup, setServerWarmup] = useState(false)
   const load = () => {
+    const warmupTimer = setTimeout(() => setServerWarmup(true), 8000)
     const sourcesPromise = isGlobal
       ? sourcesApi.list().catch(() => [])
-      : sourcesApi.list(projectId!)
+      : sourcesApi.list(projectId!).catch(() => [])
     Promise.all([
-      isGlobal ? projectsApi.list().then((r: any) => setProjects(r.items)) : projectsApi.get(projectId!).then(setProject),
-      sourcesPromise.then(setSources),
-    ]).finally(() => setLoading(false))
+      isGlobal
+        ? projectsApi.list().then((r: any) => setProjects(r.items ?? r)).catch(() => {})
+        : projectsApi.get(projectId!).then(setProject).catch(() => {}),
+      sourcesPromise.then(data => setSources(Array.isArray(data) ? data : (data as any)?.items ?? [])),
+    ]).finally(() => { clearTimeout(warmupTimer); setServerWarmup(false); setLoading(false) })
   }
   useEffect(() => {
     load()
@@ -172,7 +176,18 @@ export function SourcesPage() {
     }
   }
 
-  if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
+  if (loading) return (
+    <div style={{ display: 'flex', height: 320, flexDirection: 'column',
+      alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+      <div style={{ width: 40, height: 40, borderRadius: '50%', border: '3px solid #e2e8f0',
+        borderTopColor: '#2563eb', animation: 'spin 0.9s linear infinite' }} />
+      <p style={{ fontSize: 13, fontWeight: 600, color: '#374151', margin: 0 }}>
+        {serverWarmup ? '⚡ Server warming up — first load takes ~30 seconds' : 'Loading sources…'}
+      </p>
+      {serverWarmup && <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>Please wait — Railway backend is starting up</p>}
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+    </div>
+  )
 
   const projectMap = Object.fromEntries(projects.map(p => [p.id, p.name]))
   const pageTitle = isGlobal ? 'Sources' : `${project?.name} — Sources`

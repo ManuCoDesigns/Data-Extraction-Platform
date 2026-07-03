@@ -15,35 +15,17 @@ async def lifespan(app: FastAPI):
         import sentry_sdk
         sentry_sdk.init(dsn=settings.SENTRY_DSN, environment=settings.ENVIRONMENT)
 
-    # ── One-time FK constraint migration ──────────────────────────────────
-    # Fixes missing ON DELETE CASCADE / SET NULL on extraction_jobs children.
-    # Runs on every startup but ALTER TABLE … IF NOT EXISTS means it's a no-op
-    # after the first successful run.
+    # Warm up the database connection pool on startup
+    # This prevents the first real request from taking 60+ seconds
     try:
-        from app.database import SessionLocal
+        from app.db.session import SessionLocal
         from sqlalchemy import text
         db = SessionLocal()
-        MIGRATIONS = [
-            # audit_log: preserve history, just null out the job_id
-            "ALTER TABLE audit_log DROP CONSTRAINT IF EXISTS audit_log_job_id_fkey",
-            "ALTER TABLE audit_log ADD CONSTRAINT audit_log_job_id_fkey "
-            "FOREIGN KEY (job_id) REFERENCES extraction_jobs(id) ON DELETE SET NULL",
-            # submission_batches: cascade delete
-            "ALTER TABLE submission_batches DROP CONSTRAINT IF EXISTS submission_batches_job_id_fkey",
-            "ALTER TABLE submission_batches ADD CONSTRAINT submission_batches_job_id_fkey "
-            "FOREIGN KEY (job_id) REFERENCES extraction_jobs(id) ON DELETE CASCADE",
-            # llm_call_log: cascade delete
-            "ALTER TABLE llm_call_log DROP CONSTRAINT IF EXISTS llm_call_log_job_id_fkey",
-            "ALTER TABLE llm_call_log ADD CONSTRAINT llm_call_log_job_id_fkey "
-            "FOREIGN KEY (job_id) REFERENCES extraction_jobs(id) ON DELETE CASCADE",
-        ]
-        for sql in MIGRATIONS:
-            db.execute(text(sql))
-        db.commit()
+        db.execute(text("SELECT 1"))   # wake up the pool
         db.close()
-        print("✓ FK migration applied")
+        print("✓ Database pool warmed up")
     except Exception as e:
-        print(f"FK migration skipped: {e}")
+        print(f"DB warmup skipped: {e}")
 
     yield
 
@@ -58,20 +40,6 @@ app = FastAPI(
 )
 
 # ─── CORS ─────────────────────────────────────────────────────────────────────
-# Using FastAPI's built-in CORSMiddleware (Starlette) rather than a custom
-# @app.middleware("http"). The built-in one runs at the ASGI level — it wraps
-# every response INCLUDING unhandled exceptions and 4xx/5xx errors, so the
-# browser always sees the correct CORS headers and gets the real error code
-# instead of a misleading "No Access-Control-Allow-Origin" block.
-#
-# allow_origin_regex covers:
-#   - https://*.vercel.app   (all Vercel preview + production URLs)
-#   - http://localhost:*     (local dev, any port)
-#   - http://127.0.0.1:*    (local dev alternate)
-#
-# Explicit origins from env var CORS_ORIGINS are merged in as well so you can
-# always add custom domains without touching this file.
-
 _explicit_origins = [o.strip() for o in (settings.CORS_ORIGINS or []) if o.strip()]
 
 app.add_middleware(
@@ -106,67 +74,11 @@ app.include_router(sources.router,                          prefix=PREFIX)
 
 @app.get("/health")
 def health():
+    """Used by Railway healthcheck and frontend keep-alive ping."""
     return {"status": "ok", "version": "1.0.0"}
 
 
-@app.get("/health/db")
-def health_db():
-    """Diagnostic endpoint — checks that all expected DB columns exist."""
-    from app.db.session import SessionLocal
-    from sqlalchemy import text
-    db = SessionLocal()
-    try:
-        def cols(table):
-            rows = db.execute(text(
-                f"SELECT column_name FROM information_schema.columns "
-                f"WHERE table_name = '{table}' ORDER BY column_name"
-            )).fetchall()
-            return [r[0] for r in rows]
-
-        extracted = cols("extracted_records")
-        sources_cols = cols("sources")
-        jobs_cols = cols("extraction_jobs")
-
-        missing = []
-        for col in ["is_schema_valid", "validation_errors", "web_check_flags", "web_verified", "web_check_summary"]:
-            if col not in extracted:
-                missing.append(f"extracted_records.{col}")
-        for col in ["source_id"]:
-            if col not in jobs_cols:
-                missing.append(f"extraction_jobs.{col}")
-
-        return {
-            "status": "ok" if not missing else "migration_needed",
-            "missing_columns": missing,
-            "extracted_records_cols": extracted,
-            "sources_exists": bool(sources_cols),
-        }
-    finally:
-        db.close()
-
-
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """Catch-all — ALWAYS adds CORS headers so browser sees the real error,
-    not a misleading CORS block. The trace shows the exact line that crashed."""
-    import traceback
-    origin = request.headers.get("origin", "*")
-    return JSONResponse(
-        status_code=500,
-        content={
-            "detail": str(exc),
-            "type": type(exc).__name__,
-            "trace": traceback.format_exc()[-2000:],
-        },
-        headers={
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Credentials": "true",
-            "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-            "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept",
-        },
-    )
-
-
-@app.get("/")
-def root():
-    return {"message": "Xtrium DataOps API", "docs": "/api/docs"}
+@app.get("/ping")
+def ping():
+    """Lightweight keep-alive — frontend pings this every 4 minutes."""
+    return "pong"

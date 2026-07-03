@@ -2,28 +2,25 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
 from app.core.config import settings
 
-# SQLite needs check_same_thread=False; Postgres needs pool settings
 is_sqlite = settings.DATABASE_URL.startswith("sqlite")
 
-connect_args = {"check_same_thread": False} if is_sqlite else {}
+connect_args = {"check_same_thread": False} if is_sqlite else {
+    # Postgres: set statement timeout so slow queries fail fast, not hang
+    "options": "-c statement_timeout=30000"   # 30s max per query
+}
+
 engine_kwargs = {"connect_args": connect_args} if is_sqlite else {
-    "pool_pre_ping": True,
-    "pool_size": 10,
-    "max_overflow": 20,
-    # Recycle connections before Railway's Postgres proxy can silently
-    # kill them server-side (seen as psycopg2.OperationalError: "server
-    # closed the connection unexpectedly"). 280s keeps us safely under
-    # most 5-minute proxy idle timeouts.
-    "pool_recycle": 280,
-    # Fail fast instead of hanging if the pool is exhausted (avoids the
-    # 46s -> 300s creeping timeouts seen when every worker is waiting
-    # on a connection that never frees up).
-    "pool_timeout": 10,
+    "connect_args": connect_args,
+    "pool_pre_ping": True,      # test connection before use — catches stale conns
+    "pool_size": 5,             # keep 5 warm connections (Railway limits)
+    "max_overflow": 10,         # allow 10 burst connections
+    "pool_recycle": 300,        # recycle connections every 5 min (before Railway kills them)
+    "pool_timeout": 10,         # fail fast if no connection available (not hang for 30s)
+    "pool_reset_on_return": "commit",
 }
 
 engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
 
-# Enable WAL mode and foreign keys for SQLite
 if is_sqlite:
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_conn, _):

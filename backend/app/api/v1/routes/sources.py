@@ -63,9 +63,38 @@ def _user_roles(user: User) -> set:
 
 
 def _can_access(user: User, project: Project) -> bool:
+    """
+    A user can access a project if:
+    - They are an org_admin
+    - They have project_admin or qa_lead role (global platform roles)
+    - They are an explicit project member
+    - They are assigned as extractor or reviewer on any source in the project
+    """
     if _is_org_admin(user):
         return True
-    return _project_role(user, project) is not None
+    roles = _user_roles(user)
+    # Global privileged roles can access all projects
+    if "project_admin" in roles or "qa_lead" in roles:
+        return True
+    # Explicit project member
+    if _project_role(user, project) is not None:
+        return True
+    # Assigned as extractor or reviewer on a source in this project
+    from sqlalchemy.orm import object_session
+    db = object_session(project)
+    if db:
+        uid = str(user.id)
+        from sqlalchemy import or_
+        assigned = db.query(Source).filter(
+            Source.project_id == project.id,
+            or_(
+                Source.assigned_extractor_id == uid,
+                Source.assigned_reviewer_id  == uid,
+            )
+        ).first()
+        if assigned:
+            return True
+    return False
 
 
 def _is_project_admin(user: User, project: Project) -> bool:
@@ -190,12 +219,24 @@ def list_sources(
         if is_admin:
             q = db.query(Source)
         else:
-            accessible_project_ids = [
-                m.project_id for m in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()
-            ]
-            if not accessible_project_ids:
-                return []
-            q = db.query(Source).filter(Source.project_id.in_(accessible_project_ids))
+            roles = {r.role.value for r in current_user.roles}
+            # project_admin and qa_lead see all projects
+            if "project_admin" in roles or "qa_lead" in roles:
+                q = db.query(Source)
+            else:
+                uid = str(current_user.id)
+                accessible_project_ids = [
+                    m.project_id for m in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()
+                ]
+                from sqlalchemy import or_
+                # Union: project members + sources directly assigned to this user
+                q = db.query(Source).filter(
+                    or_(
+                        Source.project_id.in_(accessible_project_ids),
+                        Source.assigned_extractor_id == uid,
+                        Source.assigned_reviewer_id  == uid,
+                    )
+                )
 
     if status:
         try:
