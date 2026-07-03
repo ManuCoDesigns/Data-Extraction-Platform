@@ -37,25 +37,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return
     }
     try {
+      // The axios interceptor in client.ts already handles token refresh on 401.
+      // Just call /me — if the token is expired the interceptor refreshes it first.
       const me = await authApi.me()
       set({ user: me, isLoading: false })
-    } catch (err: any) {
-      // 401 — try to refresh the token first
-      const refreshToken = localStorage.getItem('refresh_token')
-      if (refreshToken) {
-        try {
-          const refreshed = await authApi.refresh(refreshToken)
-          localStorage.setItem('access_token', refreshed.access_token)
-          if (refreshed.refresh_token) {
-            localStorage.setItem('refresh_token', refreshed.refresh_token)
-          }
-          const me = await authApi.me()
-          set({ user: me, isLoading: false })
-          return
-        } catch {
-          // Refresh also failed — full logout
-        }
-      }
+    } catch {
+      // Token invalid and refresh failed — clear session, redirect to login
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
       set({ user: null, isLoading: false })
