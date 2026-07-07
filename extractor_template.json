@@ -1,0 +1,16 @@
+{
+  "extracted_answer": "Your complete answer here \u2014 include exact values, figures, names found on the site",
+  "urls_visited": [
+    "https://site1.com",
+    "https://site2.com"
+  ],
+  "primary_url": "https://the-main-site-you-used.com",
+  "data_extracted": {
+    "note": "Put the specific data points found here \u2014 prices, names, scores, dates, etc."
+  },
+  "extraction_notes": "Any blockers, CAPTCHAs, paywalls, or caveats",
+  "extraction_complete": true,
+  "score_achieved": null,
+  "score_breakdown": null,
+  "reviewer_notes": null
+}

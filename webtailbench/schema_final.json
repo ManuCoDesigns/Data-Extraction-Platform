@@ -1,0 +1,119 @@
+{
+  "extraction_instructions": "WORKFLOW FOR EXTRACTORS\n\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\nEach record in this source is one web-browsing task.\n\nStep 1 \u2014 Read the task\n  Open the record and read task_summary carefully.\n  Note the scoring criteria and max points.\n\nStep 2 \u2014 Visit the websites and collect data\n  Browse the web to complete the task.\n  Keep note of every URL you visit.\n\nStep 3 \u2014 Fill in your findings\n  Download the record JSON (or copy the template).\n  Fill ONLY these fields \u2014 leave all others as-is:\n    \u2022 extracted_answer  \u2014 your complete answer\n    \u2022 urls_visited      \u2014 list of all URLs you visited\n    \u2022 primary_url       \u2014 the main site/tool used\n    \u2022 data_extracted    \u2014 specific data points found (prices, names, dates, etc.)\n    \u2022 extraction_notes  \u2014 any blockers or caveats (CAPTCHAs, paywalls, missing data)\n    \u2022 extraction_complete \u2014 set to true when done\n\nStep 4 \u2014 Upload the completed JSON\n  Go back to the source in Xtrium.\n  Upload your filled JSON file \u2014 it replaces the pre-filled template.\n\nDO NOT change: task_id, benchmark, task_summary, criteria, num_criteria,\ntotal_max_points, is_annotated, reference_answer, video_link\nThese are reference fields \u2014 read-only.",
+  "fields": [
+    {
+      "name": "task_id",
+      "type": "integer",
+      "required": true,
+      "description": "[READ-ONLY] Unique task ID from WebTailBench dataset"
+    },
+    {
+      "name": "benchmark",
+      "type": "string",
+      "required": true,
+      "description": "[READ-ONLY] Benchmark category key"
+    },
+    {
+      "name": "task_summary",
+      "type": "string",
+      "required": true,
+      "description": "[READ-ONLY] The complete task description \u2014 what the extractor must do"
+    },
+    {
+      "name": "criteria",
+      "type": "string",
+      "required": true,
+      "description": "[READ-ONLY] Full scoring rubric with point values for each criterion"
+    },
+    {
+      "name": "num_criteria",
+      "type": "integer",
+      "required": true,
+      "description": "[READ-ONLY] Number of distinct scoring criteria"
+    },
+    {
+      "name": "total_max_points",
+      "type": "integer",
+      "required": true,
+      "description": "[READ-ONLY] Maximum score achievable for this task"
+    },
+    {
+      "name": "is_annotated",
+      "type": "boolean",
+      "required": true,
+      "description": "[READ-ONLY] True if this task is marked as annotated in the dataset"
+    },
+    {
+      "name": "has_reference_answer",
+      "type": "boolean",
+      "required": true,
+      "description": "[READ-ONLY] True if a reference answer exists (91 tasks have answers)"
+    },
+    {
+      "name": "reference_answer",
+      "type": "string",
+      "required": false,
+      "description": "[READ-ONLY] Gold reference answer for calibration (where available)"
+    },
+    {
+      "name": "video_link",
+      "type": "string",
+      "required": false,
+      "description": "[READ-ONLY] Video evidence link from the dataset"
+    },
+    {
+      "name": "extracted_answer",
+      "type": "string",
+      "required": false,
+      "description": "EXTRACTOR: Your complete answer \u2014 include exact values, names, figures found"
+    },
+    {
+      "name": "urls_visited",
+      "type": "array",
+      "required": false,
+      "description": "EXTRACTOR: All URLs visited to complete the task"
+    },
+    {
+      "name": "primary_url",
+      "type": "string",
+      "required": false,
+      "description": "EXTRACTOR: The main website or tool used"
+    },
+    {
+      "name": "data_extracted",
+      "type": "object",
+      "required": false,
+      "description": "EXTRACTOR: Specific data points found \u2014 prices, names, dates, scores, etc."
+    },
+    {
+      "name": "extraction_notes",
+      "type": "string",
+      "required": false,
+      "description": "EXTRACTOR: Blockers, CAPTCHAs, paywalls, or caveats encountered"
+    },
+    {
+      "name": "extraction_complete",
+      "type": "boolean",
+      "required": false,
+      "description": "EXTRACTOR: Set true when task is complete and JSON is ready for review"
+    },
+    {
+      "name": "score_achieved",
+      "type": "number",
+      "required": false,
+      "description": "REVIEWER: Points awarded \u2014 must be between 0 and total_max_points"
+    },
+    {
+      "name": "score_breakdown",
+      "type": "string",
+      "required": false,
+      "description": "REVIEWER: Per-criterion breakdown e.g. 'Criterion 1: 3/4 \u2014 found correct URL'"
+    },
+    {
+      "name": "reviewer_notes",
+      "type": "string",
+      "required": false,
+      "description": "REVIEWER: Overall evaluation, feedback, and reasoning"
+    }
+  ]
+}
