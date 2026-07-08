@@ -6,8 +6,19 @@ website-specific "extras" fields (marked with "extras": true in the schema).
 from typing import Any
 
 
-def validate_record(fields: dict, schema_fields: list[dict]) -> tuple[bool, list[dict]]:
-    """Returns (is_valid, errors) where errors is a list of {field, error, is_extra}."""
+def validate_record(
+    fields: dict,
+    schema_fields: list[dict],
+    flexible: bool = False,
+) -> tuple[bool, list[dict]]:
+    """
+    Returns (is_valid, errors).
+
+    flexible=True (set when schema has flexible_validation=true):
+      Only checks that required fields are present and non-empty.
+      Skips all type and enum validation — useful for free-form JSON schemas
+      such as WebTailBench where the content object has no fixed structure.
+    """
     errors = []
 
     for field_def in schema_fields:
@@ -17,19 +28,25 @@ def validate_record(fields: dict, schema_fields: list[dict]) -> tuple[bool, list
         if "fixed_value" in field_def:
             continue  # fixed fields are always valid
 
-        value = fields.get(name)
-        is_missing = value is None or value == ""
+        value  = fields.get(name)
+        # A value is "present" if it's not None, not empty string, and not empty dict/list
+        missing = value is None or value == "" or value == {} or value == []
         is_extra = bool(field_def.get("extras"))
 
-        if field_def.get("required") and is_missing:
+        # flexible mode: skip required check entirely — the task schema changes per task
+        if field_def.get("required") and missing and not flexible:
             errors.append({
                 "field": name,
-                "error": "Required field is missing",
+                "error": "Required field is missing or empty",
                 "is_extra": is_extra,
             })
             continue
 
-        if is_missing:
+            # In flexible mode: never flag anything — store whatever the extractor uploads
+        if flexible:
+            continue
+
+        if missing:
             continue
 
         type_hint = field_def.get("type", "string")
@@ -43,7 +60,7 @@ def validate_record(fields: dict, schema_fields: list[dict]) -> tuple[bool, list
         if "enum" in field_def and value not in field_def["enum"]:
             errors.append({
                 "field": name,
-                "error": f"Value {value!r} is not in allowed values {field_def['enum']}",
+                "error": f"Value {value!r} not in allowed values {field_def['enum']}",
                 "is_extra": is_extra,
             })
 
