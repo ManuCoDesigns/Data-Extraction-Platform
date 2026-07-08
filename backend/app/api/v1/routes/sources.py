@@ -1,4 +1,3 @@
-from typing import Optional
 """
 Sources API — the Kanban-tracked dataset workflow.
 
@@ -18,7 +17,8 @@ fixed inline via PATCH without a full re-upload.
 """
 import io, json, math
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
+from typing import List
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import pandas as pd
@@ -29,7 +29,6 @@ from app.models.all_models import (
     Source, SourceStatus, Project, ProjectMember, User, Schema, SchemaVersion,
     ExtractionJob, ExtractedRecord, JobStatus, SourceType as FileSourceType,
     ExtractionConfidence, ReviewStatus, AuditLog, AuditAction, Notification,
-    SubmissionBatch, LLMCallLog,
 )
 from app.schemas.api_schemas import (
     SourceCreate, SourceUpdate, SourceOut, SourceUploadSummary,
@@ -63,38 +62,9 @@ def _user_roles(user: User) -> set:
 
 
 def _can_access(user: User, project: Project) -> bool:
-    """
-    A user can access a project if:
-    - They are an org_admin
-    - They have project_admin or qa_lead role (global platform roles)
-    - They are an explicit project member
-    - They are assigned as extractor or reviewer on any source in the project
-    """
     if _is_org_admin(user):
         return True
-    roles = _user_roles(user)
-    # Global privileged roles can access all projects
-    if "project_admin" in roles or "qa_lead" in roles:
-        return True
-    # Explicit project member
-    if _project_role(user, project) is not None:
-        return True
-    # Assigned as extractor or reviewer on a source in this project
-    from sqlalchemy.orm import object_session
-    db = object_session(project)
-    if db:
-        uid = str(user.id)
-        from sqlalchemy import or_
-        assigned = db.query(Source).filter(
-            Source.project_id == project.id,
-            or_(
-                Source.assigned_extractor_id == uid,
-                Source.assigned_reviewer_id  == uid,
-            )
-        ).first()
-        if assigned:
-            return True
-    return False
+    return _project_role(user, project) is not None
 
 
 def _is_project_admin(user: User, project: Project) -> bool:
@@ -121,8 +91,7 @@ def _is_assigned_extractor(user: User, source: Source) -> bool:
     roles = _user_roles(user)
     if "project_admin" in roles:
         return True
-    # Compare as strings to avoid UUID vs str mismatch
-    return str(source.assigned_extractor_id) == str(user.id)
+    return source.assigned_extractor_id == user.id
 
 
 def _is_assigned_reviewer(user: User, source: Source) -> bool:
@@ -132,7 +101,7 @@ def _is_assigned_reviewer(user: User, source: Source) -> bool:
     roles = _user_roles(user)
     if "project_admin" in roles or "qa_lead" in roles:
         return True
-    return str(source.assigned_reviewer_id) == str(user.id)
+    return source.assigned_reviewer_id == user.id
 
 
 # ─── Serialization ───────────────────────────────────────────────────────────
@@ -219,24 +188,12 @@ def list_sources(
         if is_admin:
             q = db.query(Source)
         else:
-            roles = {r.role.value for r in current_user.roles}
-            # project_admin and qa_lead see all projects
-            if "project_admin" in roles or "qa_lead" in roles:
-                q = db.query(Source)
-            else:
-                uid = str(current_user.id)
-                accessible_project_ids = [
-                    m.project_id for m in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()
-                ]
-                from sqlalchemy import or_
-                # Union: project members + sources directly assigned to this user
-                q = db.query(Source).filter(
-                    or_(
-                        Source.project_id.in_(accessible_project_ids),
-                        Source.assigned_extractor_id == uid,
-                        Source.assigned_reviewer_id  == uid,
-                    )
-                )
+            accessible_project_ids = [
+                m.project_id for m in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()
+            ]
+            if not accessible_project_ids:
+                return []
+            q = db.query(Source).filter(Source.project_id.in_(accessible_project_ids))
 
     if status:
         try:
@@ -539,7 +496,9 @@ async def upload_to_source(
             # Always enforce is_verified=false
             mapped["is_verified"] = False
 
-        is_valid, errors = validate_record(mapped, schema_fields)
+        _flexible = bool(schema_ver and schema_ver.definition and
+                       schema_ver.definition.get("flexible_validation"))
+        is_valid, errors = validate_record(mapped, schema_fields, flexible=_flexible)
         if is_valid:
             valid_count += 1
         record = ExtractedRecord(
@@ -594,7 +553,7 @@ async def _extract_with_llm(content: bytes, ext: str, schema_definition: dict, s
     The model is told exactly what fields to extract, their types, and what
     the extraction instructions say — same instructions human extractors follow.
     """
-    import anthropic, re
+    import re
     from app.core.config import settings
 
     # Extract readable text from the document
@@ -697,15 +656,14 @@ Example of WRONG manufacturing_sites (never do this):
 
 Return a JSON array of all records found."""
 
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=8000,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
+    import google.generativeai as genai
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+    gemini = genai.GenerativeModel(
+        model_name=settings.LLM_MODEL,
+        system_instruction=system_prompt,
     )
-
-    raw_text = response.content[0].text if response.content else ""
+    response = gemini.generate_content(user_message)
+    raw_text = response.text if response.text else ""
 
     # Strip markdown fences if model added them despite instructions
     clean = raw_text.strip()
@@ -902,20 +860,6 @@ def review_source_record(
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can review records")
 
-    # ── Four-eyes principle: extractor cannot approve their own records ──
-    user_roles_rv = _user_roles(current_user)
-    is_admin_rv = "org_admin" in user_roles_rv or "project_admin" in user_roles_rv
-    if (
-        payload.action == "approve"
-        and source.assigned_extractor_id
-        and str(current_user.id) == str(source.assigned_extractor_id)
-        and not is_admin_rv
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="You extracted this source — you cannot approve your own records. A different reviewer must approve them."
-        )
-
     record = (
         db.query(ExtractedRecord)
         .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
@@ -967,17 +911,6 @@ def approve_source(
     user_roles = _user_roles(current_user)
     is_admin = "org_admin" in user_roles or "project_admin" in user_roles
 
-    # ── Four-eyes principle: extractor cannot approve their own source ───
-    if (
-        source.assigned_extractor_id
-        and str(current_user.id) == str(source.assigned_extractor_id)
-        and not is_admin
-    ):
-        raise HTTPException(
-            status_code=403,
-            detail="You extracted this source — you cannot approve it yourself. Ask a reviewer or admin to approve."
-        )
-
     # Count unapproved records
     pending_or_rejected = (
         db.query(ExtractedRecord)
@@ -1021,82 +954,127 @@ def approve_source(
     return _serialize_source(source)
 
 
-# ─── Claim source (extractor self-assignment) ─────────────────────────────────
+# ─── Multi-file upload ───────────────────────────────────────────────────────
 
-@router.post("/{source_id}/claim")
-def claim_source(
+@router.post("/{source_id}/upload-multi", response_model=SourceUploadSummary)
+async def upload_multi_to_source(
     source_id: str,
-    reviewer_id: Optional[str] = None,
+    files: List[UploadFile] = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Extractor claims an unassigned source for themselves.
-    Optionally picks a reviewer from the project team.
-    Cannot claim a source already assigned to someone else (unless admin).
+    Upload multiple JSON files at once to a source.
+    All records from all files are merged and stored as one batch.
+    Useful for WebTailBench and other projects where each task is a separate .json file.
+    Only JSON files are accepted via this endpoint.
     """
     source = _get_source_or_404(source_id, db)
+    if not _is_assigned_extractor(current_user, source):
+        raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
 
-    user_roles = _user_roles(current_user)
-    is_admin = "org_admin" in user_roles or "project_admin" in user_roles
+    if not files:
+        raise HTTPException(status_code=422, detail="No files provided.")
 
-    # Only extractors and admins can claim
-    allowed_roles = {"org_admin", "project_admin", "qa_lead", "pipeline_operator"}
-    if not (user_roles & allowed_roles):
-        raise HTTPException(status_code=403, detail="Only extractors and admins can claim sources")
+    import os as _os
 
-    # Cannot steal a source already claimed by someone else (unless admin)
-    if (
-        source.assigned_extractor_id
-        and str(source.assigned_extractor_id) != str(current_user.id)
-        and not is_admin
-    ):
-        raise HTTPException(
-            status_code=409,
-            detail=f"This source is already claimed by another extractor. Ask an admin to reassign it."
+    schema_ver = db.query(SchemaVersion).filter(
+        SchemaVersion.schema_id == source.schema_id
+    ).order_by(SchemaVersion.version.desc()).first()
+
+    schema_fields = []
+    if schema_ver and schema_ver.definition:
+        schema_fields = schema_ver.definition.get("fields", [])
+    fixed_fields = {f["name"]: f["fixed_value"] for f in schema_fields if "fixed_value" in f}
+
+    all_rows: list[dict] = []
+    errors: list[str] = []
+    files_ok = 0
+
+    for upload in files:
+        fname = upload.filename or ""
+        ext = _os.path.splitext(fname)[1].lower()
+        if ext not in (".json", ".csv", ".xlsx", ".xls"):
+            errors.append(f"{fname}: unsupported type (use .json, .csv, .xlsx)")
+            continue
+        try:
+            content_bytes = await upload.read()
+            rows = _parse_rows(content_bytes, ext, fname)
+            if not rows:
+                errors.append(f"{fname}: no records found")
+                continue
+            # Apply fixed fields
+            for row in rows:
+                for k, v in fixed_fields.items():
+                    row[k] = v
+            all_rows.extend(rows)
+            files_ok += 1
+        except Exception as e:
+            errors.append(f"{fname}: {str(e)[:100]}")
+
+    if not all_rows:
+        detail = f"No records extracted from {len(files)} file(s)."
+        if errors:
+            detail += " Errors: " + "; ".join(errors[:3])
+        raise HTTPException(status_code=422, detail=detail)
+
+    # Clear existing records then write the merged batch
+    old_job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
+    if old_job_ids:
+        db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(old_job_ids)).delete(synchronize_session=False)
+        db.query(ExtractionJob).filter(ExtractionJob.id.in_(old_job_ids)).delete(synchronize_session=False)
+
+    job = ExtractionJob(
+        project_id=source.project_id, source_id=source_id,
+        schema_id=source.schema_id,
+        schema_version=schema_ver.version if schema_ver else 1,
+        name=f"{source.name} — multi-file upload ({files_ok} files) {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
+        source_file_name=f"{files_ok} files",
+        source_file_size_bytes=sum(0 for _ in files),
+        source_type=FileSourceType.CSV,
+        status=JobStatus.READY_FOR_REVIEW,
+        total_raw_records=len(all_rows),
+        total_extracted=len(all_rows),
+        created_by=current_user.id,
+    )
+    db.add(job)
+    db.flush()
+
+    valid_count = 0
+    for row in all_rows:
+        mapped = {k: v for k, v in row.items()}
+        is_valid, validation_errors = _validate_record(mapped, schema_fields)
+        rec = ExtractedRecord(
+            job_id=job.id,
+            extracted_fields=mapped,
+            raw_text=json.dumps(mapped, ensure_ascii=False, default=str),
+            is_schema_valid=is_valid,
+            schema_errors=validation_errors,
+            review_status=ReviewStatus.PENDING,
+            extraction_method="structured",
         )
+        db.add(rec)
+        if is_valid:
+            valid_count += 1
 
-    # Only allow claiming sources that haven't started yet
-    if source.status not in (SourceStatus.NOT_STARTED,) and not is_admin:
-        raise HTTPException(
-            status_code=409,
-            detail="This source already has data — contact an admin to reassign it."
-        )
-
-    # Validate reviewer exists in the project
-    if reviewer_id:
-        from app.models.all_models import ProjectMember as PM2
-        member = db.query(PM2).filter(
-            PM2.project_id == source.project_id,
-            PM2.user_id == reviewer_id
-        ).first()
-        if not member:
-            raise HTTPException(status_code=404, detail="Reviewer not found in this project")
-
-    source.assigned_extractor_id = current_user.id
-    if reviewer_id:
-        source.assigned_reviewer_id = reviewer_id
-
+    db.flush()
+    _recompute_counts(source, db)
     db.add(AuditLog(
-        user_id=current_user.id,
-        project_id=source.project_id,
-        action=AuditAction.SOURCE_STATUS_CHANGED,
-        after_value={"claimed_by": str(current_user.id), "reviewer_id": reviewer_id},
+        user_id=current_user.id, project_id=source.project_id,
+        action=AuditAction.RECORD_CREATED,
+        after_value={"files": files_ok, "records": len(all_rows), "errors": errors},
     ))
     db.commit()
     db.refresh(source)
 
-    # Notify the chosen reviewer
-    if reviewer_id and reviewer_id != str(current_user.id):
-        db.add(Notification(
-            user_id=reviewer_id,
-            title=f"You've been assigned as reviewer for '{source.name}'",
-            body=f"Please review the records once extraction is complete.",
-            link=f"/projects/{source.project_id}/sources/{source.id}",
-        ))
-        db.commit()
-
-    return _serialize_source(source)
+    return SourceUploadSummary(
+        source_id=source_id, job_id=job.id,
+        total_records=len(all_rows), valid_records=valid_count,
+        invalid_records=len(all_rows) - valid_count,
+        extraction_method="multi_file",
+        files_processed=files_ok,
+        file_breakdown=[{"filename": e, "error": e} for e in errors],
+    )
 
 
 # ─── Export package ──────────────────────────────────────────────────────────
@@ -1256,7 +1234,7 @@ def delete_source(
 ):
     """Delete a source and all its jobs and records. Only admins can do this."""
     source = db.query(Source).filter(
-        Source.id == source_id
+        Source.id == source_id, Source.deleted_at == None
     ).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -1284,15 +1262,6 @@ def delete_source(
     # Delete all records and jobs first
     job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
     if job_ids:
-        db.query(AuditLog).filter(
-            AuditLog.job_id.in_(job_ids)
-        ).update({'job_id': None}, synchronize_session=False)
-        db.query(SubmissionBatch).filter(
-            SubmissionBatch.job_id.in_(job_ids)
-        ).delete(synchronize_session=False)
-        db.query(LLMCallLog).filter(
-            LLMCallLog.job_id.in_(job_ids)
-        ).delete(synchronize_session=False)
         db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
         db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
 
@@ -1398,7 +1367,9 @@ async def scrape_source_website(
     valid_count = 0
     for row in rows:
         mapped = {k: v for k, v in row.items() if k != "_raw_text"}
-        is_valid, errors = validate_record(mapped, schema_fields)
+        _flexible = bool(schema_ver and schema_ver.definition and
+                       schema_ver.definition.get("flexible_validation"))
+        is_valid, errors = validate_record(mapped, schema_fields, flexible=_flexible)
         if is_valid:
             valid_count += 1
         record = ExtractedRecord(
@@ -1456,20 +1427,26 @@ async def llm_verify_source(
     and what the website actually says.
     """
     source = _get_source_or_404(source_id, db)
-    # Extractors can also run LLM verify — they know the data best
-    can_verify = (
-        _is_assigned_reviewer(current_user, source)
-        or _is_assigned_extractor(current_user, source)
-    )
-    if not can_verify:
-        raise HTTPException(status_code=403, detail="Only the assigned extractor, reviewer, or admin can run LLM verification")
+    if not _is_assigned_reviewer(current_user, source):
+        raise HTTPException(status_code=403, detail="Access denied")
 
-    if not source.website_url:
-        raise HTTPException(status_code=422, detail="No website URL — cannot verify without a source to check against.")
-
+    # ── Detect mode ──────────────────────────────────────────────────────────
     schema_ver = db.query(SchemaVersion).filter(
         SchemaVersion.schema_id == source.schema_id
     ).order_by(SchemaVersion.version.desc()).first()
+
+    schema_definition = schema_ver.definition if schema_ver else {}
+    is_flexible     = bool(schema_definition.get("flexible_validation"))
+    description     = source.description or ""
+    is_task_mode    = is_flexible or any(
+        kw in description for kw in ("TASK", "task_summary", "SCORING CRITERIA")
+    )
+
+    if not is_task_mode and not source.website_url:
+        raise HTTPException(
+            status_code=422,
+            detail="No website URL — cannot verify without a source to check against."
+        )
 
     records = db.query(ExtractedRecord).join(ExtractionJob).filter(
         ExtractionJob.source_id == source_id,
@@ -1478,58 +1455,70 @@ async def llm_verify_source(
     if not records:
         raise HTTPException(status_code=422, detail="No records to verify.")
 
-    # Fetch the live website
-    from app.services.web_scraper import fetch_url_text
-    try:
-        web_text, meta = await fetch_url_text(source.website_url)
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Could not fetch source website: {str(e)}")
-
-    if not web_text.strip():
-        raise HTTPException(status_code=422, detail="The source website returned no readable text — may require JavaScript or login.")
-
-    schema_definition = schema_ver.definition if schema_ver else {}
-    fields_def = schema_definition.get("fields", [])
-    field_context = [
-        {
-            "name": f["name"],
-            "type": f.get("type", "string"),
-            "required": f.get("required", False),
-            "description": f.get("description", ""),
-            "enum": f.get("enum", []),
-        }
+    fields_def  = schema_definition.get("fields", [])
+    field_ctx   = [
+        {"name": f["name"], "type": f.get("type","string"),
+         "required": f.get("required",False), "description": f.get("description","")}
         for f in fields_def if "fixed_value" not in f
     ]
-    extraction_instructions = schema_definition.get("extraction_instructions", "")
+    ext_instr = schema_definition.get("extraction_instructions", "")
 
-    # Process in batches of 20 to stay within Claude's context window
-    import anthropic
-    from app.core.config import settings
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    # ── Build system prompt based on mode ────────────────────────────────────
+    if is_task_mode:
+        system_prompt = f"""You are a QA reviewer for the Xtrium data operations team (SOP-DS-003).
+You will be given benchmark tasks and submitted extraction records.
 
-    BATCH_SIZE = 20
-    total = len(records)
-    verified_count = 0
-    flagged_count = 0
-    error_count = 0
+Your job:
+1. Read the task and scoring criteria carefully
+2. Evaluate each record's content field against the task requirements
+3. Check source_url is a real page URL (not AI link, not empty)
+4. Check content is a meaningful JSON object (not empty dict)
+5. Flag gaps, vague answers, or missing evidence per the SOP rules
 
-    system_prompt = f"""You are a data quality verifier for a structured data extraction system.
+SOP rules:
+- No hallucinated values — null is better than a guess
+- Source traceability required — source_url must directly support the content
+- Flag incomplete answers that do not meet the criteria point count
+- PASS if the record answers the task with sufficient evidence
+
+Respond ONLY with valid JSON. No markdown, no preamble.
+Required format:
+{{
+  "results": [
+    {{
+      "record_id": "<id>",
+      "verdict": "PASS" | "FLAG" | "SKIP",
+      "summary": "<one sentence assessment>",
+      "task_answered": true,
+      "criteria_coverage": ["criterion 1 — covered", "criterion 2 — missing"],
+      "flags": [
+        {{
+          "field": "<field_name>",
+          "issue": "<what is wrong or missing>",
+          "suggested_value": "<what is needed>",
+          "confidence": 0.9
+        }}
+      ]
+    }}
+  ]
+}}"""
+    else:
+        system_prompt = f"""You are a data quality verifier for a structured data extraction system.
 
 Your job: cross-check extracted records against the actual text from the source website and flag any discrepancies.
 
-Schema: {schema_definition.get('name', 'Data Schema')}
-{f'Extraction rules: {extraction_instructions}' if extraction_instructions else ''}
+Schema: {schema_definition.get("name", "Data Schema")}
+{f"Extraction rules: {ext_instr}" if ext_instr else ""}
 
 Schema fields to verify:
-{json.dumps(field_context, indent=2)}
+{json.dumps(field_ctx, indent=2)}
 
-The source website text will be provided. For each record, check whether its field values are:
+For each record, check whether field values are:
 1. Supported by the website content (PASS)
-2. Inconsistent or likely wrong (FLAG with specific correction)
-3. Unverifiable from this page (SKIP - note it cannot be confirmed)
+2. Inconsistent or likely wrong (FLAG)
+3. Unverifiable from this page (SKIP)
 
 Respond ONLY with valid JSON. No markdown, no preamble.
-
 Required format:
 {{
   "results": [
@@ -1538,16 +1527,39 @@ Required format:
       "verdict": "PASS" | "FLAG" | "SKIP",
       "summary": "<one sentence>",
       "flags": [
-        {{
-          "field": "<field_name>",
-          "issue": "<what's wrong>",
-          "suggested_value": "<what the website says it should be>",
-          "confidence": 0.0-1.0
-        }}
+        {{"field": "<field_name>", "issue": "<what wrong>",
+          "suggested_value": "<correct value>", "confidence": 0.9}}
       ]
     }}
   ]
 }}"""
+
+    # ── Fetch website when not in task mode ──────────────────────────────────
+    web_text = ""
+    if not is_task_mode:
+        from app.services.web_scraper import fetch_url_text
+        try:
+            web_text, _ = await fetch_url_text(source.website_url)
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Could not fetch source website: {str(e)}")
+        if not web_text.strip():
+            raise HTTPException(status_code=422,
+                detail="The source website returned no readable text.")
+
+    # ── Initialise Gemini ────────────────────────────────────────────────────
+    import google.generativeai as genai
+    from app.core.config import settings
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+    gemini_model = genai.GenerativeModel(
+        model_name=settings.LLM_MODEL,
+        system_instruction=system_prompt,
+    )
+
+    BATCH_SIZE = 20
+    total = len(records)
+    verified_count = 0
+    flagged_count  = 0
+    error_count    = 0
 
     for batch_start in range(0, total, BATCH_SIZE):
         batch = records[batch_start: batch_start + BATCH_SIZE]
@@ -1557,19 +1569,20 @@ Required format:
             for r in batch
         ]
 
-        user_content = json.dumps({
-            "website_text": web_text[:50000],
-            "records_to_verify": records_payload,
-        }, ensure_ascii=False, default=str)
+        if is_task_mode:
+            user_content = json.dumps({
+                "task_and_criteria": description[:3000],
+                "records_to_evaluate": records_payload,
+            }, ensure_ascii=False, default=str)
+        else:
+            user_content = json.dumps({
+                "website_text": web_text[:50000],
+                "records_to_verify": records_payload,
+            }, ensure_ascii=False, default=str)
 
         try:
-            response = client.messages.create(
-                model=settings.LLM_MODEL,
-                max_tokens=4000,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_content}],
-            )
-            raw = response.content[0].text if response.content else ""
+            response = gemini_model.generate_content(user_content)
+            raw = response.text if response.text else ""
 
             # Strip markdown fences if present
             import re as _re
@@ -1703,26 +1716,14 @@ def reset_source(
             raise HTTPException(status_code=403, detail="Only admins can reset sources")
 
     if clear_records:
+        # ExtractedRecord links to Source through ExtractionJob (no direct source_id)
         job_ids = [j.id for j in db.query(ExtractionJob).filter(
             ExtractionJob.source_id == source_id
         ).all()]
         if job_ids:
-            # NULL out audit_log.job_id (nullable FK) — preserves audit history
-            db.query(AuditLog).filter(
-                AuditLog.job_id.in_(job_ids)
-            ).update({'job_id': None}, synchronize_session=False)
-            # Delete submission_batches and llm_call_log (non-nullable FKs)
-            db.query(SubmissionBatch).filter(
-                SubmissionBatch.job_id.in_(job_ids)
-            ).delete(synchronize_session=False)
-            db.query(LLMCallLog).filter(
-                LLMCallLog.job_id.in_(job_ids)
-            ).delete(synchronize_session=False)
-            # Delete records
             db.query(ExtractedRecord).filter(
                 ExtractedRecord.job_id.in_(job_ids)
             ).delete(synchronize_session=False)
-        # Delete jobs by source_id (same as working version)
         db.query(ExtractionJob).filter(
             ExtractionJob.source_id == source_id
         ).delete(synchronize_session=False)
@@ -1772,16 +1773,6 @@ def clear_source_records(
 
     deleted_records = 0
     if job_ids:
-        # NULL audit_log references, delete FK-constrained tables first
-        db.query(AuditLog).filter(
-            AuditLog.job_id.in_(job_ids)
-        ).update({'job_id': None}, synchronize_session=False)
-        db.query(SubmissionBatch).filter(
-            SubmissionBatch.job_id.in_(job_ids)
-        ).delete(synchronize_session=False)
-        db.query(LLMCallLog).filter(
-            LLMCallLog.job_id.in_(job_ids)
-        ).delete(synchronize_session=False)
         deleted_records = db.query(ExtractedRecord).filter(
             ExtractedRecord.job_id.in_(job_ids)
         ).delete(synchronize_session=False)

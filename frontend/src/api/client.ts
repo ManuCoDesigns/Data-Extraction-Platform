@@ -113,8 +113,6 @@ export const projectsApi = {
     api.post(`/projects/${projectId}/members`, { user_id: userId, role }).then(r => r.data),
   removeMember: (projectId: string, userId: string) =>
     api.delete(`/projects/${projectId}/members/${userId}`).then(r => r.data),
-  exportPreview: (projectId: string) =>
-    api.get(`/projects/${projectId}/export-preview`).then(r => r.data),
   exportProject: async (projectId: string, status = 'all', filename?: string) => {
     const r = await api.get(`/projects/${projectId}/export`, {
       params: { status },
@@ -272,6 +270,13 @@ export const sourcesApi = {
   get: (id: string) => api.get(`/sources/${id}`).then(r => r.data),
   update: (id: string, data: object) => api.patch(`/sources/${id}`, data).then(r => r.data),
   delete: (id: string) => api.delete(`/sources/${id}`).then(r => r.data),
+  uploadMulti: (id: string, files: File[]) => {
+    const fd = new FormData()
+    files.forEach(f => fd.append('files', f))
+    return api.post(`/sources/${id}/upload-multi`, fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
   upload: (id: string, formData: FormData) =>
     api.post(`/sources/${id}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -287,8 +292,6 @@ export const sourcesApi = {
   approve: (id: string) => api.post(`/sources/${id}/approve`).then(r => r.data),
   scrape: (id: string) => api.post(`/sources/${id}/scrape`).then(r => r.data),
   verify: (id: string) => api.post(`/sources/${id}/verify`).then(r => r.data),
-  claim: (id: string, reviewerId?: string) =>
-    api.post(`/sources/${id}/claim`, null, { params: reviewerId ? { reviewer_id: reviewerId } : {} }).then(r => r.data),
   reset: (id: string, clearRecords = true) =>
     api.post(`/sources/${id}/reset`, null, { params: { clear_records: clearRecords } }).then(r => r.data),
   clearRecords: (id: string) =>

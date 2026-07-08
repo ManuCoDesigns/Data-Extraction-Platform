@@ -24,9 +24,9 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
     ALGORITHM: str = "HS256"
 
-    # Anthropic
-    ANTHROPIC_API_KEY: str = ""
-    LLM_MODEL: str = "claude-sonnet-4-6"
+    # Gemini
+    GEMINI_API_KEY: str = ""
+    LLM_MODEL: str = "gemini-2.0-flash"
 
     # Storage
     SUPABASE_URL: Optional[str] = None

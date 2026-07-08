@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { JsonRecordViewer } from './JsonRecordViewer'
 import {
-  Globe, Upload, Download, CheckCircle, XCircle,
+  ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
-  Clock, Brain, Trash2, Search, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye,
-  Lock, Unlock, MoreHorizontal, ArrowRight,
+  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -13,361 +13,15 @@ import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinne
 import { useAuthStore } from '@/store/auth'
 import { format, formatDistanceToNow } from 'date-fns'
 
-// ── Step pipeline definition ───────────────────────────────────────────────────
-const STEPS = [
-  { id: 1, label: 'Upload',  icon: '📤', desc: 'Add company data to the source' },
-  { id: 2, label: 'Review',  icon: '🔍', desc: 'Approve every record individually' },
-  { id: 3, label: 'Approve', icon: '✅', desc: 'Lock the source as complete' },
-  { id: 4, label: 'Submit',  icon: '🚀', desc: 'Deliver records to the client' },
-]
-
-/**
- * Derive the active pipeline step from source status + records.
- *
- * Step 1 — Upload:   no data, or schema errors, or upload in progress
- * Step 2 — Review:   records exist, review underway (any review status)
- * Step 3 — Approve:  all records approved, waiting for explicit source approval
- * Step 4 — Submit:   source approved, submitting to client
- * Step 5 — Done:     source approved + all records submitted
- */
-function getStep(status: string, records: any[]): number {
-  // Step 1: no records yet, or upload issues
-  if (records.length === 0) return 1
-  if (['not_started', 'extracting', 'needs_fixes'].includes(status)) return 1
-
-  // Done: approved and all submitted
-  if (status === 'approved') {
-    const submitted = records.filter(r => r.is_submitted).length
-    const approvedRecs = records.filter(r => r.review_status === 'approved').length
-    return (submitted > 0 && submitted >= approvedRecs) ? 5 : 4
-  }
-
-  // Step 3: all records individually approved, source not yet approved
-  const allApproved = records.every(r => r.review_status === 'approved')
-  if (allApproved && records.length > 0) return 3
-
-  // Step 2: any other state with records = review in progress
-  // covers: ready_for_review, in_review, changes_requested, llm_verification
-  return 2
-}
-
-// ── Pipeline header component ──────────────────────────────────────────────────
-function StepPipeline({ currentStep }: { currentStep: number }) {
-  const isDone = currentStep === 5
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 0, padding: '20px 24px', background: '#fff', borderRadius: 16, border: '1px solid #e2e8f0', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-      {STEPS.map((step, i) => {
-        const done = isDone || currentStep > step.id
-        const active = !isDone && currentStep === step.id
-        const locked = !done && !active
-        return (
-          <div key={step.id} style={{ display: 'flex', alignItems: 'center', flex: i < STEPS.length - 1 ? 1 : undefined }}>
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 80 }}>
-              {/* Circle */}
-              <div style={{
-                width: 44, height: 44, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
-                background: done ? '#ecfdf5' : active ? '#eff6ff' : '#f8fafc',
-                border: `2px solid ${done ? '#10b981' : active ? '#3b82f6' : '#e2e8f0'}`,
-                boxShadow: active ? '0 0 0 4px #dbeafe' : 'none',
-                transition: 'all 0.3s',
-                position: 'relative',
-              }}>
-                {done ? <span style={{ fontSize: 20 }}>✓</span> : <span style={{ opacity: locked ? 0.35 : 1 }}>{step.icon}</span>}
-                {active && <div style={{ position: 'absolute', inset: -5, borderRadius: '50%', border: '2px solid #93c5fd', animation: 'pulse 2s infinite' }} />}
-              </div>
-              {/* Label */}
-              <div style={{ textAlign: 'center' }}>
-                <p style={{ fontSize: 11, fontWeight: 700, margin: 0, color: done ? '#059669' : active ? '#1d4ed8' : '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  Step {step.id}
-                </p>
-                <p style={{ fontSize: 12, fontWeight: 600, margin: '1px 0 0', color: done ? '#065f46' : active ? '#1e40af' : '#cbd5e1' }}>
-                  {step.label}
-                </p>
-              </div>
-            </div>
-            {/* Connector line */}
-            {i < STEPS.length - 1 && (
-              <div style={{ flex: 1, height: 2, background: done ? '#10b981' : '#e2e8f0', margin: '0 4px', marginBottom: 28, transition: 'background 0.3s' }} />
-            )}
-          </div>
-        )
-      })}
-      {isDone && (
-        <div style={{ marginLeft: 16, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, minWidth: 64 }}>
-          <div style={{ width: 44, height: 44, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#ecfdf5', border: '2px solid #10b981' }}>
-            <span style={{ fontSize: 22 }}>🎉</span>
-          </div>
-          <div style={{ textAlign: 'center' }}>
-            <p style={{ fontSize: 11, fontWeight: 700, margin: 0, color: '#059669', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Done</p>
-            <p style={{ fontSize: 12, fontWeight: 600, margin: '1px 0 0', color: '#065f46' }}>Complete</p>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Primary action panel ───────────────────────────────────────────────────────
-function PrimaryActionPanel({
-  step, source, records, isExtractor, isReviewer, isAdmin, isSelfReview,
-  onUpload, onReview, onApprove, onSubmit, onExport,
-  scraping, verifying, onScrape, onVerify, onClaim,
-}: any) {
-  const pendingCount = records.filter((r: any) => r.review_status === 'pending').length
-  const approvedCount = records.filter((r: any) => r.review_status === 'approved').length
-  const submittedCount = records.filter((r: any) => r.is_submitted).length
-  const total = records.length
-  const isExtractorOnly = isExtractor && !isReviewer && !isAdmin
-
-  // Extractors see steps 2-4 as "waiting for reviewer"
-  // BUT at step 2 they can still run LLM verify and re-upload if needed
-  if (isExtractorOnly && step >= 2 && step <= 4) return (
-    <div style={{ background: '#f8fafc', border: '2px solid #e2e8f0', borderRadius: 14, padding: '20px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 14, flexWrap: 'wrap' }}>
-        <div style={{ width: 44, height: 44, borderRadius: '50%', background: step === 2 ? '#eff6ff' : '#f0fdf4', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 22, flexShrink: 0 }}>
-          {step === 2 ? '🔍' : step === 3 ? '✅' : '🚀'}
-        </div>
-        <div style={{ flex: 1 }}>
-          <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', margin: 0 }}>
-            {step === 2 ? 'Records uploaded — awaiting reviewer'
-              : step === 3 ? 'All records approved — reviewer to approve source'
-              : 'Source approved — reviewer to submit records'}
-          </p>
-          <p style={{ fontSize: 13, color: '#64748b', margin: '5px 0 0' }}>
-            {step === 2 && `${records.length} record${records.length !== 1 ? 's' : ''} uploaded and valid. You can still run LLM Verify or re-upload before the reviewer starts. You will be notified if records are sent back.`}
-            {step === 3 && 'All records individually approved. The reviewer will approve the source.'}
-            {step === 4 && 'The reviewer will submit the approved records to complete delivery.'}
-          </p>
-        </div>
-        {source.assigned_reviewer_name && (
-          <div style={{ textAlign: 'right', flexShrink: 0, padding: '8px 14px', background: '#fff', borderRadius: 10, border: '1px solid #e2e8f0' }}>
-            <p style={{ fontSize: 10, color: '#94a3b8', margin: '0 0 2px', textTransform: 'uppercase', letterSpacing: '0.06em' }}>Reviewer</p>
-            <p style={{ fontSize: 13, fontWeight: 700, color: '#7c3aed', margin: 0 }}>{source.assigned_reviewer_name}</p>
-          </div>
-        )}
-      </div>
-      {/* Extractor can still run LLM verify and re-upload at step 2 */}
-      {step === 2 && (
-        <div style={{ display: 'flex', gap: 8, marginTop: 14, paddingTop: 14, borderTop: '1px solid #e2e8f0', flexWrap: 'wrap' }}>
-          {source.website_url && records.length > 0 && (
-            <Button variant="secondary" size="sm" onClick={onVerify} loading={verifying}>
-              <Shield className="w-3.5 h-3.5" /> LLM Verify vs Website
-            </Button>
-          )}
-          {source.website_url && (
-            <Button variant="secondary" size="sm" onClick={onScrape} loading={scraping}>
-              <Search className="w-3.5 h-3.5" /> Re-Scrape Website
-            </Button>
-          )}
-          <Button variant="secondary" size="sm" onClick={onUpload}>
-            <Upload className="w-3.5 h-3.5" /> Re-Upload Data
-          </Button>
-        </div>
-      )}
-    </div>
-  )
-
-  // Step 1 — Extractor zone: upload, scrape, LLM verify, fix errors
-  if (step === 1) {
-    const hasValidRecords = records.length > 0 && records.every((r: any) => r.is_schema_valid)
-    return (
-      <div style={{ background: '#eff6ff', border: '2px solid #3b82f6', borderRadius: 14, padding: '20px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div>
-            <p style={{ fontSize: 15, fontWeight: 700, color: '#1e40af', margin: 0 }}>
-              📤 Upload & Prepare Data
-            </p>
-            <p style={{ fontSize: 13, color: '#3b82f6', margin: '4px 0 0' }}>
-              {records.length === 0
-                ? 'No data yet — upload a file or auto-scrape the company website.'
-                : hasValidRecords
-                  ? `${records.length} records uploaded and valid — once done, the reviewer will take over from here.`
-                  : `${records.length} records uploaded — fix schema errors before handing to reviewer.`}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {!source.assigned_extractor_id && (
-              <Button size="sm" onClick={onClaim} style={{ background: '#6366f1', border: 'none', color: '#fff' }}>
-                ✋ Claim This Source
-              </Button>
-            )}
-            {source.website_url && isExtractor && (
-              <Button variant="secondary" size="sm" onClick={onScrape} loading={scraping}>
-                <Search className="w-3.5 h-3.5" /> Auto-Scrape
-              </Button>
-            )}
-            {source.website_url && isExtractor && records.length > 0 && (
-              <Button variant="secondary" size="sm" onClick={onVerify} loading={verifying}>
-                <Shield className="w-3.5 h-3.5" /> LLM Verify
-              </Button>
-            )}
-            {isExtractor && (
-              <Button size="sm" onClick={onUpload} style={{ background: '#2563eb', border: 'none', color: '#fff' }}>
-                <Upload className="w-3.5 h-3.5" />
-                {records.length > 0 ? 'Re-Upload' : 'Upload Data'}
-              </Button>
-            )}
-          </div>
-        </div>
-        {hasValidRecords && !isAdmin && !isReviewer && (
-          <div style={{ marginTop: 12, padding: '10px 14px', background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 10, fontSize: 12, color: '#065f46', fontWeight: 500 }}>
-            ✅ Data looks good — your job is done here. The assigned reviewer will review and approve the records.
-          </div>
-        )}
-      </div>
-    )
-  }
-
-  // Step 2 — Reviewer zone only
-  if (step === 2) {
-    // Extractor sees "handed off" message, not the review controls
-    const isExtractorOnly = isExtractor && !isReviewer && !isAdmin
-    if (isExtractorOnly && !isSelfReview) return (
-      <div style={{ background: '#f0fdf4', border: '2px solid #6ee7b7', borderRadius: 14, padding: '20px 24px' }}>
-        <p style={{ fontSize: 15, fontWeight: 700, color: '#065f46', margin: '0 0 4px' }}>
-          ✅ Data handed to reviewer
-        </p>
-        <p style={{ fontSize: 13, color: '#059669', margin: 0 }}>
-          Your extraction work is done. The reviewer is now checking each record.
-          You'll be notified if anything needs fixing.
-        </p>
-      </div>
-    )
-    return (
-      <div style={{ background: '#faf5ff', border: '2px solid #8b5cf6', borderRadius: 14, padding: '20px 24px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-          <div style={{ flex: 1 }}>
-            <p style={{ fontSize: 15, fontWeight: 700, color: '#5b21b6', margin: 0 }}>
-              🔍 Review Each Record
-            </p>
-            <p style={{ fontSize: 13, color: '#7c3aed', margin: '4px 0 8px' }}>
-              {pendingCount > 0
-                ? `${pendingCount} record${pendingCount !== 1 ? 's' : ''} still pending · ${approvedCount} of ${total} approved`
-                : `All ${total} records approved — approve the source to continue`}
-            </p>
-            <div style={{ background: '#ede9fe', borderRadius: 99, height: 8, overflow: 'hidden', maxWidth: 300 }}>
-              <div style={{ background: '#8b5cf6', height: '100%', borderRadius: 99, width: `${total > 0 ? Math.round((approvedCount / total) * 100) : 0}%`, transition: 'width 0.5s ease' }} />
-            </div>
-            <p style={{ fontSize: 11, color: '#7c3aed', margin: '4px 0 0' }}>
-              {total > 0 ? Math.round((approvedCount / total) * 100) : 0}% complete
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {source.website_url && (isReviewer || isAdmin) && (
-              <Button variant="secondary" size="sm" onClick={onVerify} loading={verifying}>
-                <Shield className="w-3.5 h-3.5" /> LLM Verify
-              </Button>
-            )}
-            {(isReviewer || isAdmin) && !isSelfReview && (
-              <Button size="sm" onClick={onReview} style={{ background: '#7c3aed', border: 'none', color: '#fff' }}>
-                <Eye className="w-3.5 h-3.5" /> Review Records →
-              </Button>
-            )}
-            {isSelfReview && !isAdmin && (
-              <span style={{ fontSize: 12, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '6px 14px', borderRadius: 20, fontWeight: 600 }}>
-                ⚠ You extracted this — a reviewer must approve
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Step 3 — Approve source
-  if (step === 3) return (
-    <div style={{ background: '#f0fdf4', border: '2px solid #10b981', borderRadius: 14, padding: '20px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <p style={{ fontSize: 15, fontWeight: 700, color: '#065f46', margin: 0 }}>
-            ✅ Step 3 of 4 — Approve the Source
-          </p>
-          <p style={{ fontSize: 13, color: '#059669', margin: '4px 0 0' }}>
-            All {total} records are approved. Click to lock this source and unlock the Submit step.
-          </p>
-        </div>
-        {(isReviewer || isAdmin) && !isSelfReview && (
-          <Button size="sm" onClick={onApprove} style={{ background: '#10b981', border: 'none', color: '#fff', fontSize: 14, padding: '10px 24px' }}>
-            <CheckCircle className="w-4 h-4" /> Approve Source
-          </Button>
-        )}
-        {isSelfReview && !isAdmin && (
-          <span style={{ fontSize: 12, background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca', padding: '8px 16px', borderRadius: 20, fontWeight: 600 }}>
-            ⚠ Cannot approve — you are the extractor
-          </span>
-        )}
-      </div>
-    </div>
-  )
-
-  // Step 4 — Submit
-  const s4submittedCount = records.filter((r: any) => r.is_submitted).length
-  const pendingSubmit     = records.filter((r: any) => !r.is_submitted && r.review_status === 'approved').length
-  if (step === 4) return (
-    <div style={{ background: '#fff7ed', border: '2px solid #f97316', borderRadius: 14, padding: '20px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <p style={{ fontSize: 15, fontWeight: 700, color: '#9a3412', margin: 0 }}>
-            🚀 Step 4 of 4 — Submit Records to Client
-          </p>
-          <p style={{ fontSize: 13, color: '#ea580c', margin: '4px 0 0' }}>
-            {pendingSubmit > 0
-              ? `${pendingSubmit} approved record${pendingSubmit !== 1 ? 's' : ''} ready to submit${s4submittedCount > 0 ? ` · ${s4submittedCount} already submitted` : ''}.`
-              : `All ${s4submittedCount} record${s4submittedCount !== 1 ? 's' : ''} have been submitted. Use Unlock Records to re-submit if needed.`}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          {isAdmin && (
-            <Button variant="secondary" size="sm" onClick={onExport}>
-              <Download className="w-3.5 h-3.5" /> Export Package
-            </Button>
-          )}
-          {pendingSubmit > 0 ? (
-            <Button size="sm" onClick={onSubmit} style={{ background: '#ea580c', border: 'none', color: '#fff', fontSize: 14, padding: '10px 24px' }}>
-              <Send className="w-4 h-4" /> Submit {pendingSubmit} Record{pendingSubmit !== 1 ? 's' : ''} →
-            </Button>
-          ) : (
-            <span style={{ fontSize: 12, background: '#ecfdf5', color: '#059669', border: '1px solid #6ee7b7', padding: '8px 16px', borderRadius: 20, fontWeight: 700 }}>
-              🎉 All records submitted
-            </span>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-
-  // Step 5 — Done
-  return (
-    <div style={{ background: '#f0fdf4', border: '2px solid #10b981', borderRadius: 14, padding: '20px 24px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16, flexWrap: 'wrap' }}>
-        <div>
-          <p style={{ fontSize: 15, fontWeight: 700, color: '#065f46', margin: 0 }}>
-            🎉 Complete — {submittedCount} record{submittedCount !== 1 ? 's' : ''} submitted
-          </p>
-          <p style={{ fontSize: 13, color: '#059669', margin: '4px 0 0' }}>
-            This source is fully delivered. Download the export package for the client.
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <Button size="sm" onClick={onExport} style={{ background: '#059669', border: 'none', color: '#fff' }}>
-            <Download className="w-4 h-4" /> Download Export
-          </Button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// ── Status meta ────────────────────────────────────────────────────────────────
 const STATUS_META: Record<SourceStatus, { label: string; color: 'gray'|'amber'|'red'|'blue'|'purple'|'green'|'indigo' }> = {
-  not_started:       { label: 'Not Started',           color: 'gray'   },
-  extracting:        { label: 'Uploading…',             color: 'blue'   },
-  needs_fixes:       { label: 'Schema Errors',          color: 'amber'  },
-  ready_for_review:  { label: 'Awaiting Review',        color: 'indigo' },
-  in_review:         { label: 'In Review',              color: 'purple' },
-  changes_requested: { label: 'Corrections Needed',     color: 'red'    },
-  llm_verification:  { label: 'LLM Check Done',         color: 'purple' },
-  approved:          { label: 'Approved ✓',             color: 'green'  },
+  not_started:       { label: 'Not Started',      color: 'gray' },
+  extracting:        { label: 'Extracting',       color: 'blue' },
+  needs_fixes:       { label: 'Needs Fixes',       color: 'amber' },
+  ready_for_review:  { label: 'Ready for Review',  color: 'indigo' },
+  in_review:         { label: 'In Review',         color: 'purple' },
+  changes_requested: { label: 'Changes Requested', color: 'red' },
+  llm_verification:  { label: 'LLM Verification',  color: 'purple' },
+  approved:          { label: 'Approved',          color: 'green' },
 }
 
 type Tab = 'records' | 'details'
@@ -388,8 +42,11 @@ export function SourceDetailPage() {
   const [editSourceForm, setEditSourceForm] = useState({ name: '', description: '', website_url: '' })
   const [showSchemaJson, setShowSchemaJson] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [multiMode, setMultiMode]   = useState(false)
+  const [multiFiles, setMultiFiles] = useState<File[]>([])
   const [file, setFile] = useState<File | null>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const fileRef  = useRef<HTMLInputElement>(null)
+  const multiRef = useRef<HTMLInputElement>(null)
   const [showAssign, setShowAssign] = useState(false)
   const [editRecord, setEditRecord] = useState<any | null>(null)
   const [editFields, setEditFields] = useState<Record<string, string>>({})
@@ -400,21 +57,19 @@ export function SourceDetailPage() {
   const [resetClearRecords, setResetClearRecords] = useState(true)
   const [deleteRecord, setDeleteRecord] = useState<any | null>(null)
   const [deleting, setDeleting] = useState(false)
+  // New capabilities
   const [schemaDefinition, setSchemaDefinition] = useState<any>(null)
   const [showSchemaPanel, setShowSchemaPanel] = useState(false)
   const [scraping, setScraping] = useState(false)
   const [verifying, setVerifying] = useState(false)
   const [verifyResult, setVerifyResult] = useState<any>(null)
   const [showVerifyResult, setShowVerifyResult] = useState(false)
+  // JSON Record Viewer
   const [activeRecordIndex, setActiveRecordIndex] = useState<number | null>(null)
-  const [submitting, setSubmitting] = useState(false)
-  const [showAdminActions, setShowAdminActions] = useState(false)
-  const [showClaimModal, setShowClaimModal]     = useState(false)
-  const [claimReviewerId, setClaimReviewerId]   = useState('')
-  const [claiming, setClaiming]                 = useState(false)
 
   const load = () => {
     if (!projectId || !sourceId) return
+    // Load each piece independently so one failure doesn't wipe all data
     projectsApi.get(projectId).then(setProject).catch(() => {})
     sourcesApi.get(sourceId).then(setSource).catch(() => {})
     sourcesApi.records(sourceId, { validity: validityFilter || undefined, page_size: 200 })
@@ -426,15 +81,7 @@ export function SourceDetailPage() {
     sourcesApi.schema(sourceId).then(setSchemaDefinition).catch(() => {})
     setLoading(false)
   }
-  useEffect(() => {
-    load()
-    // Poll every 20s — source status, record counts and review statuses can change
-    const iv = setInterval(load, 20_000)
-    const onFocus = () => load()
-    window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) load() })
-    return () => { clearInterval(iv); window.removeEventListener('focus', onFocus) }
-  }, [projectId, sourceId, validityFilter])
+  useEffect(() => { load() }, [projectId, sourceId, validityFilter])
 
   const userRoles = user?.roles ?? []
   const isAdmin = userRoles.includes('org_admin') || userRoles.includes('project_admin')
@@ -443,6 +90,7 @@ export function SourceDetailPage() {
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (multiMode) { handleUploadMulti(e); return }
     if (!file || !sourceId) return
     setUploading(true)
     try {
@@ -458,13 +106,52 @@ export function SourceDetailPage() {
       load()
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Upload failed')
-    } finally { setUploading(false) }
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleUploadMulti = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!multiFiles.length || !sourceId) return
+    setUploading(true)
+    try {
+      const summary = await sourcesApi.uploadMulti(sourceId, multiFiles)
+      toast.success(
+        `Uploaded ${multiFiles.length} file${multiFiles.length !== 1 ? 's' : ''}: ` +
+        `${summary.valid_records ?? summary.valid_rows ?? 0} valid, ` +
+        `${summary.invalid_records ?? summary.invalid_rows ?? 0} need fixes`
+      )
+      setShowUpload(false)
+      setMultiFiles([])
+      setMultiMode(false)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Multi-upload failed')
+    } finally {
+      setUploading(false)
+    }
   }
 
   const handleAssign = async (field: 'assigned_extractor_id' | 'assigned_reviewer_id', value: string) => {
     if (!sourceId) return
-    try { await sourcesApi.update(sourceId, { [field]: value }); load() }
-    catch (err: any) { toast.error(err?.response?.data?.detail || 'Failed to assign') }
+    try {
+      await sourcesApi.update(sourceId, { [field]: value })
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to assign')
+    }
+  }
+
+  const handleReview = async (recordId: string, action: 'approve' | 'reject', note?: string) => {
+    if (!sourceId) return
+    try {
+      await sourcesApi.reviewRecord(sourceId, recordId, action, note)
+      toast.success(action === 'approve' ? 'Record approved' : 'Sent back to extractor')
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Review action failed')
+    }
   }
 
   const handleFixRecord = async (recordId: string, fields: Record<string, unknown>) => {
@@ -496,43 +183,67 @@ export function SourceDetailPage() {
       load()
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to save')
-    } finally { setSavingEdit(false) }
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   const handleApproveSource = async () => {
     if (!sourceId) return
-    try { await sourcesApi.approve(sourceId); toast.success('Source approved!'); load() }
-    catch (err: any) { toast.error(err?.response?.data?.detail || 'Cannot approve yet — check that all records are approved') }
+    try {
+      await sourcesApi.approve(sourceId)
+      toast.success('Source approved!')
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Cannot approve yet — check that all records are approved')
+    }
   }
 
   const handleExport = async () => {
     if (!sourceId || !source) return
-    try { await sourcesApi.export(sourceId, `${source.name.replace(/[^a-z0-9]/gi, '_')}_export.zip`); toast.success('Export downloaded') }
-    catch (err: any) { toast.error('Export failed — source must be approved first') }
+    try {
+      await sourcesApi.export(sourceId, `${source.name.replace(/[^a-z0-9]/gi, '_')}_export.zip`)
+      toast.success('Export downloaded')
+    } catch (err: any) {
+      toast.error('Export failed — source must be approved first')
+    }
   }
 
   const handleDeleteSource = async () => {
     if (!sourceId || !projectId) return
     setDeleting(true)
-    try { await sourcesApi.delete(sourceId); toast.success('Source deleted'); navigate(`/projects/${projectId}/sources`) }
-    catch (err: any) { toast.error(err?.response?.data?.detail || 'Cannot delete this source'); setDeleting(false); setDeleteSourceConfirm(false) }
+    try {
+      await sourcesApi.delete(sourceId)
+      toast.success('Source deleted')
+      navigate(`/projects/${projectId}/sources`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Cannot delete this source')
+      setDeleting(false)
+      setDeleteSourceConfirm(false)
+    }
   }
+
+  const [submitting, setSubmitting] = useState(false)
 
   const handleSubmitSource = async () => {
     if (!sourceId) return
     setSubmitting(true)
     try {
+      // Find the job for this source then submit it
       const jobs = await jobsApi.list({ source_id: sourceId, page_size: 10 })
       const sourceJobs = (jobs.items || jobs || []).filter((j: any) => j.source_id === sourceId || j.project_id)
+
+      // Try submitting each job that has approved records
       let submitted = false
       for (const job of sourceJobs) {
         try {
           const resp = await submissionApi.submit(job.id)
+          // Download the file
           const blob = new Blob([resp.data], { type: 'application/json' })
           const url = URL.createObjectURL(blob)
           const a = document.createElement('a')
           a.href = url
-          const cn = source?.canonical_name || source?.name?.toLowerCase().replace(/\s+/g, '-') || 'submission'
+          const cn = (source as any)?.canonical_name || source?.name?.toLowerCase().replace(/\s+/g, '-') || 'submission'
           a.download = `${cn}_submission.json`
           a.click()
           URL.revokeObjectURL(url)
@@ -542,24 +253,33 @@ export function SourceDetailPage() {
           break
         } catch { continue }
       }
-      if (!submitted) toast.error('No approved records found to submit. Approve records first then approve the source.')
+
+      if (!submitted) {
+        toast.error('No approved records found to submit. Approve records first then approve the source.')
+      }
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Submission failed')
-    } finally { setSubmitting(false) }
+    } finally {
+      setSubmitting(false)
+    }
   }
 
-  const handleUpdateSource = async () => {
-    if (!sourceId) return
+  const handleUpdateSource = async () => {    if (!sourceId) return
     try {
-      await sourcesApi.update(sourceId, { name: editSourceForm.name, description: editSourceForm.description || null, website_url: editSourceForm.website_url || null })
+      await sourcesApi.update(sourceId, {
+        name: editSourceForm.name,
+        description: editSourceForm.description || null,
+        website_url: editSourceForm.website_url || null,
+      })
       toast.success('Source updated')
       setShowEditSource(false)
       load()
-    } catch (err: any) { toast.error(err?.response?.data?.detail || 'Update failed') }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Update failed')
+    }
   }
 
-  const handleReset = async () => {
-    if (!sourceId) return
+  const handleReset = async () => {    if (!sourceId) return
     setResetting(true)
     try {
       await sourcesApi.reset(sourceId, resetClearRecords)
@@ -571,20 +291,28 @@ export function SourceDetailPage() {
     } finally { setResetting(false) }
   }
 
-  const handleDeleteRecord = async () => {
-    if (!deleteRecord || !sourceId) return
+  const handleDeleteRecord = async () => {    if (!deleteRecord || !sourceId) return
     setDeleting(true)
-    try { await sourcesApi.deleteRecord(sourceId, deleteRecord.id); toast.success('Record deleted'); setDeleteRecord(null); load() }
-    catch (err: any) { toast.error(err?.response?.data?.detail || 'Failed to delete record') }
-    finally { setDeleting(false) }
+    try {
+      await sourcesApi.deleteRecord(sourceId, deleteRecord.id)
+      toast.success('Record deleted')
+      setDeleteRecord(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete record')
+    } finally { setDeleting(false) }
   }
 
   const handleScrape = async () => {
     if (!sourceId) return
     setScraping(true)
-    try { const summary = await sourcesApi.scrape(sourceId); toast.success(`Scraped: ${summary.valid_rows} records extracted, ${summary.invalid_rows} need fixes`); load() }
-    catch (err: any) { toast.error(err?.response?.data?.detail || 'Scraping failed — check the website URL is accessible') }
-    finally { setScraping(false) }
+    try {
+      const summary = await sourcesApi.scrape(sourceId)
+      toast.success(`Scraped: ${summary.valid_rows} records extracted, ${summary.invalid_rows} need fixes`)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Scraping failed — check the website URL is accessible')
+    } finally { setScraping(false) }
   }
 
   const handleVerify = async () => {
@@ -597,13 +325,15 @@ export function SourceDetailPage() {
       setShowVerifyResult(true)
       toast.success(`Verification complete — ${result.verified} pass, ${result.flagged} flagged`)
       load()
-    } catch (err: any) { toast.error(err?.response?.data?.detail || 'Verification failed') }
-    finally { setVerifying(false) }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Verification failed')
+    } finally { setVerifying(false) }
   }
 
   if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
   if (!source) return <EmptyState title="Source not found" />
 
+  // ── If a record is open, portal the viewer to <body> so app shell can't clip it ──
   if (activeRecordIndex !== null && records[activeRecordIndex]) {
     return (
       <div style={{ position: 'fixed', inset: 0, zIndex: 9999, overflow: 'hidden' }}>
@@ -628,112 +358,130 @@ export function SourceDetailPage() {
   }
 
   const meta = STATUS_META[source.status]
+  // Show Approve button for any reviewer/admin whenever source is not yet approved
+  // Don't gatekeep on source.total_records (counter can lag) — backend validates
+  const canApproveSource = (isReviewer || isAdmin) && source.status !== 'approved'
+  const allRecordsApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
   const pendingCount = records.filter(r => r.review_status === 'pending').length
   const approvedCount = records.filter(r => r.review_status === 'approved').length
-  const allRecordsApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
-  const currentStep = getStep(source.status, records)
-
-  // Open first pending record for review
-  const handleClaim = async () => {
-    if (!sourceId) return
-    setClaiming(true)
-    try {
-      await sourcesApi.claim(sourceId, claimReviewerId || undefined)
-      toast.success('Source claimed — you are now the extractor')
-      setShowClaimModal(false)
-      load()
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Could not claim source')
-    } finally { setClaiming(false) }
-  }
-
-  const handleReviewNext = () => {
-    const firstPendingIdx = records.findIndex(r => r.review_status === 'pending')
-    if (firstPendingIdx !== -1) setActiveRecordIndex(firstPendingIdx)
-    else if (records.length > 0) setActiveRecordIndex(0)
-  }
 
   return (
-    <div className="p-6 space-y-5 max-w-6xl mx-auto">
-
-      {/* ── Breadcrumb + title ─────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+    <div className="p-8 space-y-6">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm text-gray-400 mb-1">
-            <Link to={`/projects/${projectId}`} className="hover:text-gray-600 font-medium">{project?.name}</Link>
+            <Link to={`/projects/${projectId}`} className="hover:text-gray-600">{project?.name}</Link>
             <ChevronRight className="w-3.5 h-3.5" />
             <Link to={`/projects/${projectId}/sources`} className="hover:text-gray-600">Sources</Link>
             <ChevronRight className="w-3.5 h-3.5" />
-            <span className="text-gray-700 font-semibold truncate max-w-[220px]">{source.name}</span>
+            <span className="text-gray-600 truncate max-w-[200px]">{source.name}</span>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">{source.name}</h1>
             <Badge variant={meta.color}>{meta.label}</Badge>
-            {source.website_url && (
-              <a href={source.website_url} target="_blank" rel="noopener noreferrer"
-                className="text-sm text-brand-600 hover:text-brand-700 flex items-center gap-1">
-                <Globe className="w-3.5 h-3.5" /> {source.website_url}
-              </a>
-            )}
           </div>
+          {source.website_url && (
+            <a href={source.website_url} target="_blank" rel="noopener noreferrer"
+              className="text-sm text-brand-600 hover:text-brand-700 flex items-center gap-1 mt-1">
+              <Globe className="w-3.5 h-3.5" /> {source.website_url}
+            </a>
+          )}
         </div>
-
-        {/* Admin actions dropdown */}
-        {isAdmin && (
-          <div style={{ position: 'relative' }}>
-            <Button variant="secondary" size="sm" onClick={() => setShowAdminActions(v => !v)}>
-              <MoreHorizontal className="w-4 h-4" /> Admin Actions <ChevronDown className="w-3.5 h-3.5" />
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {isExtractor && source.status !== 'approved' && (
+            <Button variant="secondary" size="sm" onClick={() => setShowUpload(true)}>
+              <Upload className="w-3.5 h-3.5" /> Upload Data
             </Button>
-            {showAdminActions && (
-              <>
-                <div style={{ position: 'fixed', inset: 0, zIndex: 40 }} onClick={() => setShowAdminActions(false)} />
-                <div style={{ position: 'absolute', right: 0, top: '100%', marginTop: 6, background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, boxShadow: '0 8px 24px rgba(0,0,0,0.12)', zIndex: 50, minWidth: 200, overflow: 'hidden' }}>
-                  {[
-                    { icon: Edit3, label: 'Edit Source', action: () => { setEditSourceForm({ name: source.name, description: source.description || '', website_url: source.website_url || '' }); setShowEditSource(true); setShowAdminActions(false) }, color: '#374151' },
-                    { icon: Trash2, label: 'Clear Records', action: async () => { setShowAdminActions(false); if (!window.confirm(`Clear all ${records.length} records from "${source.name}"?`)) return; try { const r = await sourcesApi.clearRecords(sourceId!); toast.success(r.message || 'Records cleared'); load() } catch (err: any) { toast.error(err?.response?.data?.detail || 'Clear failed') } }, color: '#d97706', show: records.length > 0 },
-                    { icon: RotateCcw, label: 'Reset Source', action: () => { setShowReset(true); setShowAdminActions(false) }, color: '#d97706' },
-                    { icon: source.status === 'approved' ? Unlock : undefined, label: source.status === 'approved' ? 'Unlock Records' : undefined, action: async () => { setShowAdminActions(false); if (!window.confirm('Unlock submitted records for re-review?')) return; try { const r = await sourcesApi.unlockRecords(sourceId!); toast.success(r.message || 'Unlocked'); load() } catch (err: any) { toast.error(err?.response?.data?.detail || 'Unlock failed') } }, color: '#d97706', show: source.status === 'approved' },
-                    { icon: Trash2, label: 'Delete Source', action: () => { setDeleteSourceConfirm(true); setShowAdminActions(false) }, color: '#dc2626', show: source.status !== 'approved' },
-                  ].filter(item => item.label && item.show !== false).map(({ icon: Icon, label, action, color }: any) => (
-                    <button key={label} onClick={action}
-                      style={{ width: '100%', padding: '10px 16px', textAlign: 'left', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color, fontWeight: 500 }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
-                      {Icon && <Icon size={14} />} {label}
-                    </button>
-                  ))}
-                </div>
-              </>
-            )}
-          </div>
-        )}
+          )}
+          {isAdmin && (
+            <Button variant="secondary" size="sm" onClick={() => {
+              setEditSourceForm({ name: source.name, description: source.description || '', website_url: source.website_url || '' })
+              setShowEditSource(true)
+            }}>
+              <Edit3 className="w-3.5 h-3.5" /> Edit Source
+            </Button>
+          )}
+          {isAdmin && records.length > 0 && (
+            <Button variant="secondary" size="sm"
+              className="!text-orange-600 !border-orange-200 hover:!bg-orange-50"
+              onClick={async () => {
+                if (!window.confirm(`Clear all ${records.length} records from "${source.name}"? This cannot be undone.`)) return
+                try {
+                  const r = await sourcesApi.clearRecords(sourceId!)
+                  toast.success(r.message || 'Records cleared')
+                  load()
+                } catch (err: any) {
+                  toast.error(err?.response?.data?.detail || 'Clear failed')
+                }
+              }}>
+              <Trash2 className="w-3.5 h-3.5" /> Clear Records
+            </Button>
+          )}
+          {isExtractor && source.website_url && source.status !== 'approved' && (
+            <Button variant="secondary" size="sm" onClick={handleScrape} loading={scraping}>
+              <Search className="w-3.5 h-3.5" />
+              {scraping ? 'Scraping…' : 'Auto-Scrape Website'}
+            </Button>
+          )}
+          {isReviewer && records.length > 0 && source.status !== 'not_started' && (
+            <Button variant="secondary" size="sm" onClick={handleVerify} loading={verifying}
+              className={verifyResult ? '!border-emerald-300 !text-emerald-700' : ''}>
+              <Shield className="w-3.5 h-3.5" />
+              {verifying ? 'Verifying…' : 'LLM Verify vs Website'}
+            </Button>
+          )}
+          {canApproveSource && (
+            <Button size="sm" onClick={handleApproveSource}
+              style={{ background: '#10b981', border: 'none', color: '#fff' }}>
+              <CheckCircle className="w-3.5 h-3.5" />
+              {source.approved_records === source.total_records && source.total_records > 0
+                ? 'Approve Source'
+                : `Approve Source ${source.approved_records > 0 ? `(${source.approved_records}/${source.total_records} approved)` : ''}`}
+            </Button>
+          )}
+          {source.status === 'approved' && isAdmin && (
+            <Button size="sm" onClick={handleExport}>
+              <Download className="w-3.5 h-3.5" /> Export Package
+            </Button>
+          )}
+          {source.status === 'approved' && (
+            <Button size="sm" loading={submitting} onClick={handleSubmitSource}
+              className="!bg-green-600 hover:!bg-green-700">
+              <Send className="w-3.5 h-3.5" /> Submit Records
+            </Button>
+          )}
+          {source.status === 'approved' && isAdmin && (
+            <Button variant="secondary" size="sm"
+              className="!text-amber-600 !border-amber-200 hover:!bg-amber-50"
+              onClick={async () => {
+                if (!window.confirm(`Unlock all submitted records in "${source.name}"?\n\nThis resets their submitted status so they can be corrected and re-submitted.`)) return
+                try {
+                  const r = await sourcesApi.unlockRecords(sourceId!)
+                  toast.success(r.message || 'Records unlocked — source moved back to In Review')
+                  load()
+                } catch (err: any) {
+                  toast.error(err?.response?.data?.detail || 'Unlock failed')
+                }
+              }}>
+              <RotateCcw className="w-3.5 h-3.5" /> Unlock Records
+            </Button>
+          )}
+          {isAdmin && source.status !== 'approved' && (
+            <Button variant="secondary" size="sm" onClick={() => setDeleteSourceConfirm(true)}
+              className="!text-red-600 !border-red-200 hover:!bg-red-50">
+              <Trash2 className="w-3.5 h-3.5" /> Delete
+            </Button>
+          )}
+          {isAdmin && (
+            <Button variant="secondary" size="sm" onClick={() => setShowReset(true)}
+              className="!text-orange-600 !border-orange-200 hover:!bg-orange-50">
+              <RotateCcw className="w-3.5 h-3.5" /> Reset Source
+            </Button>
+          )}
+        </div>
       </div>
 
-      {/* ── Step pipeline ─────────────────────────────────────────────────────── */}
-      <StepPipeline currentStep={currentStep} />
-
-      {/* ── Primary action panel ──────────────────────────────────────────────── */}
-      <PrimaryActionPanel
-        step={currentStep}
-        source={source}
-        records={records}
-        isExtractor={isExtractor}
-        isReviewer={isReviewer}
-        isAdmin={isAdmin}
-        isSelfReview={!isAdmin && !!source.assigned_extractor_id && source.assigned_extractor_id === user?.id}
-        onUpload={() => setShowUpload(true)}
-        onReview={handleReviewNext}
-        onApprove={handleApproveSource}
-        onSubmit={handleSubmitSource}
-        onExport={handleExport}
-        scraping={scraping}
-        verifying={verifying}
-        onScrape={handleScrape}
-        onVerify={handleVerify}
-        onClaim={() => setShowClaimModal(true)}
-      />
-
-      {/* ── Stats row ─────────────────────────────────────────────────────────── */}
+      {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Total Records', value: source.total_records, icon: '📋', top: '#6366f1', bg: '#eef2ff', val: '#4338ca' },
@@ -741,14 +489,14 @@ export function SourceDetailPage() {
           { label: 'Needs Fixes', value: source.invalid_records, icon: '⚠️', top: '#f59e0b', bg: '#fffbeb', val: '#92400e' },
           { label: 'Approved', value: source.approved_records, icon: '🎯', top: '#3b82f6', bg: '#eff6ff', val: '#1d4ed8' },
         ].map(({ label, value, icon, top, bg, val }) => (
-          <div key={label} style={{ background: bg, borderRadius: 14, borderTop: `3px solid ${top}`, padding: '14px 18px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <span style={{ fontSize: 18 }}>{icon}</span>
-              <span style={{ fontSize: 26, fontWeight: 800, color: val, lineHeight: 1 }}>{value}</span>
+          <div key={label} style={{ background: bg, borderRadius: 14, borderTop: `3px solid ${top}`, padding: '16px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+              <span style={{ fontSize: 20 }}>{icon}</span>
+              <span style={{ fontSize: 28, fontWeight: 800, color: val, lineHeight: 1 }}>{value}</span>
             </div>
             <p style={{ fontSize: 11, fontWeight: 600, color: val, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>{label}</p>
             {source.total_records > 0 && (
-              <div style={{ marginTop: 6, background: 'rgba(255,255,255,0.6)', borderRadius: 99, height: 4, overflow: 'hidden' }}>
+              <div style={{ marginTop: 8, background: 'rgba(255,255,255,0.6)', borderRadius: 99, height: 4, overflow: 'hidden' }}>
                 <div style={{ background: top, height: '100%', borderRadius: 99, width: `${Math.min(100, Math.round((value / source.total_records) * 100))}%`, transition: 'width 0.6s ease' }} />
               </div>
             )}
@@ -756,14 +504,14 @@ export function SourceDetailPage() {
         ))}
       </div>
 
-      {/* ── Team assignment row ───────────────────────────────────────────────── */}
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+      {/* Team assignment row */}
+      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
         {[
           { role: 'Extractor', emoji: '⛏️', field: 'assigned_extractor_id' as const, name: source.assigned_extractor_name, id: source.assigned_extractor_id },
           { role: 'Reviewer', emoji: '🔍', field: 'assigned_reviewer_id' as const, name: source.assigned_reviewer_name, id: source.assigned_reviewer_id },
         ].map(({ role, emoji, field, name, id }) => (
           <div key={role} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 30, height: 30, borderRadius: '50%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>{emoji}</div>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>{emoji}</div>
             <div>
               <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 2px' }}>{role}</p>
               {isAdmin ? (
@@ -778,11 +526,12 @@ export function SourceDetailPage() {
           </div>
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#94a3b8' }}>
-          <Clock className="w-3 h-3" /> Updated {safeFromNow(source.updated_at)}
+          <Clock className="w-3 h-3" />
+          Updated {safeFromNow(source.updated_at)}
         </div>
       </div>
 
-      {/* ── Tabs ─────────────────────────────────────────────────────────────── */}
+      {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, padding: '4px', background: '#f1f5f9', borderRadius: 12, alignSelf: 'flex-start' }}>
         {(['records', 'details'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
@@ -799,17 +548,59 @@ export function SourceDetailPage() {
 
       {tab === 'records' && (
         <div className="space-y-4">
-          {/* LLM verify result banner */}
+
+          {/* ── Workflow next-step banner ── */}
+          {source.status === 'approved' ? (
+            <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 12, padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
+              <CheckCircle size={16} color="#059669" />
+              <p style={{ fontSize: 13, color: '#065f46', margin: 0, flex: 1 }}>
+                <strong>Source Approved</strong> — all records have been reviewed. Use <strong>Export Package</strong> to download.
+              </p>
+              <Button size="sm" onClick={handleExport} style={{ background: '#059669', border: 'none', color: '#fff', flexShrink: 0 }}>
+                <Download className="w-3.5 h-3.5" /> Export Package
+              </Button>
+            </div>
+          ) : records.length > 0 && (isReviewer || isAdmin) ? (
+            <div style={{ background: allRecordsApproved ? '#ecfdf5' : '#fffbeb', border: `1px solid ${allRecordsApproved ? '#6ee7b7' : '#fcd34d'}`, borderRadius: 12, padding: '14px 18px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: allRecordsApproved ? 10 : 8 }}>
+                <Eye size={16} color={allRecordsApproved ? '#059669' : '#d97706'} style={{ flexShrink: 0, marginTop: 1 }} />
+                <div style={{ flex: 1 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: allRecordsApproved ? '#065f46' : '#92400e', margin: 0 }}>
+                    {allRecordsApproved
+                      ? `All ${records.length} records approved — ready to approve source`
+                      : `${pendingCount} record${pendingCount !== 1 ? 's' : ''} pending review · ${approvedCount} approved`}
+                  </p>
+                  <p style={{ fontSize: 12, color: allRecordsApproved ? '#059669' : '#b45309', margin: '3px 0 0' }}>
+                    {allRecordsApproved
+                      ? 'Click "Approve Source" to mark this source as complete and unlock export.'
+                      : 'Click any record below to open the review panel. Use ✓ Approve or ✗ Send Back on each record.'}
+                  </p>
+                </div>
+              </div>
+              {allRecordsApproved && (
+                <Button size="sm" onClick={handleApproveSource}
+                  style={{ background: '#10b981', border: 'none', color: '#fff' }}>
+                  <CheckCircle className="w-3.5 h-3.5" /> Approve Source & Unlock Export
+                </Button>
+              )}
+            </div>
+          ) : null}
           {showVerifyResult && verifyResult && (
-            <div className={cn('border rounded-xl p-4 flex items-start justify-between gap-4', verifyResult.flagged > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200')}>
+            <div className={cn(
+              'border rounded-xl p-4 flex items-start justify-between gap-4',
+              verifyResult.flagged > 0 ? 'bg-amber-50 border-amber-200' : 'bg-emerald-50 border-emerald-200'
+            )}>
               <div className="flex items-start gap-3">
                 <Shield className={cn('w-4 h-4 mt-0.5 shrink-0', verifyResult.flagged > 0 ? 'text-amber-600' : 'text-emerald-600')} />
                 <div>
-                  <p className={cn('text-sm font-semibold', verifyResult.flagged > 0 ? 'text-amber-800' : 'text-emerald-800')}>LLM Website Verification Complete</p>
+                  <p className={cn('text-sm font-semibold', verifyResult.flagged > 0 ? 'text-amber-800' : 'text-emerald-800')}>
+                    LLM Website Verification Complete
+                  </p>
                   <p className="text-xs mt-1 text-gray-600">{verifyResult.message}</p>
                   <div className="flex gap-4 mt-2 text-xs">
                     <span className="text-emerald-700 font-medium">✓ {verifyResult.verified} verified</span>
                     <span className="text-amber-600 font-medium">⚠ {verifyResult.flagged} flagged</span>
+                    {verifyResult.truncated && <span className="text-gray-400">· Page was large, truncated to 80k chars</span>}
                   </div>
                 </div>
               </div>
@@ -817,43 +608,58 @@ export function SourceDetailPage() {
             </div>
           )}
 
-          {/* Filter bar */}
           <div className="flex items-center gap-2 flex-wrap">
             {['', 'valid', 'invalid'].map(v => (
               <button key={v} onClick={() => setValidityFilter(v)}
                 className={cn('px-3 py-1.5 rounded-lg text-xs font-medium border transition',
-                  validityFilter === v ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')}>
+                  validityFilter === v ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                )}
+              >
                 {v === '' ? 'All' : v === 'valid' ? 'Schema-valid' : 'Needs fixes'}
               </button>
             ))}
             {schemaDefinition?.fields?.length > 0 && (
-              <button onClick={() => setShowSchemaPanel(p => !p)}
+              <button
+                onClick={() => setShowSchemaPanel(p => !p)}
                 className={cn('ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition',
-                  showSchemaPanel ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50')}>
+                  showSchemaPanel ? 'bg-brand-600 text-white border-brand-600' : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
+                )}
+              >
                 <Info className="w-3.5 h-3.5" /> Schema Reference
               </button>
             )}
           </div>
 
           <div className={cn('flex gap-4', showSchemaPanel ? 'items-start' : '')}>
+            {/* Schema reference panel */}
             {showSchemaPanel && schemaDefinition && (
               <div className="w-72 shrink-0">
                 <Card className="p-4 sticky top-4">
                   <div className="flex items-center justify-between mb-3">
-                    <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">{schemaDefinition.name || 'Schema'} Fields</h4>
+                    <h4 className="text-xs font-semibold text-gray-700 uppercase tracking-wide">
+                      {schemaDefinition.name || 'Schema'} Fields
+                    </h4>
                     <div className="flex items-center gap-2">
-                      <button onClick={() => setShowSchemaJson(true)} className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1">
+                      <button onClick={() => setShowSchemaJson(true)}
+                        className="text-xs text-brand-600 hover:text-brand-700 font-medium flex items-center gap-1">
                         <Code className="w-3 h-3" /> Full JSON
                       </button>
-                      <button onClick={() => setShowSchemaPanel(false)} className="text-gray-400 hover:text-gray-600"><XCircle className="w-3.5 h-3.5" /></button>
+                      <button onClick={() => setShowSchemaPanel(false)} className="text-gray-400 hover:text-gray-600">
+                        <XCircle className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   </div>
                   {schemaDefinition.extraction_instructions && (
-                    <div className="mb-3 p-2 bg-brand-50 rounded-lg text-xs text-brand-700 leading-relaxed">{schemaDefinition.extraction_instructions}</div>
+                    <div className="mb-3 p-2 bg-brand-50 rounded-lg text-xs text-brand-700 leading-relaxed">
+                      {schemaDefinition.extraction_instructions}
+                    </div>
                   )}
                   <div className="space-y-2 max-h-[60vh] overflow-y-auto scrollbar-thin">
                     {(schemaDefinition.fields || []).map((f: any) => (
-                      <div key={f.name} className={cn('p-2.5 rounded-lg border text-xs', 'fixed_value' in f ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200')}>
+                      <div key={f.name} className={cn(
+                        'p-2.5 rounded-lg border text-xs',
+                        'fixed_value' in f ? 'bg-gray-50 border-gray-100' : 'bg-white border-gray-200'
+                      )}>
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="font-mono font-semibold text-gray-800">{f.name}</span>
                           <span className="text-gray-400">{f.type || 'string'}</span>
@@ -863,7 +669,9 @@ export function SourceDetailPage() {
                         {f.description && <p className="text-gray-500 mt-1 leading-relaxed">{f.description}</p>}
                         {f.enum?.length > 0 && (
                           <div className="mt-1.5 flex flex-wrap gap-1">
-                            {f.enum.map((v: string) => (<span key={v} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{v}</span>))}
+                            {f.enum.map((v: string) => (
+                              <span key={v} className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs font-mono">{v}</span>
+                            ))}
                           </div>
                         )}
                       </div>
@@ -873,106 +681,137 @@ export function SourceDetailPage() {
               </div>
             )}
 
+            {/* Records table */}
             <div className="flex-1 min-w-0">
-              {records.length === 0 ? (
-                <EmptyState title="No records yet"
-                  description={isExtractor ? 'Upload a file or use Auto-Scrape Website to extract records.' : 'Waiting for the extractor to upload data.'}
-                  action={isExtractor ? (
-                    <div className="flex gap-2 flex-wrap justify-center">
-                      <Button onClick={() => setShowUpload(true)}><Upload className="w-4 h-4" /> Upload File</Button>
-                      {source.website_url && (<Button variant="secondary" onClick={handleScrape} loading={scraping}><Search className="w-4 h-4" /> Auto-Scrape Website</Button>)}
-                    </div>
-                  ) : undefined}
-                />
-              ) : (
-                <Card className="overflow-hidden">
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                          {['Company', 'Sites', 'Products', 'Schema', 'Web Check', 'Review', ''].map((h, i) => (
-                            <th key={h + i} style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
-                              className={i > 0 && i < 5 && i !== 3 ? 'hidden md:table-cell' : ''}>{h}</th>
-                          ))}
+
+          {records.length === 0 ? (
+            <EmptyState
+              title="No records yet"
+              description={isExtractor ? 'Upload a file or use Auto-Scrape Website to extract records.' : 'Waiting for the extractor to upload data.'}
+              action={isExtractor ? (
+                <div className="flex gap-2 flex-wrap justify-center">
+                  <Button onClick={() => setShowUpload(true)}><Upload className="w-4 h-4" /> Upload File</Button>
+                  {source.website_url && (
+                    <Button variant="secondary" onClick={handleScrape} loading={scraping}>
+                      <Search className="w-4 h-4" /> Auto-Scrape Website
+                    </Button>
+                  )}
+                </div>
+              ) : undefined}
+            />
+          ) : (
+            <Card className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                      {['Company','Sites','Products','Schema','Web Check','Review',''].map((h, i) => (
+                        <th key={h+i} style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+                          className={i > 0 && i < 5 && i !== 3 ? 'hidden md:table-cell' : ''}>
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {records.map((r, idx) => {
+                      const ef = r.extracted_fields || {}
+                      const primaryName = String(ef.company_name || ef.material_name || r.canonical_name || r.id.slice(0, 8))
+                      const sector = ef.industry_sector as string | undefined
+                      const tier = ef.supply_chain_tier as number | undefined
+                      const sites = Array.isArray(ef.manufacturing_sites) ? ef.manufacturing_sites.length : 0
+                      const products = Array.isArray(ef.products_offered) ? ef.products_offered.length : 0
+                      const webFlagCount = (r.web_check_flags || []).length
+                      return (
+                        <tr key={r.id}
+                          style={{
+                            borderLeft: `3px solid ${r.review_status === 'approved' ? '#10b981' : r.review_status === 'rejected' ? '#ef4444' : r.is_schema_valid ? '#6366f1' : '#f59e0b'}`,
+                            cursor: 'pointer', transition: 'background 0.1s',
+                          }}
+                          className="hover:bg-slate-50 transition"
+                          onClick={() => setActiveRecordIndex(idx)}
+                        >
+                          <td className="px-5 py-3">
+                            <p className="font-semibold text-gray-900 truncate max-w-[200px]">{primaryName}</p>
+                            <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                              {sector && <span className="text-xs text-gray-400">{sector}</span>}
+                              {tier && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-1.5 rounded">tier {tier}</span>}
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            {sites > 0
+                              ? <span className="text-sm font-medium text-gray-700">🏭 {sites} site{sites !== 1 ? 's' : ''}</span>
+                              : <span className="text-xs text-gray-300">—</span>
+                            }
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            {products > 0
+                              ? <span className="text-sm font-medium text-gray-700">📦 {products} product{products !== 1 ? 's' : ''}</span>
+                              : <span className="text-xs text-gray-300">—</span>
+                            }
+                          </td>
+                          <td className="px-4 py-3">
+                            {r.is_schema_valid ? (
+                              <Badge variant="green"><CheckCircle className="w-3 h-3" /> Valid</Badge>
+                            ) : (
+                              <div>
+                                <Badge variant="amber"><AlertCircle className="w-3 h-3" /> {r.validation_errors.length} error{r.validation_errors.length !== 1 ? 's' : ''}</Badge>
+                                <div className="mt-1 space-y-0.5">
+                                  {r.validation_errors.slice(0, 2).map((e: any, i: number) => (
+                                    <p key={i} className="text-xs text-amber-600">{e.field}: {e.error}</p>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 hidden md:table-cell">
+                            {r.web_verified === null || r.web_verified === undefined ? (
+                              <span className="text-xs text-gray-300">Not run</span>
+                            ) : r.web_verified ? (
+                              <Badge variant="green"><CheckCircle className="w-3 h-3" /> Verified</Badge>
+                            ) : (
+                              <div>
+                                <Badge variant="red"><AlertCircle className="w-3 h-3" /> {webFlagCount} issue{webFlagCount !== 1 ? 's' : ''}</Badge>
+                                {r.web_check_summary && (
+                                  <p className="text-xs text-gray-500 mt-0.5 max-w-[160px] truncate">{r.web_check_summary}</p>
+                                )}
+                                {(r.web_check_flags || []).slice(0, 2).map((f: any, i: number) => (
+                                  <p key={i} className="text-xs text-red-600 mt-0.5">
+                                    <span className="font-mono">{f.field}</span>: {f.issue}
+                                    {f.suggested_value && <span className="text-green-600"> → {f.suggested_value}</span>}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3">
+                            <ReviewBadge status={r.review_status} />
+                            {r.review_note && <p className="text-xs text-gray-400 mt-0.5 max-w-[160px] truncate">"{r.review_note}"</p>}
+                          </td>
+                          <td className="px-4 py-3 text-right">
+                            <div className="flex items-center gap-2 justify-end">
+                              <span style={{
+                                fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 20,
+                                background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe',
+                                whiteSpace: 'nowrap',
+                              }}>Open →</span>
+                              {isExtractor && (
+                                <button onClick={e => { e.stopPropagation(); setDeleteRecord(r) }} className="p-1 text-gray-300 hover:text-red-500 transition">
+                                  <Trash2 className="w-3 h-3" />
+                                </button>
+                              )}
+                            </div>
+                          </td>
                         </tr>
-                      </thead>
-                      <tbody className="divide-y divide-gray-50">
-                        {records.map((r, idx) => {
-                          const ef = r.extracted_fields || {}
-                          const primaryName = String(ef.company_name || ef.material_name || r.canonical_name || r.id.slice(0, 8))
-                          const sector = ef.industry_sector as string | undefined
-                          const tier = ef.supply_chain_tier as number | undefined
-                          const sites = Array.isArray(ef.manufacturing_sites) ? ef.manufacturing_sites.length : 0
-                          const products = Array.isArray(ef.products_offered) ? ef.products_offered.length : 0
-                          const webFlagCount = (r.web_check_flags || []).length
-                          return (
-                            <tr key={r.id}
-                              style={{ borderLeft: `3px solid ${r.review_status === 'approved' ? '#10b981' : r.review_status === 'rejected' ? '#ef4444' : r.is_schema_valid ? '#6366f1' : '#f59e0b'}`, cursor: 'pointer', transition: 'background 0.1s' }}
-                              className="hover:bg-slate-50 transition"
-                              onClick={() => setActiveRecordIndex(idx)}>
-                              <td className="px-5 py-3">
-                                <p className="font-semibold text-gray-900 truncate max-w-[200px]">{primaryName}</p>
-                                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                                  {sector && <span className="text-xs text-gray-400">{sector}</span>}
-                                  {tier && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-1.5 rounded">tier {tier}</span>}
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 hidden md:table-cell">
-                                {sites > 0 ? <span className="text-sm font-medium text-gray-700">🏭 {sites} site{sites !== 1 ? 's' : ''}</span> : <span className="text-xs text-gray-300">—</span>}
-                              </td>
-                              <td className="px-4 py-3 hidden md:table-cell">
-                                {products > 0 ? <span className="text-sm font-medium text-gray-700">📦 {products} product{products !== 1 ? 's' : ''}</span> : <span className="text-xs text-gray-300">—</span>}
-                              </td>
-                              <td className="px-4 py-3">
-                                {r.is_schema_valid ? (
-                                  <Badge variant="green"><CheckCircle className="w-3 h-3" /> Valid</Badge>
-                                ) : (
-                                  <div>
-                                    <Badge variant="amber"><AlertCircle className="w-3 h-3" /> {r.validation_errors.length} error{r.validation_errors.length !== 1 ? 's' : ''}</Badge>
-                                    <div className="mt-1 space-y-0.5">
-                                      {r.validation_errors.slice(0, 2).map((e: any, i: number) => (<p key={i} className="text-xs text-amber-600">{e.field}: {e.error}</p>))}
-                                    </div>
-                                  </div>
-                                )}
-                              </td>
-                              <td className="px-4 py-3 hidden md:table-cell">
-                                {r.web_verified === null || r.web_verified === undefined ? (
-                                  <span className="text-xs text-gray-300">Not run</span>
-                                ) : r.web_verified ? (
-                                  <Badge variant="green"><CheckCircle className="w-3 h-3" /> Verified</Badge>
-                                ) : (
-                                  <div>
-                                    <Badge variant="red"><AlertCircle className="w-3 h-3" /> {webFlagCount} issue{webFlagCount !== 1 ? 's' : ''}</Badge>
-                                    {(r.web_check_flags || []).slice(0, 1).map((f: any, i: number) => (
-                                      <p key={i} className="text-xs text-red-600 mt-0.5"><span className="font-mono">{f.field}</span>: {f.issue}</p>
-                                    ))}
-                                  </div>
-                                )}
-                              </td>
-                              <td className="px-4 py-3">
-                                <ReviewBadge status={r.review_status} submitted={r.is_submitted} />
-                                {r.review_note && <p className="text-xs text-gray-400 mt-0.5 max-w-[160px] truncate">"{r.review_note}"</p>}
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                <div className="flex items-center gap-2 justify-end">
-                                  <span style={{ fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 20, background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe', whiteSpace: 'nowrap' }}>Open →</span>
-                                  {isExtractor && (
-                                    <button onClick={e => { e.stopPropagation(); setDeleteRecord(r) }} className="p-1 text-gray-300 hover:text-red-500 transition">
-                                      <Trash2 className="w-3 h-3" />
-                                    </button>
-                                  )}
-                                </div>
-                              </td>
-                            </tr>
-                          )
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </Card>
-              )}
-            </div>
-          </div>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
+            </div>{/* end flex-1 records table */}
+          </div>{/* end schema panel + records flex row */}
         </div>
       )}
 
@@ -986,6 +825,7 @@ export function SourceDetailPage() {
               { label: 'Website', value: source.website_url || '(none)' },
               { label: 'Created', value: safeFormat(source.created_at, 'MMM d, yyyy HH:mm') },
               { label: 'Extraction started', value: source.extraction_started_at ? format(new Date(source.extraction_started_at), 'MMM d, HH:mm') : '—' },
+              { label: 'Extraction completed', value: source.extraction_completed_at ? format(new Date(source.extraction_completed_at), 'MMM d, HH:mm') : '—' },
               { label: 'Review started', value: source.review_started_at ? format(new Date(source.review_started_at), 'MMM d, HH:mm') : '—' },
               { label: 'Approved', value: source.approved_at ? format(new Date(source.approved_at), 'MMM d, HH:mm') : '—' },
             ].map(({ label, value }) => (
@@ -995,6 +835,7 @@ export function SourceDetailPage() {
               </div>
             ))}
           </Card>
+
           <Card className="p-6">
             <h3 className="text-sm font-semibold text-gray-700 mb-2">Notes & Assumptions</h3>
             <p className="text-xs text-gray-400 mb-3">Visible on the final export cover sheet.</p>
@@ -1003,7 +844,7 @@ export function SourceDetailPage() {
         </div>
       )}
 
-      {/* ── Upload modal ───────────────────────────────────────────────────────── */}
+      {/* Upload modal */}
       <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Upload extracted data to this source — individual files or a ZIP bundle.">
         <form onSubmit={handleUpload} className="space-y-4">
           {source.total_records > 0 && (
@@ -1011,32 +852,139 @@ export function SourceDetailPage() {
               Re-uploading replaces all {source.total_records} existing records in this source.
             </div>
           )}
+
+          {/* File type legend */}
           <div className="grid grid-cols-2 gap-2 text-xs">
             {[
-              { icon: '🗂️', label: 'ZIP of JSONs', desc: 'Bundle from extractor script' },
-              { icon: '📄', label: 'JSON / CSV / Excel', desc: 'Single structured file' },
-              { icon: '📋', label: 'PDF / TXT', desc: 'AI extracts records automatically' },
-              { icon: '⚡', label: 'Auto-Scrape', desc: 'Use the scrape button instead', highlight: true },
-            ].map(({ icon, label, desc, highlight }) => (
-              <div key={label} className={cn('flex items-start gap-2 p-2.5 rounded-lg border', highlight ? 'bg-brand-50 border-brand-100' : 'bg-gray-50 border-gray-100')}>
+              { icon: '🗂️', label: 'ZIP of JSONs', desc: 'Bundle from extractor script — all files processed at once' },
+              { icon: '📄', label: 'JSON / CSV / Excel', desc: 'Single structured file with multiple records' },
+              { icon: '📋', label: 'PDF / TXT', desc: 'Raw document — AI extracts records automatically' },
+            ].map(({ icon, label, desc }) => (
+              <div key={label} className="flex items-start gap-2 p-2.5 bg-gray-50 rounded-lg border border-gray-100">
                 <span className="text-base leading-none mt-0.5">{icon}</span>
                 <div>
-                  <p className={cn('font-medium', highlight ? 'text-brand-700' : 'text-gray-700')}>{label}</p>
-                  <p className={cn('leading-relaxed mt-0.5', highlight ? 'text-brand-500' : 'text-gray-400')}>{desc}</p>
+                  <p className="font-medium text-gray-700">{label}</p>
+                  <p className="text-gray-400 leading-relaxed mt-0.5">{desc}</p>
                 </div>
               </div>
             ))}
+            <div className="flex items-start gap-2 p-2.5 bg-brand-50 rounded-lg border border-brand-100">
+              <span className="text-base leading-none mt-0.5">⚡</span>
+              <div>
+                <p className="font-medium text-brand-700">Auto-Scrape</p>
+                <p className="text-brand-500 leading-relaxed mt-0.5">Use the scrape button to pull directly from the source URL</p>
+              </div>
+            </div>
           </div>
-          <div onClick={() => !uploading && fileRef.current?.click()}
-            className={cn('border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition',
+
+          {/* Mode toggle */}
+          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
+            <button type="button"
+              className={cn('flex-1 py-2 transition', !multiMode ? 'bg-brand-600 text-white' : 'text-gray-500 hover:bg-gray-50')}
+              onClick={() => { setMultiMode(false); setMultiFiles([]) }}>
+              Single file
+            </button>
+            <button type="button"
+              className={cn('flex-1 py-2 transition', multiMode ? 'bg-brand-600 text-white' : 'text-gray-500 hover:bg-gray-50')}
+              onClick={() => { setMultiMode(true); setFile(null) }}>
+              Multiple files
+            </button>
+          </div>
+
+          {multiMode ? (
+            <>
+              {/* Multi-file dropzone */}
+              <div
+                onClick={() => !uploading && multiRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+                onDrop={e => {
+                  e.preventDefault()
+                  const dropped = Array.from(e.dataTransfer.files).filter(f =>
+                    /\.(json|csv|xlsx|xls)$/i.test(f.name))
+                  setMultiFiles(prev => {
+                    const names = new Set(prev.map(f => f.name))
+                    return [...prev, ...dropped.filter(f => !names.has(f.name))]
+                  })
+                }}
+                className={cn(
+                  'border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition',
+                  multiFiles.length ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
+                  uploading && 'opacity-60 cursor-not-allowed'
+                )}>
+                <input
+                  ref={multiRef}
+                  type="file"
+                  accept=".json,.csv,.xlsx,.xls"
+                  multiple
+                  className="hidden"
+                  onChange={e => {
+                    const picked = Array.from(e.target.files ?? [])
+                    setMultiFiles(prev => {
+                      const names = new Set(prev.map(f => f.name))
+                      return [...prev, ...picked.filter(f => !names.has(f.name))]
+                    })
+                    e.target.value = ''
+                  }}
+                />
+                <Upload className="w-6 h-6 mx-auto text-gray-400 mb-2" />
+                <p className="text-sm text-gray-600 font-medium">Drop multiple files or click to browse</p>
+                <p className="text-xs text-gray-400 mt-1">JSON · CSV · Excel — each file's records are merged into one batch</p>
+              </div>
+
+              {/* Selected files list */}
+              {multiFiles.length > 0 && (
+                <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                    {multiFiles.length} file{multiFiles.length !== 1 ? 's' : ''} selected
+                  </p>
+                  {multiFiles.map((f, i) => (
+                    <div key={f.name} className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-100 text-xs">
+                      <span className="text-sm">
+                        {/\.json$/i.test(f.name) ? '📄' : /\.xlsx?$/i.test(f.name) ? '📊' : '📋'}
+                      </span>
+                      <span className="flex-1 font-medium text-gray-700 truncate">{f.name}</span>
+                      <span className="text-gray-400 shrink-0">{(f.size / 1024).toFixed(1)} KB</span>
+                      <button type="button"
+                        className="text-gray-300 hover:text-red-400 transition shrink-0 font-bold"
+                        onClick={() => setMultiFiles(prev => prev.filter((_, idx) => idx !== i))}>
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                  <button type="button"
+                    className="text-xs text-gray-400 hover:text-red-400 transition"
+                    onClick={() => setMultiFiles([])}>
+                    Clear all
+                  </button>
+                </div>
+              )}
+            </>
+          ) : (
+          <>
+          {/* Drop zone */}
+          <div
+            onClick={() => !uploading && fileRef.current?.click()}
+            className={cn(
+              'border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition',
               file ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
-              uploading && 'opacity-60 cursor-not-allowed')}>
-            <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.json,.pdf,.txt,.zip" className="hidden" onChange={e => setFile(e.target.files?.[0] ?? null)} />
+              uploading && 'opacity-60 cursor-not-allowed'
+            )}
+          >
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".csv,.xlsx,.xls,.json,.pdf,.txt,.zip"
+              className="hidden"
+              onChange={e => setFile(e.target.files?.[0] ?? null)}
+            />
             <Upload className="w-6 h-6 mx-auto text-gray-400 mb-2" />
             {file ? (
               <div>
                 <p className="text-sm font-semibold text-brand-700">{file.name}</p>
                 <p className="text-xs text-gray-500 mt-0.5">{(file.size / 1024).toFixed(1)} KB</p>
+                {file.name.toLowerCase().endsWith('.zip') && (
+                  <p className="text-xs text-brand-600 mt-1.5 font-medium">ZIP detected — all JSON/CSV/Excel files inside will be processed</p>
+                )}
               </div>
             ) : (
               <div>
@@ -1045,28 +993,39 @@ export function SourceDetailPage() {
               </div>
             )}
           </div>
+
           {file && /\.(pdf|txt)$/i.test(file.name) && (
             <div className="flex items-start gap-2 bg-purple-50 border border-purple-200 rounded-xl p-3">
               <Brain className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-purple-700"><strong>AI extraction</strong> — Claude will read this document and extract records matching the schema. Takes 10–30 seconds.</p>
+              <p className="text-xs text-purple-700">
+                <strong>AI extraction</strong> — Gemini will read this document and extract records matching the schema. Takes 10–30 seconds.
+              </p>
             </div>
           )}
+          </>
+          )}
+
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" type="button" onClick={() => setShowUpload(false)} disabled={uploading}>Cancel</Button>
-            <Button type="submit" loading={uploading} disabled={!file}>
-              {uploading ? (file?.name.toLowerCase().endsWith('.zip') ? 'Processing ZIP…' : file && /\.(pdf|txt)$/i.test(file.name) ? 'AI extracting…' : 'Uploading…') : <><Upload className="w-4 h-4" /> Upload & Validate</>}
+            <Button variant="secondary" type="button" onClick={() => { setShowUpload(false); setMultiFiles([]); setMultiMode(false) }} disabled={uploading}>Cancel</Button>
+            <Button type="submit" loading={uploading} disabled={multiMode ? multiFiles.length === 0 : !file}>
+              {uploading
+                ? (multiMode ? `Uploading ${multiFiles.length} files…` : file?.name.toLowerCase().endsWith('.zip') ? 'Processing ZIP…' : file && /\.(pdf|txt)$/i.test(file.name) ? 'AI extracting…' : 'Uploading…')
+                : <><Upload className="w-4 h-4" /> Upload & Validate</>
+              }
             </Button>
           </div>
         </form>
       </Modal>
 
-      {/* ── Edit record modal ─────────────────────────────────────────────────── */}
+      {/* Edit record modal */}
       <Modal open={!!editRecord} onClose={() => setEditRecord(null)} title="Fix Record" size="md">
         {editRecord && (
           <div className="space-y-4">
             {!editRecord.is_schema_valid && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 space-y-1">
-                {editRecord.validation_errors.map((e: any, i: number) => (<p key={i} className="text-xs text-amber-700"><strong>{e.field}:</strong> {e.error}</p>))}
+                {editRecord.validation_errors.map((e: any, i: number) => (
+                  <p key={i} className="text-xs text-amber-700"><strong>{e.field}:</strong> {e.error}</p>
+                ))}
               </div>
             )}
             <div className="space-y-3 max-h-96 overflow-y-auto scrollbar-thin">
@@ -1082,88 +1041,81 @@ export function SourceDetailPage() {
         )}
       </Modal>
 
-      <ConfirmDialog open={deleteSourceConfirm} title="Delete Source"
+      <ConfirmDialog
+        open={deleteSourceConfirm}
+        title="Delete Source"
         description={`"${source.name}" and all its records will be permanently deleted. This cannot be undone.`}
-        confirmLabel="Delete Source" variant="danger" loading={deleting}
-        onConfirm={handleDeleteSource} onCancel={() => setDeleteSourceConfirm(false)} />
-      <ConfirmDialog open={!!deleteRecord} title="Delete Record"
+        confirmLabel="Delete Source"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDeleteSource}
+        onCancel={() => setDeleteSourceConfirm(false)}
+      />
+      <ConfirmDialog
+        open={!!deleteRecord}
+        title="Delete Record"
         description="This record will be permanently deleted from the source."
-        confirmLabel="Delete Record" variant="danger" loading={deleting}
-        onConfirm={handleDeleteRecord} onCancel={() => setDeleteRecord(null)} />
+        confirmLabel="Delete Record"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDeleteRecord}
+        onCancel={() => setDeleteRecord(null)}
+      />
 
-      {/* Claim Source modal */}
-      <Modal open={showClaimModal} onClose={() => setShowClaimModal(false)} title="Claim This Source" description="Assign yourself as the extractor and optionally pick a reviewer.">
+      {/* Edit Source modal */}
+      <Modal open={showEditSource} onClose={() => setShowEditSource(false)} title="Edit Source" description="Update the source name, description, or website URL.">
         <div className="space-y-4">
-          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10, padding: '12px 16px' }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: '#1e40af', margin: '0 0 4px' }}>You are claiming: {source?.name}</p>
-            <p style={{ fontSize: 12, color: '#3b82f6', margin: 0 }}>You will be set as the extractor. Pick a reviewer — they will approve your records.</p>
-          </div>
+          <Input label="Source Name" value={editSourceForm.name}
+            onChange={e => setEditSourceForm(f => ({ ...f, name: e.target.value }))} />
+          <Input label="Website URL" value={editSourceForm.website_url} placeholder="https://www.company.com"
+            onChange={e => setEditSourceForm(f => ({ ...f, website_url: e.target.value }))} />
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
-              Pick a Reviewer <span style={{ color: '#94a3b8', fontWeight: 400 }}>(recommended)</span>
-            </label>
-            <select value={claimReviewerId} onChange={e => setClaimReviewerId(e.target.value)}
-              style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none' }}>
-              <option value="">Leave unassigned (admin will pick later)</option>
-              {members.filter(m => m.id !== user?.id).map(m => (
-                <option key={m.id} value={m.id}>{m.full_name}</option>
-              ))}
-            </select>
-          </div>
-          <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10, padding: '10px 14px' }}>
-            <p style={{ fontSize: 12, color: '#dc2626', margin: 0 }}>⚠ Note: You will not be able to approve your own records. The reviewer you pick (or an admin) must approve them.</p>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Description</label>
+            <textarea value={editSourceForm.description} rows={3}
+              onChange={e => setEditSourceForm(f => ({ ...f, description: e.target.value }))}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              placeholder="Brief description of this source…" />
           </div>
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setShowClaimModal(false)}>Cancel</Button>
-            <Button loading={claiming} onClick={handleClaim} style={{ background: '#6366f1', border: 'none', color: '#fff' }}>
-              ✋ Claim Source
+            <Button variant="secondary" onClick={() => setShowEditSource(false)}>Cancel</Button>
+            <Button onClick={handleUpdateSource} disabled={!editSourceForm.name.trim()}>
+              <Save className="w-4 h-4" /> Save Changes
             </Button>
           </div>
         </div>
       </Modal>
 
-      {/* Edit Source modal */}
-      <Modal open={showEditSource} onClose={() => setShowEditSource(false)} title="Edit Source" description="Update the source name, description, or website URL.">
-        <div className="space-y-4">
-          <Input label="Source Name" value={editSourceForm.name} onChange={e => setEditSourceForm(f => ({ ...f, name: e.target.value }))} />
-          <Input label="Website URL" value={editSourceForm.website_url} placeholder="https://www.company.com" onChange={e => setEditSourceForm(f => ({ ...f, website_url: e.target.value }))} />
-          <div>
-            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Description</label>
-            <textarea value={editSourceForm.description} rows={3} onChange={e => setEditSourceForm(f => ({ ...f, description: e.target.value }))}
-              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500" placeholder="Brief description…" />
-          </div>
-          <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setShowEditSource(false)}>Cancel</Button>
-            <Button onClick={handleUpdateSource} disabled={!editSourceForm.name.trim()}><Save className="w-4 h-4" /> Save Changes</Button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Schema JSON modal */}
+      {/* Schema full JSON view modal */}
       <Modal open={showSchemaJson} onClose={() => setShowSchemaJson(false)} title={schemaDefinition?.name || 'Schema Definition'} size="lg">
         <div style={{ height: 500, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
           <textarea readOnly value={JSON.stringify(schemaDefinition, null, 2)}
             style={{ width: '100%', height: '100%', fontFamily: 'var(--font-mono)', fontSize: 12, padding: 16, border: 'none', outline: 'none', resize: 'none', background: '#0f172a', color: '#e2e8f0', lineHeight: 1.6 }} />
         </div>
         <div className="flex justify-end mt-4">
-          <Button variant="secondary" size="sm" onClick={() => { navigator.clipboard.writeText(JSON.stringify(schemaDefinition, null, 2)); toast.success('Copied') }}>Copy JSON</Button>
+          <Button variant="secondary" size="sm" onClick={() => {
+            navigator.clipboard.writeText(JSON.stringify(schemaDefinition, null, 2))
+            toast.success('Schema JSON copied to clipboard')
+          }}>Copy JSON</Button>
         </div>
       </Modal>
 
-      {/* Reset modal */}
-      <Modal open={showReset} onClose={() => !resetting && setShowReset(false)} title="Reset Source" description="Undo all extraction progress and start from scratch.">
+      {/* Reset Source modal */}
+      <Modal open={showReset} onClose={() => !resetting && setShowReset(false)} title="Reset Source" description="This will undo all extraction progress and allow the source to be re-extracted from scratch.">
         <div className="space-y-4">
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 text-sm text-orange-800">
             <p className="font-semibold mb-1">⚠ Admin Action — "{source?.name}"</p>
-            <p>Resets status to <strong>Not Started</strong>. Use this to recover from bad data.</p>
+            <p>This resets the source status back to <strong>Not Started</strong>. Use this to recover from bad test data or incorrect extractions.</p>
           </div>
           <label className="flex items-center gap-3 cursor-pointer p-3 bg-gray-50 rounded-xl border border-gray-200">
             <input type="checkbox" checked={resetClearRecords} onChange={e => setResetClearRecords(e.target.checked)} className="w-4 h-4 text-orange-500" />
             <div>
               <p className="text-sm font-semibold text-gray-800">Clear all records ({source?.total_records} records)</p>
-              <p className="text-xs text-gray-500">Recommended — removes incorrect records</p>
+              <p className="text-xs text-gray-500">Recommended — removes test/incorrect records so the extractor starts clean</p>
             </div>
           </label>
+          {!resetClearRecords && (
+            <p className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">Records will be kept but the status, review progress, and timestamps will be reset.</p>
+          )}
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setShowReset(false)} disabled={resetting}>Cancel</Button>
             <Button onClick={handleReset} loading={resetting} className="!bg-orange-500 hover:!bg-orange-600">
@@ -1173,15 +1125,16 @@ export function SourceDetailPage() {
         </div>
       </Modal>
 
+      {/* Full-screen JSON Record Viewer */}
+
     </div>
   )
 }
 
-function ReviewBadge({ status, submitted }: { status: string; submitted?: boolean }) {
-  if (submitted) return <Badge variant="green">🚀 Submitted</Badge>
-  const map: Record<string, { variant: 'green' | 'red' | 'gray' | 'amber'; label: string }> = {
+function ReviewBadge({ status }: { status: string }) {
+  const map: Record<string, { variant: 'green'|'red'|'gray'|'amber'; label: string }> = {
     pending: { variant: 'gray', label: 'Pending' },
-    approved: { variant: 'green', label: '✓ Approved' },
+    approved: { variant: 'green', label: 'Approved' },
     rejected: { variant: 'red', label: 'Sent back' },
   }
   const m = map[status] ?? map.pending
@@ -1191,16 +1144,24 @@ function ReviewBadge({ status, submitted }: { status: string; submitted?: boolea
 function NotesEditor({ source, canEdit, onSave }: { source: Source; canEdit: boolean; onSave: () => void }) {
   const [notes, setNotes] = useState(source.notes ?? '')
   const [saving, setSaving] = useState(false)
+
   const save = async () => {
     setSaving(true)
-    try { await sourcesApi.update(source.id, { notes }); toast.success('Notes saved'); onSave() }
-    catch { toast.error('Failed to save notes') }
-    finally { setSaving(false) }
+    try {
+      await sourcesApi.update(source.id, { notes })
+      toast.success('Notes saved')
+      onSave()
+    } catch {
+      toast.error('Failed to save notes')
+    } finally {
+      setSaving(false)
+    }
   }
+
   return (
     <div className="space-y-3">
       <Textarea rows={6} value={notes} onChange={e => setNotes(e.target.value)} disabled={!canEdit}
-        placeholder="Any assumptions made during extraction, known data gaps, or context for the next person…" />
+        placeholder="Any assumptions made during extraction, known data gaps, or context the next person should know…" />
       {canEdit && (
         <Button size="sm" onClick={save} loading={saving} disabled={notes === (source.notes ?? '')}>
           <Save className="w-3.5 h-3.5" /> Save Notes
