@@ -41,24 +41,7 @@ def submit_job(
 
     records = q.all()
     if not records:
-        # Check WHY — give a clear, accurate error
-        already_submitted = db.query(ExtractedRecord).filter(
-            ExtractedRecord.job_id == job_id,
-            ExtractedRecord.is_submitted == True,
-        ).count()
-        total_approved = db.query(ExtractedRecord).filter(
-            ExtractedRecord.job_id == job_id,
-            ExtractedRecord.review_status == ReviewStatus.APPROVED,
-        ).count()
-        if already_submitted > 0 and already_submitted >= total_approved:
-            raise HTTPException(
-                status_code=422,
-                detail=f"All {already_submitted} record(s) in this job have already been submitted. Use Unlock Records on the source if you need to re-submit."
-            )
-        raise HTTPException(
-            status_code=422,
-            detail="No approved records found. Approve records in the source before submitting."
-        )
+        raise HTTPException(status_code=422, detail="No approved records to submit")
 
     # Build payload
     output = {
@@ -134,7 +117,7 @@ def dashboard_stats(
     current_user: User = Depends(get_current_user),
 ):
     user_roles = {r.role.value for r in current_user.roles}
-    is_admin = "org_admin" in user_roles or "project_admin" in user_roles or "qa_lead" in user_roles
+    is_admin = "org_admin" in user_roles
 
     job_q = db.query(ExtractionJob)
     if not is_admin:
@@ -189,6 +172,149 @@ def dashboard_stats(
 
 # ─── Notifications ────────────────────────────────────────────────────────────
 
+
+@stats_router.get("/productivity")
+def productivity_stats(
+    project_id: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Per-person productivity metrics for admin dashboard.
+    Shows extraction speed, review speed, quality rates, and fast-review flags.
+    """
+    try:
+        from app.models.all_models import (
+            ExtractedRecord, ExtractionJob, Source, User as UserModel,
+            UserRoleAssignment, ReviewStatus,
+        )
+        from sqlalchemy import func, case
+        from datetime import datetime, timezone, timedelta
+
+        # Base query — filter by project if provided
+        job_q = db.query(ExtractionJob)
+        if project_id:
+            job_q = job_q.filter(ExtractionJob.project_id == project_id)
+        job_ids = [j.id for j in job_q.all()]
+
+        if not job_ids:
+            return {"extractors": [], "reviewers": [], "generated_at": datetime.now(timezone.utc).isoformat()}
+
+        records = db.query(ExtractedRecord).filter(
+            ExtractedRecord.job_id.in_(job_ids)
+        ).all()
+
+        # ── Per-extractor stats ───────────────────────────────────────────
+        extractor_map: dict = {}
+        for rec in records:
+            job = db.query(ExtractionJob).filter(ExtractionJob.id == rec.job_id).first()
+            if not job or not job.created_by: continue
+            uid = str(job.created_by)
+            if uid not in extractor_map:
+                user = db.query(UserModel).filter(UserModel.id == uid).first()
+                extractor_map[uid] = {
+                    "user_id": uid,
+                    "name":    user.full_name if user else uid[:8],
+                    "email":   user.email if user else "",
+                    "total_records":    0,
+                    "valid_records":    0,
+                    "invalid_records":  0,
+                    "approved_records": 0,
+                    "sources_worked":   set(),
+                }
+            e = extractor_map[uid]
+            e["total_records"]    += 1
+            e["sources_worked"].add(job.source_id)
+            if rec.is_schema_valid:    e["valid_records"]    += 1
+            else:                      e["invalid_records"]  += 1
+            if rec.review_status.value == "approved": e["approved_records"] += 1
+
+        extractors = []
+        for e in extractor_map.values():
+            t = e["total_records"]
+            extractors.append({
+                "user_id":        e["user_id"],
+                "name":           e["name"],
+                "email":          e["email"],
+                "total_records":  t,
+                "valid_records":  e["valid_records"],
+                "invalid_records": e["invalid_records"],
+                "approved_records": e["approved_records"],
+                "sources_worked": len(e["sources_worked"]),
+                "error_rate_pct": round((e["invalid_records"] / t * 100) if t else 0, 1),
+                "approval_rate_pct": round((e["approved_records"] / t * 100) if t else 0, 1),
+            })
+        extractors.sort(key=lambda x: -x["total_records"])
+
+        # ── Per-reviewer stats ────────────────────────────────────────────
+        reviewer_map: dict = {}
+        for rec in records:
+            if not rec.reviewed_by: continue
+            uid = str(rec.reviewed_by)
+            if uid not in reviewer_map:
+                user = db.query(UserModel).filter(UserModel.id == uid).first()
+                reviewer_map[uid] = {
+                    "user_id": uid,
+                    "name":    user.full_name if user else uid[:8],
+                    "email":   user.email if user else "",
+                    "total_reviewed":   0,
+                    "approved":         0,
+                    "rejected":         0,
+                    "fast_reviews":     0,
+                    "review_times_secs": [],
+                }
+            r = reviewer_map[uid]
+            r["total_reviewed"] += 1
+            if rec.review_status.value in ("approved", "pending_admin_review"):
+                r["approved"] += 1
+            elif rec.review_status.value == "rejected":
+                r["rejected"] += 1
+            # Fast review check
+            if rec.pipeline_warnings:
+                for w in rec.pipeline_warnings:
+                    if isinstance(w, dict) and w.get("type") == "fast_review" and w.get("reviewer") == reviewer_map[uid]["email"]:
+                        r["fast_reviews"] += 1
+            # Review time
+            if rec.review_started_at and rec.reviewed_at:
+                secs = int((rec.reviewed_at - rec.review_started_at).total_seconds())
+                if 0 < secs < 86400:  # sanity: under 24 hours
+                    r["review_times_secs"].append(secs)
+
+        reviewers = []
+        for r in reviewer_map.values():
+            t   = r["total_reviewed"]
+            avg = int(sum(r["review_times_secs"]) / len(r["review_times_secs"])) if r["review_times_secs"] else None
+            reviewers.append({
+                "user_id":          r["user_id"],
+                "name":             r["name"],
+                "email":            r["email"],
+                "total_reviewed":   t,
+                "approved":         r["approved"],
+                "rejected":         r["rejected"],
+                "fast_reviews":     r["fast_reviews"],
+                "avg_review_secs":  avg,
+                "avg_review_label": (
+                    f"{avg}s" if avg and avg < 60 else
+                    f"{avg//60}m {avg%60}s" if avg and avg < 3600 else
+                    f"{avg//3600}h {(avg%3600)//60}m" if avg else "—"
+                ),
+                "approval_rate_pct": round((r["approved"] / t * 100) if t else 0, 1),
+                "flagged": r["fast_reviews"] > 0,
+            })
+        reviewers.sort(key=lambda x: -x["total_reviewed"])
+
+        return {
+            "extractors":    extractors,
+            "reviewers":     reviewers,
+            "total_records": len(records),
+            "generated_at":  datetime.now(timezone.utc).isoformat(),
+        }
+
+    except Exception as exc:
+        import traceback, logging
+        logging.getLogger(__name__).error("productivity error: %s", traceback.format_exc())
+        return {"extractors": [], "reviewers": [], "error": str(exc)}
+
 @notifications_router.get("")
 def list_notifications(
     db: Session = Depends(get_db),
@@ -226,136 +352,87 @@ def sources_summary(
     current_user: User = Depends(get_current_user),
 ):
     """
-    Returns source counts + dashboard stats.
-    Wrapped in try/except so it never returns 500 — always returns a valid shape.
+    Returns source counts by status + recent activity for the dashboard.
+    Scoped by role: org_admins see everything, others see their accessible projects.
     """
-    try:
-        from app.models.all_models import (
-            Source, SourceStatus, ProjectMember, ExtractedRecord, ReviewStatus,
-        )
-        from datetime import datetime, timezone, timedelta
+    from app.models.all_models import Source, SourceStatus, ProjectMember
+    from sqlalchemy import func
 
-        user_roles = {r.role.value for r in current_user.roles}
-        is_admin = bool(user_roles & {"org_admin", "project_admin", "qa_lead"})
-        uid = str(current_user.id)
+    user_roles = {r.role.value for r in current_user.roles}
+    is_admin = "org_admin" in user_roles
 
-        q = db.query(Source)
-        if not is_admin:
-            accessible = [
-                m.project_id for m in
-                db.query(ProjectMember).filter(ProjectMember.user_id == uid).all()
-            ]
-            if not accessible:
-                return _empty_summary()
-            q = q.filter(Source.project_id.in_(accessible))
+    q = db.query(Source)
+    if not is_admin:
+        accessible = [m.project_id for m in db.query(ProjectMember).filter(ProjectMember.user_id == current_user.id).all()]
+        if not accessible:
+            return {"by_status": {}, "total": 0, "approved_this_week": 0, "recent": []}
+        q = q.filter(Source.project_id.in_(accessible))
 
-        sources = q.all()
-        total   = len(sources)
+    sources = q.all()
+    total = len(sources)
 
-        # Status counts
-        by_status: dict = {}
-        for s in sources:
-            k = s.status.value
-            by_status[k] = by_status.get(k, 0) + 1
+    by_status: dict[str, int] = {}
+    for s in sources:
+        key = s.status.value
+        by_status[key] = by_status.get(key, 0) + 1
 
-        # Approved this week
-        week_ago = datetime.now(timezone.utc) - timedelta(days=7)
-        approved_this_week = sum(
-            1 for s in sources
-            if s.status == SourceStatus.APPROVED
-            and s.approved_at and s.approved_at >= week_ago
-        )
+    from datetime import datetime, timezone, timedelta
+    week_ago = datetime.now(timezone.utc) - timedelta(days=7)
+    approved_this_week = sum(
+        1 for s in sources
+        if s.status == SourceStatus.APPROVED and s.approved_at and s.approved_at >= week_ago
+    )
 
-        # Helper to serialise a source
-        def _s(s: Source) -> dict:
-            tot  = s.total_records    or 0
-            appr = s.approved_records or 0
-            return {
-                "id": str(s.id), "name": s.name,
-                "project_id": str(s.project_id),
-                "status": s.status.value,
-                "total_records": tot,
-                "valid_records":   s.valid_records   or 0,
-                "invalid_records": s.invalid_records or 0,
-                "approved_records": appr,
-                "pending_records": max(0, tot - appr),
-                "updated_at": s.updated_at,
-                "assigned_extractor_id": str(s.assigned_extractor_id) if s.assigned_extractor_id else None,
-                "assigned_reviewer_id":  str(s.assigned_reviewer_id)  if s.assigned_reviewer_id  else None,
-            }
+    # My assigned sources (needs action)
+    my_extracting = [s for s in sources if s.assigned_extractor_id == current_user.id and s.status.value in ("extracting", "needs_fixes", "changes_requested")]
+    my_reviewing = [s for s in sources if s.assigned_reviewer_id == current_user.id and s.status.value in ("ready_for_review", "in_review")]
 
-        # My extraction work
-        my_extracting = [_s(s) for s in sources if str(s.assigned_extractor_id) == uid]
-
-        # My reviewer queue (all assigned, not yet approved)
-        my_reviewing = sorted(
-            [_s(s) for s in sources
-             if str(s.assigned_reviewer_id) == uid
-             and s.status.value != "not_started"],
-            key=lambda s: s["updated_at"] or "", reverse=True
-        )
-
-        # Available to claim (no extractor, not started)
-        available = [_s(s) for s in sources
-                     if not s.assigned_extractor_id
-                     and s.status.value == "not_started"][:20]
-
-        # Reviewer contribution — records personally approved/rejected
-        my_approved_records = db.query(ExtractedRecord).filter(
-            ExtractedRecord.reviewed_by == uid,
-            ExtractedRecord.review_status == ReviewStatus.APPROVED,
-        ).count()
-
-        my_approved_this_week = db.query(ExtractedRecord).filter(
-            ExtractedRecord.reviewed_by == uid,
-            ExtractedRecord.review_status == ReviewStatus.APPROVED,
-            ExtractedRecord.reviewed_at >= week_ago,
-        ).count()
-
-        my_pending_total = sum(s["pending_records"] for s in my_reviewing)
-
-        # Extractor contribution
-        ext_sources = [s for s in sources if str(s.assigned_extractor_id) == uid]
-        total_extracted      = sum(s.total_records    or 0 for s in ext_sources)
-        total_ext_approved   = sum(s.approved_records or 0 for s in ext_sources)
-        total_ext_errors     = sum(s.invalid_records  or 0 for s in ext_sources)
-
-        # Recent activity
-        recent = sorted(sources, key=lambda s: s.updated_at or s.created_at, reverse=True)[:10]
-
+    def _src(s: Source) -> dict:
         return {
-            "by_status":            by_status,
-            "total":                total,
-            "approved_this_week":   approved_this_week,
-            "my_extracting":        my_extracting,
-            "my_reviewing":         my_reviewing,
-            "available":            available,
-            "my_approved_records":  my_approved_records,
-            "my_approved_this_week": my_approved_this_week,
-            "my_pending_total":     my_pending_total,
-            "total_extracted":      total_extracted,
-            "total_ext_approved":   total_ext_approved,
-            "total_ext_errors":     total_ext_errors,
-            "total_ext_sources":    len(ext_sources),
-            "recent":               [_s(s) for s in recent],
+            "id": s.id, "name": s.name, "project_id": s.project_id,
+            "status": s.status.value, "total_records": s.total_records,
+            "valid_records": s.valid_records, "invalid_records": s.invalid_records,
+            "approved_records": s.approved_records, "updated_at": s.updated_at,
         }
 
-    except Exception as exc:
-        # Never let the dashboard 500 — log and return safe empty shape
-        import traceback, logging
-        logging.getLogger(__name__).error("sources-summary error: %s", traceback.format_exc())
-        return _empty_summary()
+    # Recent activity = last 10 updated sources
+    recent = sorted(sources, key=lambda s: s.updated_at or s.created_at, reverse=True)[:10]
 
+    # Per-project breakdown for admin dashboard
+    def _per_project(srcs):
+        from collections import defaultdict
+        pp = {}
+        for s in srcs:
+            pid = str(s.project_id)
+            if pid not in pp:
+                pp[pid] = {"project_id": pid, "total": 0, "approved": 0,
+                           "in_progress": 0, "not_started": 0}
+            pp[pid]["total"] += 1
+            st = s.status.value if hasattr(s.status, "value") else str(s.status)
+            if st == "approved":      pp[pid]["approved"]     += 1
+            elif st == "not_started": pp[pid]["not_started"]  += 1
+            else:                     pp[pid]["in_progress"]  += 1
+        return list(pp.values())
 
-def _empty_summary() -> dict:
+    # Pending admin review — records where reviewer approved but admin hasn't yet
+    from app.models.all_models import ExtractedRecord, ExtractionJob
+    pending_admin_sources = []
+    for s in sources:
+        has_pending = db.query(ExtractedRecord)            .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)            .filter(ExtractionJob.source_id == s.id,
+                    ExtractedRecord.review_status == "pending_admin_review")            .first()
+        if has_pending:
+            pending_admin_sources.append(_src(s))
+
     return {
-        "by_status": {}, "total": 0, "approved_this_week": 0,
-        "my_extracting": [], "my_reviewing": [], "available": [],
-        "my_approved_records": 0, "my_approved_this_week": 0, "my_pending_total": 0,
-        "total_extracted": 0, "total_ext_approved": 0, "total_ext_errors": 0,
-        "total_ext_sources": 0, "recent": [],
+        "by_status": by_status,
+        "total": total,
+        "approved_this_week": approved_this_week,
+        "my_extracting": [_src(s) for s in my_extracting[:5]],
+        "my_reviewing":  [_src(s) for s in my_reviewing[:5]],
+        "recent":        [_src(s) for s in recent],
+        "per_project":   _per_project(sources),
+        "pending_admin_review": pending_admin_sources[:20],
     }
-
 
 
 @notifications_router.post("/read-all")

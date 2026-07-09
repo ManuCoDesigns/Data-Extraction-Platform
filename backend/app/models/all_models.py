@@ -78,14 +78,13 @@ class ReviewStatus(str, enum.Enum):
     SKIPPED = "skipped"
     QUARANTINED = "quarantined"
     ESCALATED = "escalated"
+    PENDING_ADMIN_REVIEW = "pending_admin_review"
 
 
 class LLMVerdict(str, enum.Enum):
-    PASS_    = "PASS"
-    REVIEW   = "REVIEW"
-    REJECT   = "REJECT"
-    SKIPPED  = "SKIPPED"  # LLM check was skipped for this record
-    FLAGGED  = "FLAGGED"  # extra safety — DB may have other historic values
+    PASS_ = "PASS"
+    REVIEW = "REVIEW"
+    REJECT = "REJECT"
 
 
 class AuditAction(str, enum.Enum):
@@ -120,6 +119,10 @@ class AuditAction(str, enum.Enum):
     SOURCE_DATA_UPLOADED = "source_data_uploaded"
     SOURCE_RECORD_FIXED = "source_record_fixed"
     SOURCE_APPROVED = "source_approved"
+    RECORD_ADMIN_REVIEWED = "record_admin_reviewed"
+    RECORD_RETURNED_FOR_CORRECTION = "record_returned_for_correction"
+    RECORD_REVISION_STARTED = "record_revision_started"
+    RECORD_SENT_TO_ADMIN = "record_sent_to_admin"
 
 
 class SourceStatus(str, enum.Enum):
@@ -445,6 +448,19 @@ class ExtractedRecord(Base):
     web_check_summary = Column(Text, nullable=True)
     extracted_fields = Column(JSON, nullable=False, default=dict)
     raw_text = Column(Text, nullable=False)
+    # Admin final review
+    admin_review_note       = Column(Text, nullable=True)
+    admin_reviewed_by       = Column(String(36), ForeignKey("users.id"), nullable=True)
+    admin_reviewed_at       = Column(DateTime(timezone=True), nullable=True)
+    # Revision / correction cycle tracking
+    revision_count          = Column(Integer, default=0, server_default="0", nullable=False)
+    correction_count        = Column(Integer, default=0, server_default="0", nullable=False)
+    # Time tracking — when each stage started
+    extraction_started_at   = Column(DateTime(timezone=True), nullable=True)
+    review_started_at       = Column(DateTime(timezone=True), nullable=True)
+    admin_review_started_at = Column(DateTime(timezone=True), nullable=True)
+    # Per-field reviewer comments {field_name: [{comment, user, ts}]}
+    reviewer_field_comments = Column(JSON, default=dict, server_default="{}")
     is_submitted = Column(Boolean, default=False)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
     canonical_name = Column(String(512), nullable=True, index=True)
@@ -452,7 +468,8 @@ class ExtractedRecord(Base):
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
     job = relationship("ExtractionJob", back_populates="records")
-    reviewer = relationship("User", foreign_keys=[reviewed_by])
+    reviewer       = relationship("User", foreign_keys=[reviewed_by])
+    admin_reviewer = relationship("User", foreign_keys=[admin_reviewed_by])
     llm_reviews = relationship("LLMCallLog", back_populates="record")
     validation_results = relationship("ValidationResult", back_populates="record")
 
@@ -468,7 +485,7 @@ class LLMCallLog(Base):
 
     id = Column(String(36), primary_key=True, default=new_uuid)
     record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="CASCADE"), nullable=False)
-    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=False)
     model = Column(String(100), nullable=False)
     input_tokens = Column(Integer, nullable=True)
     output_tokens = Column(Integer, nullable=True)
@@ -504,7 +521,7 @@ class SubmissionBatch(Base):
     __tablename__ = "submission_batches"
 
     id = Column(String(36), primary_key=True, default=new_uuid)
-    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=False)
     submitted_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     destination = Column(String(100), nullable=False)
     record_count = Column(Integer, nullable=False)
@@ -544,7 +561,7 @@ class AuditLog(Base):
     timestamp = Column(DateTime(timezone=True), default=now_utc, nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=True)
-    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="SET NULL"), nullable=True)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=True)
     record_id = Column(String(36), ForeignKey("extracted_records.id"), nullable=True)
     action = Column(SAEnum(AuditAction), nullable=False)
     before_value = Column(JSON, nullable=True)

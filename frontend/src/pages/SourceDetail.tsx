@@ -41,12 +41,13 @@ export function SourceDetailPage() {
   const [showEditSource, setShowEditSource] = useState(false)
   const [editSourceForm, setEditSourceForm] = useState({ name: '', description: '', website_url: '' })
   const [showSchemaJson, setShowSchemaJson] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [multiMode, setMultiMode]   = useState(false)
-  const [multiFiles, setMultiFiles] = useState<File[]>([])
+  const [uploading, setUploading]       = useState(false)
+  const [adminReviewing, setAdminReviewing] = useState(false)
+  const [showTimeline, setShowTimeline]     = useState<string|null>(null)
+  const [timeline, setTimeline]             = useState<any>(null)
+  const [fieldComments, setFieldComments]   = useState<Record<string,string>>({})
   const [file, setFile] = useState<File | null>(null)
-  const fileRef  = useRef<HTMLInputElement>(null)
-  const multiRef = useRef<HTMLInputElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const [showAssign, setShowAssign] = useState(false)
   const [editRecord, setEditRecord] = useState<any | null>(null)
   const [editFields, setEditFields] = useState<Record<string, string>>({})
@@ -90,7 +91,6 @@ export function SourceDetailPage() {
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (multiMode) { handleUploadMulti(e); return }
     if (!file || !sourceId) return
     setUploading(true)
     try {
@@ -111,25 +111,29 @@ export function SourceDetailPage() {
     }
   }
 
-  const handleUploadMulti = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!multiFiles.length || !sourceId) return
-    setUploading(true)
+  const handleAdminReview = async (recordId: string, action: 'approve'|'return', note: string) => {
+    if (!sourceId) return
+    setAdminReviewing(true)
     try {
-      const summary = await sourcesApi.uploadMulti(sourceId, multiFiles)
-      toast.success(
-        `Uploaded ${multiFiles.length} file${multiFiles.length !== 1 ? 's' : ''}: ` +
-        `${summary.valid_records ?? summary.valid_rows ?? 0} valid, ` +
-        `${summary.invalid_records ?? summary.invalid_rows ?? 0} need fixes`
-      )
-      setShowUpload(false)
-      setMultiFiles([])
-      setMultiMode(false)
+      await sourcesApi.adminReview(sourceId, recordId, {action, note, field_comments: fieldComments})
+      toast.success(action === 'approve' ? '✓ Record fully approved' : 'Record returned for correction')
+      setFieldComments({})
       load()
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Multi-upload failed')
+      toast.error(err?.response?.data?.detail || 'Admin review failed')
     } finally {
-      setUploading(false)
+      setAdminReviewing(false)
+    }
+  }
+
+  const loadTimeline = async (recordId: string) => {
+    if (!sourceId) return
+    setShowTimeline(recordId)
+    try {
+      const t = await sourcesApi.getTimeline(sourceId, recordId)
+      setTimeline(t)
+    } catch {
+      setTimeline(null)
     }
   }
 
@@ -786,16 +790,51 @@ export function SourceDetailPage() {
                           </td>
                           <td className="px-4 py-3">
                             <ReviewBadge status={r.review_status} />
+                            {r.review_status === 'pending_admin_review' && (
+                              <span style={{fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:20,
+                                background:'#fef2f2',color:'#dc2626',border:'1px solid #fecaca',marginLeft:4}}>
+                                ⚡ Needs admin
+                              </span>
+                            )}
+                            {r.correction_count > 0 && (
+                              <span style={{fontSize:10,fontWeight:700,padding:'2px 7px',borderRadius:20,
+                                background:'#fffbeb',color:'#d97706',border:'1px solid #fde68a',marginLeft:4}}>
+                                ↩ {r.correction_count}x corrected
+                              </span>
+                            )}
+                            {r.revision_count > 0 && (
+                              <span style={{fontSize:10,color:'#94a3b8',marginLeft:4}}>
+                                rev {r.revision_count}
+                              </span>
+                            )}
                             {r.review_note && <p className="text-xs text-gray-400 mt-0.5 max-w-[160px] truncate">"{r.review_note}"</p>}
+                            {/* Field comments from reviewer */}
+                            {r.reviewer_field_comments && Object.keys(r.reviewer_field_comments).length > 0 && (
+                              <div style={{marginTop:4}}>
+                                {Object.entries(r.reviewer_field_comments as Record<string,any[]>).slice(0,2).map(([field,comments])=>(
+                                  <div key={field} style={{fontSize:10,color:'#7c3aed',background:'#faf5ff',
+                                    borderRadius:6,padding:'2px 6px',marginTop:2,display:'inline-block',maxWidth:160,
+                                    overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                                    💬 {field === '_general' ? 'General' : field}: {(comments[comments.length-1] as any)?.comment}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center gap-2 justify-end">
+                              <button
+                                onClick={e=>{e.stopPropagation();loadTimeline(r.id)}}
+                                style={{fontSize:10,padding:'3px 8px',borderRadius:8,background:'#f8fafc',
+                                  color:'#94a3b8',border:'1px solid #e2e8f0',cursor:'pointer'}}>
+                                📋 History
+                              </button>
                               <span style={{
                                 fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 20,
                                 background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe',
                                 whiteSpace: 'nowrap',
                               }}>Open →</span>
-                              {isExtractor && (
+                              {(isExtractor || isAdmin) && (
                                 <button onClick={e => { e.stopPropagation(); setDeleteRecord(r) }} className="p-1 text-gray-300 hover:text-red-500 transition">
                                   <Trash2 className="w-3 h-3" />
                                 </button>
@@ -877,90 +916,6 @@ export function SourceDetailPage() {
             </div>
           </div>
 
-          {/* Mode toggle */}
-          <div className="flex rounded-lg border border-gray-200 overflow-hidden text-xs font-medium">
-            <button type="button"
-              className={cn('flex-1 py-2 transition', !multiMode ? 'bg-brand-600 text-white' : 'text-gray-500 hover:bg-gray-50')}
-              onClick={() => { setMultiMode(false); setMultiFiles([]) }}>
-              Single file
-            </button>
-            <button type="button"
-              className={cn('flex-1 py-2 transition', multiMode ? 'bg-brand-600 text-white' : 'text-gray-500 hover:bg-gray-50')}
-              onClick={() => { setMultiMode(true); setFile(null) }}>
-              Multiple files
-            </button>
-          </div>
-
-          {multiMode ? (
-            <>
-              {/* Multi-file dropzone */}
-              <div
-                onClick={() => !uploading && multiRef.current?.click()}
-                onDragOver={e => e.preventDefault()}
-                onDrop={e => {
-                  e.preventDefault()
-                  const dropped = Array.from(e.dataTransfer.files).filter(f =>
-                    /\.(json|csv|xlsx|xls)$/i.test(f.name))
-                  setMultiFiles(prev => {
-                    const names = new Set(prev.map(f => f.name))
-                    return [...prev, ...dropped.filter(f => !names.has(f.name))]
-                  })
-                }}
-                className={cn(
-                  'border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition',
-                  multiFiles.length ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
-                  uploading && 'opacity-60 cursor-not-allowed'
-                )}>
-                <input
-                  ref={multiRef}
-                  type="file"
-                  accept=".json,.csv,.xlsx,.xls"
-                  multiple
-                  className="hidden"
-                  onChange={e => {
-                    const picked = Array.from(e.target.files ?? [])
-                    setMultiFiles(prev => {
-                      const names = new Set(prev.map(f => f.name))
-                      return [...prev, ...picked.filter(f => !names.has(f.name))]
-                    })
-                    e.target.value = ''
-                  }}
-                />
-                <Upload className="w-6 h-6 mx-auto text-gray-400 mb-2" />
-                <p className="text-sm text-gray-600 font-medium">Drop multiple files or click to browse</p>
-                <p className="text-xs text-gray-400 mt-1">JSON · CSV · Excel — each file's records are merged into one batch</p>
-              </div>
-
-              {/* Selected files list */}
-              {multiFiles.length > 0 && (
-                <div className="space-y-1.5 max-h-48 overflow-y-auto">
-                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
-                    {multiFiles.length} file{multiFiles.length !== 1 ? 's' : ''} selected
-                  </p>
-                  {multiFiles.map((f, i) => (
-                    <div key={f.name} className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 rounded-lg border border-gray-100 text-xs">
-                      <span className="text-sm">
-                        {/\.json$/i.test(f.name) ? '📄' : /\.xlsx?$/i.test(f.name) ? '📊' : '📋'}
-                      </span>
-                      <span className="flex-1 font-medium text-gray-700 truncate">{f.name}</span>
-                      <span className="text-gray-400 shrink-0">{(f.size / 1024).toFixed(1)} KB</span>
-                      <button type="button"
-                        className="text-gray-300 hover:text-red-400 transition shrink-0 font-bold"
-                        onClick={() => setMultiFiles(prev => prev.filter((_, idx) => idx !== i))}>
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                  <button type="button"
-                    className="text-xs text-gray-400 hover:text-red-400 transition"
-                    onClick={() => setMultiFiles([])}>
-                    Clear all
-                  </button>
-                </div>
-              )}
-            </>
-          ) : (
-          <>
           {/* Drop zone */}
           <div
             onClick={() => !uploading && fileRef.current?.click()}
@@ -998,18 +953,16 @@ export function SourceDetailPage() {
             <div className="flex items-start gap-2 bg-purple-50 border border-purple-200 rounded-xl p-3">
               <Brain className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
               <p className="text-xs text-purple-700">
-                <strong>AI extraction</strong> — Gemini will read this document and extract records matching the schema. Takes 10–30 seconds.
+                <strong>AI extraction</strong> — Claude will read this document and extract records matching the schema. Takes 10–30 seconds.
               </p>
             </div>
           )}
-          </>
-          )}
 
           <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" type="button" onClick={() => { setShowUpload(false); setMultiFiles([]); setMultiMode(false) }} disabled={uploading}>Cancel</Button>
-            <Button type="submit" loading={uploading} disabled={multiMode ? multiFiles.length === 0 : !file}>
+            <Button variant="secondary" type="button" onClick={() => setShowUpload(false)} disabled={uploading}>Cancel</Button>
+            <Button type="submit" loading={uploading} disabled={!file}>
               {uploading
-                ? (multiMode ? `Uploading ${multiFiles.length} files…` : file?.name.toLowerCase().endsWith('.zip') ? 'Processing ZIP…' : file && /\.(pdf|txt)$/i.test(file.name) ? 'AI extracting…' : 'Uploading…')
+                ? (file?.name.toLowerCase().endsWith('.zip') ? 'Processing ZIP…' : file && /\.(pdf|txt)$/i.test(file.name) ? 'AI extracting…' : 'Uploading…')
                 : <><Upload className="w-4 h-4" /> Upload & Validate</>
               }
             </Button>
@@ -1128,6 +1081,126 @@ export function SourceDetailPage() {
       {/* Full-screen JSON Record Viewer */}
 
     </div>
+
+    {/* ── Timeline Modal ──────────────────────────────────────────────── */}
+    {showTimeline && createPortal(
+      <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',display:'flex',
+        alignItems:'center',justifyContent:'center',zIndex:200,padding:16}}
+        onClick={()=>{setShowTimeline(null);setTimeline(null)}}>
+        <div style={{background:'#fff',borderRadius:16,padding:24,maxWidth:580,width:'100%',
+          maxHeight:'80vh',overflowY:'auto'}} onClick={e=>e.stopPropagation()}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+            <div>
+              <h3 style={{fontSize:16,fontWeight:700,color:'#0f172a',margin:0}}>Record Timeline</h3>
+              {timeline && (
+                <p style={{fontSize:12,color:'#94a3b8',margin:'3px 0 0'}}>
+                  {timeline.revision_count} revision{timeline.revision_count!==1?'s':''} · {timeline.correction_count} correction{timeline.correction_count!==1?'s':''}
+                </p>
+              )}
+            </div>
+            <button onClick={()=>{setShowTimeline(null);setTimeline(null)}}
+              style={{background:'none',border:'none',cursor:'pointer',fontSize:20,color:'#94a3b8'}}>×</button>
+          </div>
+          {!timeline
+            ? <div style={{textAlign:'center',padding:40,color:'#94a3b8'}}>Loading…</div>
+            : <div>
+                {/* Status badges */}
+                <div style={{display:'flex',gap:8,marginBottom:16,flexWrap:'wrap'}}>
+                  {[
+                    {label:'Current', value:timeline.current_status, color:'#2563eb'},
+                    {label:'Revisions', value:timeline.revision_count, color:'#7c3aed'},
+                    {label:'Corrections', value:timeline.correction_count, color:'#dc2626'},
+                  ].map(({label,value,color})=>(
+                    <div key={label} style={{background:color+'15',border:`1px solid ${color}30`,
+                      borderRadius:10,padding:'8px 12px',textAlign:'center'}}>
+                      <p style={{fontSize:18,fontWeight:800,color,margin:0}}>{value}</p>
+                      <p style={{fontSize:11,color:'#94a3b8',margin:0}}>{label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Timeline events */}
+                <div style={{position:'relative'}}>
+                  <div style={{position:'absolute',left:15,top:0,bottom:0,width:2,background:'#e2e8f0'}}/>
+                  {(timeline.events || []).map((ev:any,i:number)=>(
+                    <div key={i} style={{display:'flex',gap:12,marginBottom:14,position:'relative'}}>
+                      <div style={{width:32,height:32,borderRadius:'50%',background:'#fff',
+                        border:'2px solid #e2e8f0',flexShrink:0,display:'flex',alignItems:'center',
+                        justifyContent:'center',fontSize:12,zIndex:1}}>
+                        {ev.action.includes('approved')?'✓':ev.action.includes('returned')||ev.action.includes('rejected')?'↩':'→'}
+                      </div>
+                      <div style={{flex:1,paddingTop:4}}>
+                        <p style={{fontSize:13,fontWeight:600,color:'#1e293b',margin:0}}>
+                          {ev.action.replace(/_/g,' ')}
+                        </p>
+                        <div style={{display:'flex',gap:8,marginTop:2}}>
+                          <span style={{fontSize:11,color:'#94a3b8'}}>
+                            {ev.timestamp ? new Date(ev.timestamp).toLocaleString() : '—'}
+                          </span>
+                          {ev.seconds_since_previous != null && (
+                            <span style={{fontSize:11,color:'#7c3aed',fontWeight:600}}>
+                              ⏱ {ev.seconds_since_previous < 60
+                                ? `${ev.seconds_since_previous}s`
+                                : ev.seconds_since_previous < 3600
+                                  ? `${Math.round(ev.seconds_since_previous/60)}m`
+                                  : `${Math.round(ev.seconds_since_previous/3600)}h`}
+                            </span>
+                          )}
+                        </div>
+                        {ev.after_value?.note && (
+                          <p style={{fontSize:11,color:'#64748b',marginTop:3,
+                            background:'#f8fafc',borderRadius:6,padding:'4px 8px'}}>
+                            💬 "{ev.after_value.note}"
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {(timeline.events||[]).length === 0 && (
+                    <p style={{fontSize:13,color:'#94a3b8',textAlign:'center',padding:'20px 0'}}>No events recorded yet</p>
+                  )}
+                </div>
+
+                {/* Field comments */}
+                {timeline.reviewer_field_comments && Object.keys(timeline.reviewer_field_comments).length > 0 && (
+                  <div style={{marginTop:16,borderTop:'1px solid #f1f5f9',paddingTop:16}}>
+                    <p style={{fontSize:13,fontWeight:700,color:'#0f172a',marginBottom:10}}>Field Comments</p>
+                    {Object.entries(timeline.reviewer_field_comments as Record<string,any[]>).map(([field,comments])=>(
+                      <div key={field} style={{marginBottom:12}}>
+                        <p style={{fontSize:11,fontWeight:700,color:'#64748b',textTransform:'uppercase',
+                          letterSpacing:'.05em',marginBottom:6}}>
+                          {field === '_general' ? 'General Notes' : field}
+                        </p>
+                        {comments.map((cm:any,i:number)=>(
+                          <div key={i} style={{background:cm.type==='correction'?'#fef2f2':'#f0fdf4',
+                            border:`1px solid ${cm.type==='correction'?'#fecaca':'#bbf7d0'}`,
+                            borderRadius:10,padding:'8px 12px',marginBottom:6}}>
+                            <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+                              <span style={{fontSize:10,fontWeight:700,
+                                color:cm.role==='admin'?'#dc2626':cm.role==='reviewer'?'#7c3aed':'#2563eb',
+                                background:cm.role==='admin'?'#fef2f2':cm.role==='reviewer'?'#faf5ff':'#eff6ff',
+                                padding:'1px 6px',borderRadius:20}}>
+                                {cm.role || 'reviewer'}
+                              </span>
+                              <span style={{fontSize:11,color:'#94a3b8'}}>{cm.user}</span>
+                              <span style={{fontSize:11,color:'#94a3b8',marginLeft:'auto'}}>
+                                {cm.ts ? new Date(cm.ts).toLocaleString() : ''}
+                              </span>
+                            </div>
+                            <p style={{fontSize:13,color:'#1e293b',margin:0}}>{cm.comment}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+          }
+        </div>
+      </div>,
+      document.body
+    )}
+  </div>
   )
 }
 

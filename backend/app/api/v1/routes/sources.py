@@ -872,7 +872,39 @@ def review_source_record(
     if payload.action not in ("approve", "reject"):
         raise HTTPException(status_code=422, detail="action must be 'approve' or 'reject'")
 
-    record.review_status = ReviewStatus.APPROVED if payload.action == "approve" else ReviewStatus.REJECTED
+    from datetime import datetime, timezone as _tz
+    now = datetime.now(_tz.utc)
+
+    # Flag suspiciously fast reviews (< 90 seconds) for admin investigation
+    review_seconds = None
+    if record.review_started_at:
+        review_seconds = int((now - record.review_started_at).total_seconds())
+        if review_seconds < 90:
+            warnings = list(record.pipeline_warnings or [])
+            warnings.append({
+                "type": "fast_review",
+                "seconds": review_seconds,
+                "reviewer": current_user.email,
+                "ts": now.isoformat(),
+                "threshold": 90,
+            })
+            record.pipeline_warnings = warnings
+
+    if payload.action == "approve":
+        record.review_status  = ReviewStatus.PENDING_ADMIN_REVIEW
+        record.revision_count = (record.revision_count or 0) + 1
+        record.admin_review_started_at = now
+        fc = record.reviewer_field_comments or {}
+        if payload.note:
+            fc.setdefault("_general",[]).append({"comment":payload.note,"user":current_user.email,"role":"reviewer","ts":now.isoformat()})
+            record.reviewer_field_comments = fc
+    else:
+        record.review_status    = ReviewStatus.REJECTED
+        record.correction_count = (record.correction_count or 0) + 1
+        fc = record.reviewer_field_comments or {}
+        if payload.note:
+            fc.setdefault("_general",[]).append({"comment":payload.note,"user":current_user.email,"role":"reviewer","type":"rejection","ts":now.isoformat()})
+            record.reviewer_field_comments = fc
     record.review_note = payload.note
     record.reviewed_by = current_user.id
     record.reviewed_at = datetime.now(timezone.utc)
@@ -1075,6 +1107,132 @@ async def upload_multi_to_source(
         files_processed=files_ok,
         file_breakdown=[{"filename": e, "error": e} for e in errors],
     )
+
+
+# ─── Admin Final Review ──────────────────────────────────────────────────────
+
+@router.post("/{source_id}/records/{record_id}/admin-review")
+def admin_review_record(
+    source_id: str, record_id: str,
+    payload: dict,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Admin does the final sign-off on a record.
+    - action = "approve" -> record moves to APPROVED (fully complete)
+    - action = "return"  -> record goes back to PENDING (returned for correction)
+    Increments correction_count when returning.
+    """
+    source = _get_source_or_404(source_id, db)
+    if not _is_org_admin(current_user):
+        user_roles = _user_roles(current_user)
+        if "project_admin" not in user_roles and "qa_lead" not in user_roles:
+            raise HTTPException(status_code=403, detail="Only admins can do final review")
+
+    record = db.query(ExtractedRecord).filter(ExtractedRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    action = payload.get("action", "approve")
+    note   = payload.get("note", "")
+    field_comments = payload.get("field_comments", {})
+
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+
+    if action == "approve":
+        record.review_status       = ReviewStatus.APPROVED
+        record.admin_reviewed_by   = current_user.id
+        record.admin_reviewed_at   = now
+        record.admin_review_note   = note
+        if field_comments:
+            existing = record.reviewer_field_comments or {}
+            for field, comment in field_comments.items():
+                existing.setdefault(field, []).append({
+                    "comment": comment, "user": current_user.email,
+                    "role": "admin", "ts": now.isoformat()
+                })
+            record.reviewer_field_comments = existing
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id,
+            record_id=record_id,
+            action=AuditAction.RECORD_ADMIN_REVIEWED,
+            after_value={"action": "approved", "note": note},
+        ))
+    else:  # return for correction
+        record.review_status    = ReviewStatus.PENDING
+        record.correction_count = (record.correction_count or 0) + 1
+        record.admin_review_note = note
+        record.extraction_started_at = now  # reset extraction timer
+        if field_comments:
+            existing = record.reviewer_field_comments or {}
+            for field, comment in field_comments.items():
+                existing.setdefault(field, []).append({
+                    "comment": comment, "user": current_user.email,
+                    "role": "admin", "ts": now.isoformat(), "type": "correction"
+                })
+            record.reviewer_field_comments = existing
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id,
+            record_id=record_id,
+            action=AuditAction.RECORD_RETURNED_FOR_CORRECTION,
+            after_value={"note": note, "correction_count": record.correction_count},
+        ))
+
+    db.commit()
+    return {"status": "ok", "record_id": record_id, "action": action,
+            "correction_count": record.correction_count or 0}
+
+
+# ─── Record Timeline ──────────────────────────────────────────────────────────
+
+@router.get("/{source_id}/records/{record_id}/timeline")
+def record_timeline(
+    source_id: str, record_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the full audit history for a record, with time-spent calculations.
+    """
+    source = _get_source_or_404(source_id, db)
+    record = db.query(ExtractedRecord).filter(ExtractedRecord.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    logs = (db.query(AuditLog)
+        .filter(AuditLog.record_id == record_id)
+        .order_by(AuditLog.timestamp.asc())
+        .all())
+
+    # Calculate time between events
+    events = []
+    prev_ts = record.created_at
+    for log in logs:
+        delta_secs = None
+        if prev_ts and log.timestamp:
+            delta_secs = int((log.timestamp - prev_ts).total_seconds())
+        events.append({
+            "action":     log.action.value,
+            "user_id":    log.user_id,
+            "timestamp":  log.timestamp.isoformat() if log.timestamp else None,
+            "seconds_since_previous": delta_secs,
+            "after_value": log.after_value,
+        })
+        prev_ts = log.timestamp
+
+    return {
+        "record_id":       record_id,
+        "current_status":  record.review_status.value,
+        "revision_count":  record.revision_count  or 0,
+        "correction_count": record.correction_count or 0,
+        "created_at":      record.created_at.isoformat() if record.created_at else None,
+        "reviewed_at":     record.reviewed_at.isoformat() if record.reviewed_at else None,
+        "admin_reviewed_at": record.admin_reviewed_at.isoformat() if record.admin_reviewed_at else None,
+        "reviewer_field_comments": record.reviewer_field_comments or {},
+        "events":          events,
+    }
 
 
 # ─── Export package ──────────────────────────────────────────────────────────
