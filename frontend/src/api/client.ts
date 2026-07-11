@@ -125,6 +125,8 @@ export const projectsApi = {
     a.click()
     URL.revokeObjectURL(url)
   },
+  exportPreview: (projectId: string) =>
+    api.get(`/projects/${projectId}/export-preview`).then(r => r.data),
   exportPackage: async (projectId: string, projectName = 'project') => {
     const r = await api.get(`/projects/${projectId}/export-package`, { responseType: 'blob' })
     const url = URL.createObjectURL(new Blob([r.data], { type: 'application/zip' }))
