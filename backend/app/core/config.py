@@ -5,14 +5,14 @@ import json
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "Xtrium DataOps Platform"
+    APP_NAME: str = "Data Extraction Platform"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
     SECRET_KEY: str = "change-me-in-production-use-32-char-min"
     ENVIRONMENT: str = "development"
 
     # Database
-    DATABASE_URL: str = "sqlite:///./xtrium_dev.db"
+    DATABASE_URL: str = "sqlite:///./data_extraction_dev.db"
 
     # Redis / Celery
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -31,14 +31,14 @@ class Settings(BaseSettings):
     # Storage
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_KEY: Optional[str] = None
-    STORAGE_BUCKET: str = "xtrium-uploads"
+    STORAGE_BUCKET: str = "data-extraction-uploads"
     STORAGE_PROVIDER: str = "local"
 
     # S3-compatible (optional)
     S3_ENDPOINT_URL: Optional[str] = None
     S3_ACCESS_KEY_ID: str = ""
     S3_SECRET_ACCESS_KEY: str = ""
-    S3_BUCKET_NAME: str = "xtrium-uploads"
+    S3_BUCKET_NAME: str = "data-extraction-uploads"
     S3_REGION: str = "auto"
 
     # Sentry

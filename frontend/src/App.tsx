@@ -66,7 +66,7 @@ function IndexRoute() {
       </div>
       <div style={{ textAlign: 'center' }}>
         <p style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', margin: 0 }}>
-          ⚡ Xtrium DataOps
+          ⚡ Data Extraction Platform
         </p>
         <p style={{ fontSize: 12, color: '#94a3b8', margin: '4px 0 0' }}>
           Connecting to server — first load may take up to 30 seconds
