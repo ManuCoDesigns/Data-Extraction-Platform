@@ -22,7 +22,7 @@ import uuid
 from typing import Optional
 from app.core.config import settings
 
-LOCAL_STORAGE_DIR = os.environ.get("LOCAL_STORAGE_DIR", "/tmp/xtrium_storage")
+LOCAL_STORAGE_DIR = os.environ.get("LOCAL_STORAGE_DIR", "/tmp/_storage")
 
 
 def new_storage_key(prefix: str, filename: str) -> str:

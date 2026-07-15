@@ -89,7 +89,7 @@ export function LoginPage() {
                     type="email"
                     value={email}
                     onChange={e => setEmail(e.target.value)}
-                    placeholder="admin@xtrium.ai"
+                    placeholder="admin@.ai"
                     required
                     autoFocus
                     className="w-full pl-10 pr-4 py-2.5 border border-gray-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent hover:border-gray-300 transition placeholder:text-gray-400"

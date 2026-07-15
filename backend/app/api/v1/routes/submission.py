@@ -91,7 +91,7 @@ def submit_job(
         io.BytesIO(payload_bytes),
         media_type="application/json",
         headers={
-            "Content-Disposition": f'attachment; filename="xtrium_{job_id[:8]}_submission.json"',
+            "Content-Disposition": f'attachment; filename="_{job_id[:8]}_submission.json"',
             "X-Batch-Id": batch.id,
             "X-Payload-SHA256": payload_hash,
         },

@@ -15,7 +15,7 @@ node_modules/
 frontend/dist/
 
 # Uploads / temp
-/tmp/xtrium_uploads/
+/tmp/_uploads/
 *.pdf
 *.xlsx
 *.csv

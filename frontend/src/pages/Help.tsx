@@ -193,7 +193,7 @@ export function HelpPage() {
         <Section id="schema" icon={<Layers style={{ width: 18, height: 18 }} />} title="Step 2 — Define a Schema" badge={<RoleBadge role="admin" />}>
           <p style={{ fontSize: 13, color: '#64748b', lineHeight: 1.7, margin: 0 }}>
             A schema defines what a valid record looks like — field names, types, required fields, allowed values, and extraction rules for the AI.
-            Xtrium uses the <strong>BGS Supplier Graph Schema v1.0</strong> as the base for all critical materials data.
+             uses the <strong>BGS Supplier Graph Schema v1.0</strong> as the base for all critical materials data.
           </p>
 
           <div>

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-xtrium_extractor.py — Data Extraction Extraction Script
+_extractor.py — Data Extraction Extraction Script
 =======================================================
 
 Scrapes a company website and extracts structured records using the
@@ -22,17 +22,17 @@ Critical Materials extras (from company websites):
   investor_relations_url
 
 Usage:
-  python xtrium_extractor.py --url https://www.albemarle.com --source-id <uuid> --upload
-  python xtrium_extractor.py --config config.json
+  python _extractor.py --url https://www.albemarle.com --source-id <uuid> --upload
+  python _extractor.py --config config.json
 
 Requirements: pip install anthropic requests beautifulsoup4
 
 Config file (config.json):
 {
   "anthropic_api_key": "sk-ant-...",
-  "xtrium_url": "https://xtrium-platform-production.up.railway.app",
-  "xtrium_email": "admin@yourorg.com",
-  "xtrium_password": "yourpassword",
+  "_url": "https://-platform-production.up.railway.app",
+  "_email": "admin@yourorg.com",
+  "_password": "yourpassword",
   "source_id": "uuid-of-the-source",
   "output_dir": "./output",
   "upload": true
@@ -240,9 +240,9 @@ def extract_with_claude(content: str, url: str, api_key: str) -> dict:
     return record
 
 
-# ─── Xtrium API ───────────────────────────────────────────────────────────────
+# ───  API ───────────────────────────────────────────────────────────────
 
-class XtriumAPI:
+class API:
     def __init__(self, base, email, pw):
         self.b = base.rstrip("/")
         self.s = requests.Session()
@@ -270,11 +270,11 @@ def run(args):
     api_key   = args.api_key or config.get("anthropic_api_key") or os.getenv("ANTHROPIC_API_KEY")
     url       = args.url or config.get("url")
     source_id = args.source_id or config.get("source_id")
-    out_dir   = Path(args.output_dir or config.get("output_dir","./xtrium_output"))
+    out_dir   = Path(args.output_dir or config.get("output_dir","./_output"))
     do_upload = args.upload or config.get("upload", False)
-    xtrium_url = args.xtrium_url or config.get("xtrium_url","")
-    email     = args.email or config.get("xtrium_email","")
-    password  = args.password or config.get("xtrium_password","") or os.getenv("XTRIUM_PASSWORD","")
+    _url = args._url or config.get("_url","")
+    email     = args.email or config.get("_email","")
+    password  = args.password or config.get("_password","") or os.getenv("_PASSWORD","")
 
     if not api_key: sys.exit("Missing ANTHROPIC_API_KEY")
     if not url: sys.exit("Missing --url")
@@ -302,9 +302,9 @@ def run(args):
     if record.get("annual_production"): print(f"  Production entries: {len(record['annual_production'])}")
     if record.get("jv_stakes"): print(f"  JV stakes: {len(record['jv_stakes'])}")
 
-    if do_upload and xtrium_url and source_id:
-        print(f"\n[3/3] Uploading to Xtrium…")
-        api = XtriumAPI(xtrium_url, email, password)
+    if do_upload and _url and source_id:
+        print(f"\n[3/3] Uploading to …")
+        api = API(_url, email, password)
         result = api.upload(source_id, record, fname)
         print(f"  ✓ {result.get('valid_rows')}/{result.get('total_rows')} valid")
     else:
@@ -320,19 +320,19 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Extract Albemarle and upload to an Xtrium source:
-  python xtrium_extractor.py \\
+  # Extract Albemarle and upload to an  source:
+  python _extractor.py \\
     --url https://www.albemarle.com \\
     --source-id your-source-uuid \\
-    --xtrium-url https://xtrium-platform-production.up.railway.app \\
+    ---url https://-platform-production.up.railway.app \\
     --email admin@yourorg.com --password yourpass \\
     --upload
 
   # Extract to file only (no upload):
-  python xtrium_extractor.py --url https://www.glencore.com --output ./output
+  python _extractor.py --url https://www.glencore.com --output ./output
 
   # Use a config file:
-  python xtrium_extractor.py --config config.json
+  python _extractor.py --config config.json
 
 Output format:
   BGS base fields (18): company_name, manufacturing_sites, products_offered, etc.
@@ -342,9 +342,9 @@ Output format:
     p.add_argument("--config", metavar="FILE")
     p.add_argument("--url", metavar="URL", help="Company website to extract")
     p.add_argument("--source-id", metavar="UUID")
-    p.add_argument("--xtrium-url", metavar="URL", default="https://xtrium-platform-production.up.railway.app")
+    p.add_argument("---url", metavar="URL", default="https://-platform-production.up.railway.app")
     p.add_argument("--email"); p.add_argument("--password"); p.add_argument("--api-key")
-    p.add_argument("--output-dir", default="./xtrium_output")
+    p.add_argument("--output-dir", default="./_output")
     p.add_argument("--upload", action="store_true")
     args = p.parse_args()
     if len(sys.argv) == 1: p.print_help(); sys.exit(0)

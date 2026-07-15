@@ -88,7 +88,7 @@ export function App() {
 
     // Keep Railway backend warm — ping /ping every 4 minutes
     // This prevents the 60-90 second cold start that users experience
-    const BACKEND = (import.meta.env.VITE_API_URL || 'https://xtrium-platform-production.up.railway.app/api/v1')
+    const BACKEND = (import.meta.env.VITE_API_URL || 'https://-platform-production.up.railway.app/api/v1')
       .replace('/api/v1', '')
     const ping = () => fetch(`${BACKEND}/ping`).catch(() =>
       // Fallback: try /health if /ping not available yet

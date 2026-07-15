@@ -376,7 +376,7 @@ def export_project(
                 try:
                     ef = dict(r.extracted_fields) if isinstance(r.extracted_fields, dict) else (r.extracted_fields or {})
                     review_str = r.review_status.value if hasattr(r.review_status, "value") else str(r.review_status)
-                    ef["_xtrium"] = {
+                    ef["_"] = {
                         "source_name":    source.name,
                         "source_status":  source.status.value,
                         "review_status":  review_str,
@@ -402,7 +402,7 @@ def export_project(
     # 4. Build ZIP
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
     readme_lines = [
-        f"# {project.name} — Xtrium Export",
+        f"# {project.name} —  Export",
         f"",
         f"Exported: {ts}",
         f"Filter:   {status}",
@@ -526,7 +526,7 @@ def export_project_package(
         ).all()
         for r in recs:
             d = dict(r.extracted_fields or {})
-            d["_xtrium"] = {
+            d["_"] = {
                 "source": source.name,
                 "review_status": r.review_status.value if hasattr(r.review_status, "value") else r.review_status,
                 "is_schema_valid": r.is_schema_valid,
@@ -615,8 +615,8 @@ def export_project_package(
 
     # ── ONE COVER PAGE PER SOURCE ─────────────────────────────────────────────
     for s_idx, source in enumerate(sources):
-        records_for_source = [r for r in all_records if r.get("_xtrium", {}).get("source") == source.name]
-        approved_count = sum(1 for r in records_for_source if r.get("_xtrium", {}).get("review_status") == "approved")
+        records_for_source = [r for r in all_records if r.get("_", {}).get("source") == source.name]
+        approved_count = sum(1 for r in records_for_source if r.get("_", {}).get("review_status") == "approved")
         total_count    = len(records_for_source)
 
         extractor_name = get_name(source.assigned_extractor_id)

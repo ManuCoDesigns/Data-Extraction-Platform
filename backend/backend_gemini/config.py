@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Database
-    DATABASE_URL: str = "sqlite:///./xtrium_dev.db"
+    DATABASE_URL: str = "sqlite:///./_dev.db"
 
     # Redis / Celery
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -31,14 +31,14 @@ class Settings(BaseSettings):
     # Storage
     SUPABASE_URL: Optional[str] = None
     SUPABASE_SERVICE_KEY: Optional[str] = None
-    STORAGE_BUCKET: str = "xtrium-uploads"
+    STORAGE_BUCKET: str = "-uploads"
     STORAGE_PROVIDER: str = "local"
 
     # S3-compatible (optional)
     S3_ENDPOINT_URL: Optional[str] = None
     S3_ACCESS_KEY_ID: str = ""
     S3_SECRET_ACCESS_KEY: str = ""
-    S3_BUCKET_NAME: str = "xtrium-uploads"
+    S3_BUCKET_NAME: str = "-uploads"
     S3_REGION: str = "auto"
 
     # Sentry

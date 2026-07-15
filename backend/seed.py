@@ -2,7 +2,7 @@
 """
 Seed script — creates the first Org Admin user.
 Run once after applying migrations:
-  python seed.py --email admin@xtrium.ai --name "Xtrium Admin" --password Admin1234!
+  python seed.py --email admin@.ai --name " Admin" --password Admin1234!
 """
 import argparse
 from app.db.session import SessionLocal

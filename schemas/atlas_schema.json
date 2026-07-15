@@ -1,5 +1,5 @@
 {
-  "name": "Xtrium Supplier Graph Schema — Atlas Australia Mines 2024",
+  "name": " Supplier Graph Schema — Atlas Australia Mines 2024",
   "grouping_key": "company_name",
   "base_schema": "bgs-supplier-graph-v1",
   "source_website": "https://digital.atlas.gov.au/datasets/australian-operating-mines-2024/explore",

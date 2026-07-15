@@ -858,7 +858,7 @@ def _extract_json_ld_into_soup(soup: BeautifulSoup) -> None:
             data = json.loads(script.string or "")
             flat = _flatten_json_ld(data)
             if flat:
-                div = soup.new_tag("div", attrs={"class": "xtrium-json-ld"})
+                div = soup.new_tag("div", attrs={"class": "-json-ld"})
                 div.string = flat
                 soup.body.append(div)
         except Exception:
@@ -1207,7 +1207,7 @@ def build_record(raw: dict, soup: Optional[BeautifulSoup],
     else:
         # No URL at all — mark as spreadsheet-only
         record["sources"].append(make_source(
-            "Xtrium Internal Critical Materials Suppliers Spreadsheet",
+            " Internal Critical Materials Suppliers Spreadsheet",
             None, "tier2"
         ))
 
@@ -1407,7 +1407,7 @@ def main():
         with open(filepath, "w", encoding="utf-8") as f:
             json.dump(record, f, indent=2, ensure_ascii=False)
 
-    # Combined JSON (all records in one array — upload this to Xtrium)
+    # Combined JSON (all records in one array — upload this to )
     combined_path = out_dir / "combined_suppliers.json"
     with open(combined_path, "w", encoding="utf-8") as f:
         json.dump(records, f, indent=2, ensure_ascii=False)
@@ -1424,20 +1424,20 @@ Method: {"Excel + Website Scraping + Claude LLM" if args.use_llm else "Excel + W
 ## Summary
 - Total suppliers extracted: {len(records)}
 - Records folder: `records/` ({len(records)} individual JSON files)
-- Combined file: `combined_suppliers.json` (upload this to Xtrium)
+- Combined file: `combined_suppliers.json` (upload this to )
 
 ## Files
 | File | Contents |
 |------|----------|
-| `combined_suppliers.json` | All {len(records)} records in one array — for Xtrium upload |
+| `combined_suppliers.json` | All {len(records)} records in one array — for  upload |
 | `records/*.json` | One file per company — for individual review/sharing |
 | `README.md` | This file |
 
-## Upload to Xtrium
+## Upload to 
 ```bash
 python seed_critical_materials.py \
   --combined combined_suppliers.json \
-  --url https://xtrium-platform-production.up.railway.app \
+  --url https://-platform-production.up.railway.app \
   --email admin@yourorg.com --password yourpass
 ```
 
@@ -1466,7 +1466,7 @@ python seed_critical_materials.py \
 
     log.info("Project folder → %s/", out_dir)
     log.info("  records/         %d individual JSON files", len(records))
-    log.info("  combined_suppliers.json  (upload this to Xtrium)")
+    log.info("  combined_suppliers.json  (upload this to )")
     log.info("  README.md        summary and upload instructions")
     log.info("  export_report.json")
 

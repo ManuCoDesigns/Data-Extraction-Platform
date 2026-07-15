@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-seed_critical_materials.py — Seed Xtrium with 141 Critical Materials companies
+seed_critical_materials.py — Seed  with 141 Critical Materials companies
 Creates 1 project, 1 schema, 141 sources (one per company with its website_url
 set for LLM verification), and 141 records pre-loaded.
 
 Usage:
   python seed_critical_materials.py \
-    --url https://xtrium-platform-production.up.railway.app \
+    --url https://-platform-production.up.railway.app \
     --email admin@yourorg.com --password yourpass
 
 Requirements: pip install requests openpyxl
@@ -154,8 +154,8 @@ def build_record(c):
         'certification_references':[],'certifications_raw':None,'regulation_references':[],
         'data_completeness_flags':{'review_score':'manual_only','defect_rate_ppm':'manual_only',
             'on_time_delivery_rate':'manual_only','pricing':'api_only','inventory_levels':'api_only'},
-        'sources':[{'source_name':'Xtrium Critical Materials Intelligence — Intern Research 2025',
-            'source_url':w or 'https://xtrium.ai','doi':None,'tier':'tier2'}],
+        'sources':[{'source_name':' Critical Materials Intelligence — Intern Research 2025',
+            'source_url':w or 'https://.ai','doi':None,'tier':'tier2'}],
     }
 
 class API:
@@ -247,11 +247,11 @@ def run(args):
     print(f'  Sources created:  {created}')
     print(f'  Records uploaded: {filled}  (valid: {valid}, needs fix: {invalid})')
     print(f'  Already had data: {skipped} (skipped)')
-    print(f'\n→ Open Xtrium → Projects → Critical Materials Intelligence')
+    print(f'\n→ Open  → Projects → Critical Materials Intelligence')
 
 def main():
-    p=argparse.ArgumentParser(description='Seed Xtrium with 141 Critical Materials Suppliers')
-    p.add_argument('--url',default='https://xtrium-platform-production.up.railway.app')
+    p=argparse.ArgumentParser(description='Seed  with 141 Critical Materials Suppliers')
+    p.add_argument('--url',default='https://-platform-production.up.railway.app')
     p.add_argument('--email',required=True); p.add_argument('--password',required=True)
     p.add_argument('--xlsx',help='Path to Excel file')
     main_args=p.parse_args(); run(main_args)

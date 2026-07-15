@@ -1,5 +1,5 @@
 {
-  "name": "Xtrium Supplier Graph Schema — Critical Materials (Website-Sourced)",
+  "name": " Supplier Graph Schema — Critical Materials (Website-Sourced)",
   "grouping_key": "company_name",
   "base_schema": "bgs-supplier-graph-v1",
   "source_type": "company_website",

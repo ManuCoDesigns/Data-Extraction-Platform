@@ -3,7 +3,7 @@
 patch_existing_records.py — Update already-seeded records with Excel data
 =========================================================================
 Reads the Critical Materials Excel, finds each company's existing source
-and record in Xtrium, and PATCHes the record with the correctly mapped
+and record in , and PATCHes the record with the correctly mapped
 field values — WITHOUT creating duplicates.
 
 Run this when:
@@ -13,7 +13,7 @@ Run this when:
 
 Usage:
   python scripts/patch_existing_records.py \
-    --url https://xtrium-platform-production.up.railway.app \
+    --url https://-platform-production.up.railway.app \
     --email garima@careerflow.ai \
     --password garima@careerflow.ai \
     --xlsx "Intern- Critical_Materials_Suppliers.xlsx"
@@ -223,8 +223,8 @@ def build_patch_fields(c: dict) -> dict:
         "regulation_references": [],
         "data_completeness_flags": DATA_COMPLETENESS_FLAGS.copy(),
         "sources": [{
-            "source_name": "Xtrium Critical Materials Intelligence — Intern Research 2025",
-            "source_url": website or "https://xtrium.ai",
+            "source_name": " Critical Materials Intelligence — Intern Research 2025",
+            "source_url": website or "https://.ai",
             "doi": None,
             "tier": "tier2",
         }],
@@ -238,7 +238,7 @@ def build_patch_fields(c: dict) -> dict:
     }
 
 
-class XtriumAPI:
+class API:
     def __init__(self, base: str, email: str, password: str):
         self.base = base.rstrip("/")
         self.s = requests.Session()
@@ -275,14 +275,14 @@ def run(args):
     # Build a lookup by canonical_name
     company_map = {c["canonical_name"]: c for c in companies}
 
-    api = XtriumAPI(args.url, args.email, args.password)
+    api = API(args.url, args.email, args.password)
 
     print("\n[2/4] Finding project…")
     projects = api.get("/api/v1/projects").get("items", [])
     project_name = args.project or "Critical Materials Intelligence"
     project = next((p for p in projects if project_name.lower() in p["name"].lower()), None)
     if not project:
-        sys.exit(f'Project "{project_name}" not found in Xtrium. Check --project name.')
+        sys.exit(f'Project "{project_name}" not found in . Check --project name.')
     print(f"  Found: {project['name']} ({project['id']})")
 
     print("\n[3/4] Loading all sources in project…")
@@ -350,20 +350,20 @@ def run(args):
     if args.dry_run:
         print("\n  [DRY RUN] No changes were saved. Remove --dry-run to apply.")
     else:
-        print("\n  Open Xtrium → refresh to see updated records.")
+        print("\n  Open  → refresh to see updated records.")
 
 
 def main():
     p = argparse.ArgumentParser(
-        description="Patch existing Xtrium records with correct Excel data — no duplicates created"
+        description="Patch existing  records with correct Excel data — no duplicates created"
     )
-    p.add_argument("--url", default="https://xtrium-platform-production.up.railway.app")
+    p.add_argument("--url", default="https://-platform-production.up.railway.app")
     p.add_argument("--email", required=True)
     p.add_argument("--password", required=True)
     p.add_argument("--xlsx", default="Intern- Critical_Materials_Suppliers.xlsx",
                    help="Path to the Excel file")
     p.add_argument("--project", default="Critical Materials Intelligence",
-                   help="Xtrium project name to patch")
+                   help=" project name to patch")
     p.add_argument("--dry-run", action="store_true",
                    help="Show what would change without saving anything")
     args = p.parse_args()

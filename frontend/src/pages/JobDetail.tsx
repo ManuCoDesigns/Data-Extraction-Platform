@@ -78,7 +78,7 @@ export function JobDetailPage() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `xtrium_${jobId.slice(0, 8)}_submission.json`
+      a.download = `_${jobId.slice(0, 8)}_submission.json`
       a.click()
       toast.success('Submission downloaded')
       setShowSubmit(false)

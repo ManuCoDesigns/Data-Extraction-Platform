@@ -1,5 +1,5 @@
 """
-PDF parser for the Xtrium extraction pipeline.
+PDF parser for the  extraction pipeline.
 Uses pdfplumber with positional word extraction.
 Detects column layout, applies page-header category tracking.
 """

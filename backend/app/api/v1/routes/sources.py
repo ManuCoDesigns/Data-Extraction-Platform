@@ -1623,7 +1623,7 @@ async def llm_verify_source(
 
     # ── Build system prompt based on mode ────────────────────────────────────
     if is_task_mode:
-        system_prompt = f"""You are a QA reviewer for the Xtrium data operations team (SOP-DS-003).
+        system_prompt = f"""You are a QA reviewer for the  data operations team (SOP-DS-003).
 You will be given benchmark tasks and submitted extraction records.
 
 Your job:

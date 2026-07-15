@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Seed a super admin user into the Xtrium database.
+Seed a super admin user into the  database.
 Usage: python seed_admin.py <DATABASE_URL>
 """
 import sys, uuid

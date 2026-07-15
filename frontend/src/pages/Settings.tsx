@@ -189,7 +189,7 @@ function AppearanceSettings() {
 
 // ── Storage Settings ──────────────────────────────────────────────────────────
 function StorageSettings() {
-  const [form, setForm] = useState({ provider: 'r2', endpoint_url: '', access_key_id: '', bucket: 'xtrium-uploads', region: 'auto' })
+  const [form, setForm] = useState({ provider: 'r2', endpoint_url: '', access_key_id: '', bucket: '-uploads', region: 'auto' })
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

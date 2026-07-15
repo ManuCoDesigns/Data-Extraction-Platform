@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-bgs_extractor.py — BGS Directory of Mines & Quarries → Xtrium Supplier Graph
+bgs_extractor.py — BGS Directory of Mines & Quarries →  Supplier Graph
 ==============================================================================
 
 Implements SOP-DS-002 v1.1 exactly:
@@ -12,7 +12,7 @@ Implements SOP-DS-002 v1.1 exactly:
      products_offered deduplication, manufacturing_sites, fixed values
   5. Validates each supplier object against the pre-submission checklist (Section 11)
   6. Outputs: one JSON file per supplier + combined bgs_suppliers.json
-  7. Optionally uploads to Xtrium API
+  7. Optionally uploads to  API
 
 Usage:
   python bgs_extractor.py --pdf BGS_DMQ_2020.pdf --output ./output --upload
@@ -25,9 +25,9 @@ Requirements:
 Config file (config.json):
   {
     "anthropic_api_key": "sk-ant-...",
-    "xtrium_url": "https://xtrium-platform-production.up.railway.app",
-    "xtrium_email": "admin@yourorg.com",
-    "xtrium_password": "yourpassword",
+    "_url": "https://-platform-production.up.railway.app",
+    "_email": "admin@yourorg.com",
+    "_password": "yourpassword",
     "source_id": "uuid-of-the-bgs-source",
     "pdf_path": "./BGS_DMQ_2020.pdf",
     "output_dir": "./bgs_output",
@@ -453,9 +453,9 @@ def validate_supplier(supplier: dict) -> list[str]:
     return errors
 
 
-# ─── Xtrium upload ────────────────────────────────────────────────────────────
+# ───  upload ────────────────────────────────────────────────────────────
 
-class XtriumClient:
+class Client:
     def __init__(self, base_url: str, email: str, password: str):
         self.base_url = base_url.rstrip("/")
         self.session = requests.Session()
@@ -468,7 +468,7 @@ class XtriumClient:
         r.raise_for_status()
         token = r.json()["access_token"]
         self.session.headers["Authorization"] = f"Bearer {token}"
-        print(f"  ✓ Logged in to Xtrium as {email}")
+        print(f"  ✓ Logged in to  as {email}")
 
     def upload_json(self, source_id: str, records: list[dict], filename: str) -> dict:
         import io
@@ -496,9 +496,9 @@ def run(args):
     output_dir  = Path(args.output_dir or config.get("output_dir", "./bgs_output"))
     chunk_pages = int(args.chunk_pages or config.get("chunk_pages", 30))
     do_upload   = args.upload or config.get("upload", False)
-    xtrium_url  = args.xtrium_url or config.get("xtrium_url")
-    email       = args.email or config.get("xtrium_email")
-    password    = args.password or config.get("xtrium_password") or os.getenv("XTRIUM_PASSWORD")
+    _url  = args._url or config.get("_url")
+    email       = args.email or config.get("_email")
+    password    = args.password or config.get("_password") or os.getenv("_PASSWORD")
     source_id   = args.source_id or config.get("source_id")
 
     if not api_key:
@@ -611,19 +611,19 @@ def run(args):
             json.dump(all_errors, f, ensure_ascii=False, indent=2)
         print(f"  Errors report → {err_path}")
 
-    # ── Upload to Xtrium ──────────────────────────────────────────────────────
-    if do_upload and xtrium_url and source_id:
-        print(f"\n  Uploading to Xtrium source {source_id}…")
-        client = XtriumClient(xtrium_url, email, password)
+    # ── Upload to  ──────────────────────────────────────────────────────
+    if do_upload and _url and source_id:
+        print(f"\n  Uploading to  source {source_id}…")
+        client = Client(_url, email, password)
         result = client.upload_json(source_id, final_suppliers, combined_path.name)
         print(f"  ✓ Upload complete:")
         print(f"     Total rows:   {result.get('total_rows')}")
         print(f"     Valid rows:   {result.get('valid_rows')}")
         print(f"     Invalid rows: {result.get('invalid_rows')}")
         print(f"     Job ID:       {result.get('job_id')}")
-        print(f"\n  Open Xtrium to review the extracted records.")
+        print(f"\n  Open  to review the extracted records.")
     elif do_upload:
-        print("\n  ⚠  Upload requested but --xtrium-url / --source-id not set — skipping")
+        print("\n  ⚠  Upload requested but ---url / --source-id not set — skipping")
 
     print(f"\n✓ Done. Output in: {output_dir.resolve()}")
     print(f"  Suppliers extracted: {len(final_suppliers)}")
@@ -634,15 +634,15 @@ def run(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="BGS Directory of Mines & Quarries → Xtrium Supplier Graph (SOP-DS-002 v1.1)",
+        description="BGS Directory of Mines & Quarries →  Supplier Graph (SOP-DS-002 v1.1)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Use a local PDF and upload to Xtrium:
+  # Use a local PDF and upload to :
   python bgs_extractor.py \\
     --pdf BGS_DMQ_2020.pdf \\
     --source-id ff9ca5e5-d621-424b-a69a-e337a63f54b4 \\
-    --xtrium-url https://xtrium-platform-production.up.railway.app \\
+    ---url https://-platform-production.up.railway.app \\
     --email admin@yourorg.com --password yourpass \\
     --upload
 
@@ -655,9 +655,9 @@ Examples:
 Config file template:
 {
   "anthropic_api_key": "sk-ant-...",
-  "xtrium_url": "https://xtrium-platform-production.up.railway.app",
-  "xtrium_email": "admin@yourorg.com",
-  "xtrium_password": "yourpassword",
+  "_url": "https://-platform-production.up.railway.app",
+  "_email": "admin@yourorg.com",
+  "_password": "yourpassword",
   "source_id": "uuid-of-the-source",
   "pdf_path": "./BGS_DMQ_2020.pdf",
   "output_dir": "./bgs_output",
@@ -672,9 +672,9 @@ Config file template:
     parser.add_argument("--output-dir",   metavar="DIR",  default="./bgs_output")
     parser.add_argument("--chunk-pages",  type=int, default=30, metavar="N",
                         help="Pages per Claude chunk (default: 30, reduce if hitting token limits)")
-    parser.add_argument("--upload",       action="store_true", help="Upload to Xtrium after extraction")
-    parser.add_argument("--source-id",    metavar="UUID", help="Xtrium source ID to upload to")
-    parser.add_argument("--xtrium-url",   metavar="URL",  help="Xtrium API base URL")
+    parser.add_argument("--upload",       action="store_true", help="Upload to  after extraction")
+    parser.add_argument("--source-id",    metavar="UUID", help=" source ID to upload to")
+    parser.add_argument("---url",   metavar="URL",  help=" API base URL")
     parser.add_argument("--email",        metavar="EMAIL")
     parser.add_argument("--password",     metavar="PASS")
 

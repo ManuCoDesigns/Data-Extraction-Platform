@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebTailBench → Xtrium  —  Final Setup v2
+WebTailBench →   —  Final Setup v2
 - Cleans up old WebTailBench projects
 - Creates project, schema, 11 sources
 - Uploads pre-filled records (all Excel data preserved)
@@ -12,11 +12,11 @@ from pathlib import Path
 try: import requests
 except ImportError: print("pip install requests"); sys.exit(1)
 
-BASE = "https://xtrium-platform-production.up.railway.app/api/v1"
+BASE = "https://-platform-production.up.railway.app/api/v1"
 HERE = Path(__file__).parent
 
-EMAIL = input("Xtrium admin email:    ").strip()
-PASS  = input("Xtrium admin password: ").strip()
+EMAIL = input(" admin email:    ").strip()
+PASS  = input(" admin password: ").strip()
 
 CAT_INFO = {
     "compositional_tasks_v2": ("Compositional Tasks",    "Multi-step: find, verify, cross-reference across multiple websites. 47 tasks are annotated with gold answers."),
@@ -41,7 +41,7 @@ SCHEMA_DEF = {
 3. Visit the required websites and collect the data
 4. Fill Section B fields: extracted_answer, urls_visited, primary_url, data_extracted, extraction_notes
 5. Set extraction_complete = "true"
-6. Upload the completed JSON file to Xtrium
+6. Upload the completed JSON file to 
 
 DO NOT change Section A fields (task_id through video_link) — they are read-only reference data.
 Leave Section C fields (score_achieved, score_breakdown, reviewer_notes) blank for the reviewer.
@@ -170,4 +170,4 @@ for cat_key,(cat_name,cat_desc) in CAT_INFO.items():
     time.sleep(0.3)
 
 print(f"\n{'━'*60}\n✓ Done! {total} records uploaded\n")
-print(f"  Open: https://xtrium-platform.vercel.app")
+print(f"  Open: https://-platform.vercel.app")

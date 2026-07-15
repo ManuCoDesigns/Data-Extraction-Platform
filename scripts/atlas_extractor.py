@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-atlas_extractor.py — Australian Operating Mines 2024 → Xtrium Supplier Graph
+atlas_extractor.py — Australian Operating Mines 2024 →  Supplier Graph
 =============================================================================
 Fetches live GeoJSON from the Atlas Gov AU API or uses existing ZIP,
 maps each mine to BGS Supplier Graph schema + Atlas extras fields,
-and uploads directly to an Xtrium source.
+and uploads directly to an  source.
 
 Usage:
   python atlas_extractor.py --upload --source-id <uuid> --email admin@x.com --password pass
@@ -126,12 +126,12 @@ def upload(records, source_id, base_url, email, password):
     return r.json()
 
 def main():
-    p = argparse.ArgumentParser(description='Atlas Australia Mines → Xtrium')
+    p = argparse.ArgumentParser(description='Atlas Australia Mines → ')
     p.add_argument('--input-zip', help='Use existing ZIP instead of live fetch')
     p.add_argument('--output', default='./atlas_output.json', help='Output JSON path')
     p.add_argument('--upload', action='store_true')
     p.add_argument('--source-id')
-    p.add_argument('--url', default='https://xtrium-platform-production.up.railway.app')
+    p.add_argument('--url', default='https://-platform-production.up.railway.app')
     p.add_argument('--email'); p.add_argument('--password')
     args = p.parse_args()
 
@@ -152,7 +152,7 @@ def main():
     print(f'  Saved {len(records)} records → {args.output}')
 
     if args.upload and args.source_id:
-        print('\n[3/3] Uploading to Xtrium...')
+        print('\n[3/3] Uploading to ...')
         result = upload(records, args.source_id, args.url, args.email, args.password)
         print(f'  ✓ {result.get("valid_rows")}/{result.get("total_rows")} valid records uploaded')
     else:

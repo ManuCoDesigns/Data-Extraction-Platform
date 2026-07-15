@@ -5,11 +5,11 @@
 STEP 1 — EXTRACT THE ZIP
 =======================================================
 
-1. Find the downloaded zip:  xtrium-platform.zip
+1. Find the downloaded zip:  -platform.zip
 2. Right-click it → "Extract All"
-3. Choose a folder, e.g.:   C:\Projects\xtrium-platform
+3. Choose a folder, e.g.:   C:\Projects\-platform
 4. Open VS Code
-5. File → Open Folder → select C:\Projects\xtrium-platform
+5. File → Open Folder → select C:\Projects\-platform
 6. Open Terminal in VS Code:  Ctrl + ` (backtick)
    Make sure it says "powershell" at the top of the terminal
 
@@ -124,7 +124,7 @@ B) DATABASE — TWO OPTIONS:
 
    Option 1: SQLite (easiest, works immediately, good for testing)
    → No setup needed, just use:
-     DATABASE_URL=sqlite:///./xtrium_dev.db
+     DATABASE_URL=sqlite:///./_dev.db
 
    Option 2: Supabase Postgres (recommended for real use)
    1. Go to https://supabase.com → Sign up free
@@ -140,7 +140,7 @@ STEP 7 — CREATE THE .ENV FILE
 =======================================================
 
 Make sure you are in the backend folder:
-    cd C:\Projects\xtrium-platform\backend
+    cd C:\Projects\-platform\backend
 
 Create the .env file:
     copy .env.example .env
@@ -154,7 +154,7 @@ ENVIRONMENT=development
 DEBUG=true
 
 # Use SQLite for local testing (easiest):
-DATABASE_URL=sqlite:///./xtrium_dev.db
+DATABASE_URL=sqlite:///./_dev.db
 
 # OR use Supabase (paste your URL here):
 # DATABASE_URL=postgresql://postgres:yourpassword@db.xxxx.supabase.co:5432/postgres
@@ -194,9 +194,9 @@ You should see: All tables created successfully
 STEP 9 — CREATE YOUR FIRST ADMIN USER
 =======================================================
 
-    python seed.py --email admin@xtrium.ai --name "Xtrium Admin" --password "Admin1234!"
+    python seed.py --email admin@.ai --name " Admin" --password "Admin1234!"
 
-You should see: ✓ Created Org Admin: admin@xtrium.ai
+You should see: ✓ Created Org Admin: admin@.ai
 
 You can change the email and password to anything you like.
 Write down what you set — you will use it to log in.
@@ -228,7 +228,7 @@ Open a NEW terminal in VS Code:
 Press the + button at the top right of the terminal panel.
 
 --- Move into frontend folder ---
-    cd C:\Projects\xtrium-platform\frontend
+    cd C:\Projects\-platform\frontend
 
 --- Install Node packages ---
     npm install
@@ -249,7 +249,7 @@ You should see:
     ➜  Local:   http://localhost:5173/
 
 Open your browser and go to: http://localhost:5173
-You should see the Xtrium login page.
+You should see the  login page.
 
 
 =======================================================
@@ -258,7 +258,7 @@ STEP 12 — LOG IN AND TEST
 
 1. Go to http://localhost:5173
 2. Enter the email and password you set in Step 9
-   Default: admin@xtrium.ai / Admin1234!
+   Default: admin@.ai / Admin1234!
 3. You should land on the Dashboard
 
 First things to do:
@@ -277,7 +277,7 @@ Without it, files upload but don't get extracted.
 Open a THIRD terminal in VS Code (press + again).
 
 Make sure you are in the backend folder with venv active:
-    cd C:\Projects\xtrium-platform\backend
+    cd C:\Projects\-platform\backend
     venv\Scripts\activate
 
 Start the worker:
@@ -312,7 +312,7 @@ URLs:
   Health:     http://localhost:8000/health
 
 Login:
-  Email:    admin@xtrium.ai   (or whatever you set in Step 9)
+  Email:    admin@.ai   (or whatever you set in Step 9)
   Password: Admin1234!        (or whatever you set in Step 9)
 
 

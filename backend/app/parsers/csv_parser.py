@@ -1,5 +1,5 @@
 """
-CSV parser for the Xtrium extraction pipeline.
+CSV parser for the  extraction pipeline.
 Auto-detects header row, handles blank rows.
 """
 from typing import Any

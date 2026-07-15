@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-WebTailBench → Xtrium setup script v2
+WebTailBench →  setup script v2
 Each task = 1 source (task details in source description)
 Schema = only the answer/scoring fields the team fills in
 Extractor reads the task from the source, does the work, creates a record with their answer
@@ -13,9 +13,9 @@ try:
 except ImportError:
     print("Run: pip install requests"); sys.exit(1)
 
-BASE   = "https://xtrium-platform-production.up.railway.app/api/v1"
-EMAIL  = input("Xtrium admin email:    ").strip()
-PASS   = input("Xtrium admin password: ").strip()
+BASE   = "https://-platform-production.up.railway.app/api/v1"
+EMAIL  = input(" admin email:    ").strip()
+PASS   = input(" admin password: ").strip()
 
 HERE = Path(__file__).parent
 
@@ -111,4 +111,4 @@ print(f"  1. Extractor opens a source → reads task in description")
 print(f"  2. Completes the task in the browser")
 print(f"  3. Creates a record: fills extracted_answer + extracted_url")
 print(f"  4. Reviewer scores against criteria in the source description")
-print(f"\n  Open: https://xtrium-platform.vercel.app")
+print(f"\n  Open: https://-platform.vercel.app")

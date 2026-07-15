@@ -97,7 +97,7 @@ export function AppLayout() {
           </div>
           {!collapsed && (
             <div style={{ overflow: 'hidden' }}>
-              <p style={{ fontSize: 14, fontWeight: 800, color: '#fff', margin: 0, letterSpacing: '-0.01em' }}>Xtrium</p>
+              <p style={{ fontSize: 14, fontWeight: 800, color: '#fff', margin: 0, letterSpacing: '-0.01em' }}></p>
               <p style={{ fontSize: 10, color: 'rgba(255,255,255,0.35)', margin: 0, letterSpacing: '0.05em', textTransform: 'uppercase' }}>DataOps Platform</p>
             </div>
           )}
@@ -233,7 +233,7 @@ export function AppLayout() {
         }}>
           {/* Breadcrumb */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#94a3b8' }}>
-            <span style={{ fontWeight: 700, color: '#1e293b' }}>Xtrium</span>
+            <span style={{ fontWeight: 700, color: '#1e293b' }}></span>
           </div>
 
           {/* Right side: notifications + profile */}
