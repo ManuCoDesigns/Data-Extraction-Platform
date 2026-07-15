@@ -192,6 +192,11 @@ async def _fetch_one(client: httpx.AsyncClient, url: str, max_chars: int) -> tup
         json_ld = parser.get_json_ld_text()
         meta = "\n".join(f"{k}: {v}" for k, v in parser.meta_tags.items())
         combined = "\n\n".join(p for p in [meta, json_ld, main] if p.strip())
+        if not combined.strip():
+            import re as re2
+            raw = re2.sub(r"<[^>]+>", " ", response.text)
+            raw = re2.sub(r"\s+", " ", raw).strip()
+            combined = raw[:max_chars]
         return combined, url
     except Exception:
         return "", ""
@@ -208,8 +213,9 @@ async def fetch_url_text(url: str, max_chars: int = 80_000) -> tuple[str, dict]:
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=httpx.Timeout(25.0, connect=10.0),
-        headers=_BROWSER_HEADERS,
+        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
         verify=True,
+        http2=False,
     ) as client:
 
         # Try the main URL first
@@ -269,8 +275,9 @@ async def fetch_multiple_pages(
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=httpx.Timeout(25.0, connect=10.0),
-        headers=_BROWSER_HEADERS,
+        headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'},
         verify=True,
+        http2=False,
     ) as client:
         for page_num in range(1, max_pages + 1):
             if page_num == 1:
