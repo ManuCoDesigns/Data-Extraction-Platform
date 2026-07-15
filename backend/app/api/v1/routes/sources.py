@@ -660,9 +660,7 @@ Return a JSON array of all records found."""
     _client = _genai.Client(api_key=settings.GEMINI_API_KEY)
     _response = _client.models.generate_content(
         model=settings.LLM_MODEL,
-        contents=system_prompt + '
-
-' + user_message,
+        contents=system_prompt + '\n\n' + user_message,
     )
     raw_text = _response.text if _response.text else ""
 
@@ -1737,9 +1735,7 @@ Required format:
             }, ensure_ascii=False, default=str)
 
         try:
-            response = _client.models.generate_content(model=settings.LLM_MODEL, contents=system_prompt + "
-
-" + user_content)
+            response = _client.models.generate_content(model=settings.LLM_MODEL, contents=system_prompt + "\n\n" + user_content)
             raw = response.text if response.text else ""
 
             # Strip markdown fences if present
