@@ -656,14 +656,15 @@ Example of WRONG manufacturing_sites (never do this):
 
 Return a JSON array of all records found."""
 
-    import google.generativeai as genai
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-    gemini = genai.GenerativeModel(
-        model_name=settings.LLM_MODEL,
-        system_instruction=system_prompt,
+    from google import genai as _genai
+    _client = _genai.Client(api_key=settings.GEMINI_API_KEY)
+    _response = _client.models.generate_content(
+        model=settings.LLM_MODEL,
+        contents=system_prompt + '
+
+' + user_message,
     )
-    response = gemini.generate_content(user_message)
-    raw_text = response.text if response.text else ""
+    raw_text = _response.text if _response.text else ""
 
     # Strip markdown fences if model added them despite instructions
     clean = raw_text.strip()
