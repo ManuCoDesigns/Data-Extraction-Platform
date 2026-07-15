@@ -1705,13 +1705,10 @@ Required format:
                 detail="The source website returned no readable text.")
 
     # ── Initialise Gemini ────────────────────────────────────────────────────
-    import google.generativeai as genai
+    from google import genai as _genai
     from app.core.config import settings
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-    gemini_model = genai.GenerativeModel(
-        model_name=settings.LLM_MODEL,
-        system_instruction=system_prompt,
-    )
+    _client = _genai.Client(api_key=settings.GEMINI_API_KEY)
+    # system_prompt passed inline
 
     BATCH_SIZE = 20
     total = len(records)
@@ -1739,7 +1736,9 @@ Required format:
             }, ensure_ascii=False, default=str)
 
         try:
-            response = gemini_model.generate_content(user_content)
+            response = _client.models.generate_content(model=settings.LLM_MODEL, contents=system_prompt + "
+
+" + user_content)
             raw = response.text if response.text else ""
 
             # Strip markdown fences if present
