@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Database
-    DATABASE_URL: str = "postgresql://postgres:pLSDoVqreppyxqoBqSNjYtrjRBtIobtp@postgres.railway.internal:5432/railway"
+    DATABASE_URL: str = "postgresql://postgres:cBUUyZhCYfKOssQnryAIEipDQDqRJJkn@postgres.railway.internal:5432/railway"
 
     # Redis / Celery
     REDIS_URL: str = "redis://localhost:6379/0"
