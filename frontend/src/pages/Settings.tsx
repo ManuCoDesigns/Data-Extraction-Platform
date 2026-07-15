@@ -37,7 +37,7 @@ function Toggle({ checked, onChange }: { checked: boolean; onChange: (v: boolean
 
 // ── General Settings ──────────────────────────────────────────────────────────
 function GeneralSettings() {
-  const [form, setForm] = useState({ platform_name: 'Xtrium DataOps', timezone: 'Africa/Nairobi', date_format: 'DD/MM/YYYY' })
+  const [form, setForm] = useState({ platform_name: 'Data Extraction', timezone: 'Africa/Nairobi', date_format: 'DD/MM/YYYY' })
   const [saved, setSaved] = useState(false)
 
   const save = () => { setSaved(true); toast.success('General settings saved'); setTimeout(() => setSaved(false), 2000) }
@@ -82,7 +82,7 @@ function GeneralSettings() {
 
       <SectionCard title="Platform Info" description="Read-only system information.">
         {[
-          { label: 'Version',   value: 'Xtrium DataOps v2.0' },
+          { label: 'Version',   value: 'Data Extraction v2.0' },
           { label: 'Built by',  value: 'Emmanuel Otieno · otienoemmanuel683@gmail.com' },
           { label: 'Backend',   value: 'FastAPI + PostgreSQL (Railway)' },
           { label: 'Frontend',  value: 'React + Vite + TypeScript (Vercel)' },

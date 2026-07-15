@@ -5,7 +5,7 @@ import json
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "Xtrium DataOps Platform"
+    APP_NAME: str = "Data Extraction Platform"
     API_V1_STR: str = "/api/v1"
     DEBUG: bool = False
     SECRET_KEY: str = "change-me-in-production-use-32-char-min"

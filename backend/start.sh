@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "=== Xtrium DataOps API Starting ==="
+echo "=== Data Extraction API Starting ==="
 echo "Environment: $ENVIRONMENT"
 echo "Database: $(echo $DATABASE_URL | cut -d'@' -f2)"
 

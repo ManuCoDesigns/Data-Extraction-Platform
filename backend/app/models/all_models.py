@@ -1,5 +1,5 @@
 """
-All database models for the Xtrium DataOps Platform.
+All database models for the Data Extraction Platform.
 Single file for clarity — split by domain if it grows past ~600 lines.
 """
 import uuid

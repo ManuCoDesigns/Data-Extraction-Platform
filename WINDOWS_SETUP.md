@@ -1,4 +1,4 @@
-# Xtrium DataOps Platform — Windows Setup Guide
+# Data Extraction Platform — Windows Setup Guide
 # Run every command in VS Code Terminal (PowerShell)
 
 =======================================================

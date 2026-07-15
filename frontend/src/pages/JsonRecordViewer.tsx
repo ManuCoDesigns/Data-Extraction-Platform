@@ -1,5 +1,5 @@
 /**
- * RecordReviewer — Clean data review panel for Xtrium DataOps
+ * RecordReviewer — Clean data review panel for Data Extraction
  * Full-page, purpose-built for reviewing extracted supplier records.
  * Replaces the VS Code JSON editor approach with a structured review UI.
  */

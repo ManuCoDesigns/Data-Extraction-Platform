@@ -1,5 +1,5 @@
 """
-Pydantic v2 request/response schemas for the Xtrium DataOps Platform API.
+Pydantic v2 request/response schemas for the Data Extraction Platform API.
 """
 from __future__ import annotations
 from datetime import datetime

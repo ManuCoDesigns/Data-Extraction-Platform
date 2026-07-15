@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-xtrium_extractor.py — Xtrium DataOps Extraction Script
+xtrium_extractor.py — Data Extraction Extraction Script
 =======================================================
 
 Scrapes a company website and extracts structured records using the

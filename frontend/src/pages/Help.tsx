@@ -134,7 +134,7 @@ export function HelpPage() {
           </div>
           <div>
             <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: 0 }}>Help Guide</h1>
-            <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>Xtrium DataOps Platform · v2.0</p>
+            <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>Data Extraction Platform · v2.0</p>
           </div>
         </div>
         <p style={{ fontSize: 14, color: '#64748b', lineHeight: 1.7, margin: 0, maxWidth: 700 }}>
@@ -598,7 +598,7 @@ export function HelpPage() {
             otienoemmanuel683@gmail.com
           </a>
         </div>
-        <span style={{ fontSize: 11, color: '#94a3b8' }}>Xtrium DataOps Platform v2.0 · Internal Use Only</span>
+        <span style={{ fontSize: 11, color: '#94a3b8' }}>Data Extraction Platform v2.0 · Internal Use Only</span>
       </div>
     </div>
   )

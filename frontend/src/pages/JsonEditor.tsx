@@ -1,5 +1,5 @@
 /**
- * JsonEditor — Monaco-powered JSON editor for Xtrium DataOps
+ * JsonEditor — Monaco-powered JSON editor for Data Extraction
  *
  * Extractor role: fully editable tree + code view, validates before save, highlights changes
  * Reviewer role: read-only, can dismiss incorrect LLM flags
