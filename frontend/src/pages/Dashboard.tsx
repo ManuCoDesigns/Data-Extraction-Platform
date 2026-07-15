@@ -647,7 +647,7 @@ function ExtractorDashboard() {
           badge={needsAction.length} badgeColor="#dc2626">
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><TH>Source</TH><TH align="center">Status</TH><TH align="center">Errors</TH><TH>Updated</TH><TH></TH></tr></thead>
+              <thead><tr><TH>Source</TH><TH align="center">Status</TH><TH align="center">Errors</TH><TH>Updated</TH><TH> </TH></tr></thead>
               <tbody>
                 {needsAction.map((r: any) => (
                   <tr key={r.id} style={{ background: '#fef2f2' }}>
@@ -675,7 +675,7 @@ function ExtractorDashboard() {
           badge={`${available.length} available`} badgeColor="#059669">
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><TH>Source</TH><TH align="center">Records</TH><TH>Updated</TH><TH></TH></tr></thead>
+              <thead><tr><TH>Source</TH><TH align="center">Records</TH><TH>Updated</TH><TH> </TH></tr></thead>
               <tbody>
                 {available.slice(0, 8).map((r: any) => (
                   <tr key={r.id}
@@ -821,7 +821,7 @@ function ReviewerDashboard() {
                     <TH align="center">Pending</TH>
                     <TH align="center">Progress</TH>
                     <TH>Updated</TH>
-                    <TH></TH>
+                    <TH> </TH>
                   </tr>
                 </thead>
                 <tbody>
