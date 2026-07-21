@@ -410,7 +410,7 @@ async def upload_to_source(
 
     job = ExtractionJob(
         project_id=source.project_id, source_id=source_id,
-        schema_id=source.schema_id, schema_version=schema_ver.version,
+        schema_id=source.schema_id, schema_version=(schema_ver.version if schema_ver else None),
         name=f"{source.name} — {extraction_method} upload {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
         source_file_name=file.filename, source_file_size_bytes=len(content),
         source_type=file_ext_type, status=JobStatus.READY_FOR_REVIEW,
@@ -502,7 +502,7 @@ async def upload_to_source(
         if is_valid:
             valid_count += 1
         record = ExtractedRecord(
-            job_id=job.id, schema_version=schema_ver.version,
+            job_id=job.id, schema_version=(schema_ver.version if schema_ver else None),
             extraction_confidence=ExtractionConfidence.HIGH if is_valid else ExtractionConfidence.FLAGGED,
             is_schema_valid=is_valid, validation_errors=errors,
             review_status=ReviewStatus.PENDING,
@@ -1237,7 +1237,7 @@ async def scrape_source_website(
 
     job = ExtractionJob(
         project_id=source.project_id, source_id=source_id,
-        schema_id=source.schema_id, schema_version=schema_ver.version,
+        schema_id=source.schema_id, schema_version=(schema_ver.version if schema_ver else None),
         name=f"{source.name} — web scrape {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
         source_file_name=source.website_url[:255], source_file_size_bytes=len(web_text),
         source_type=FileSourceType.CSV, status=JobStatus.READY_FOR_REVIEW,
@@ -1254,7 +1254,7 @@ async def scrape_source_website(
         if is_valid:
             valid_count += 1
         record = ExtractedRecord(
-            job_id=job.id, schema_version=schema_ver.version,
+            job_id=job.id, schema_version=(schema_ver.version if schema_ver else None),
             extraction_confidence=ExtractionConfidence.HIGH if is_valid else ExtractionConfidence.FLAGGED,
             is_schema_valid=is_valid, validation_errors=errors,
             review_status=ReviewStatus.PENDING,

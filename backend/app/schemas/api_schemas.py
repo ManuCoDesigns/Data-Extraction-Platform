@@ -133,8 +133,8 @@ class JobCreate(BaseModel):
 class JobOut(BaseModel):
     id: str
     project_id: str
-    schema_id: str
-    schema_version: int
+    schema_id: Optional[str] = None
+    schema_version: Optional[int] = None
     name: str
     source_file_name: Optional[str]
     source_file_size_bytes: Optional[int]
@@ -266,7 +266,7 @@ class SourceUpdate(BaseModel):
 class SourceOut(BaseModel):
     id: str
     project_id: str
-    schema_id: str
+    schema_id: Optional[str] = None
     schema_name: Optional[str] = None
     name: str
     description: Optional[str]

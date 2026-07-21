@@ -357,7 +357,7 @@ class ExtractionJob(Base):
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
     source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=True, index=True)
     schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)  # nullable: some sources have no fixed schema
-    schema_version = Column(Integer, nullable=False)
+    schema_version = Column(Integer, nullable=True)  # nullable: no schema means no version
     name = Column(String(255), nullable=False)
     source_file_url = Column(String(1024), nullable=True)
     source_file_name = Column(String(512), nullable=True)
@@ -422,7 +422,7 @@ class ExtractedRecord(Base):
 
     id = Column(String(36), primary_key=True, default=new_uuid)
     job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
-    schema_version = Column(Integer, nullable=False)
+    schema_version = Column(Integer, nullable=True)  # nullable: no schema means no version
     extraction_confidence = Column(SAEnum(ExtractionConfidence), nullable=False)
     pipeline_warnings = Column(JSON, default=list)
     # Schema validation — structural conformance, separate from LLM content checks
@@ -506,7 +506,7 @@ class SubmissionBatch(Base):
     submitted_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     destination = Column(String(100), nullable=False)
     record_count = Column(Integer, nullable=False)
-    schema_version = Column(Integer, nullable=False)
+    schema_version = Column(Integer, nullable=True)  # nullable: no schema means no version
     payload_sha256 = Column(String(64), nullable=True)
     file_url = Column(String(1024), nullable=True)
     status = Column(String(50), default="completed")
