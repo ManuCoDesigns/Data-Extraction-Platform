@@ -55,7 +55,7 @@ export function UsersPage() {
 
   const updateRole = async (userId: string, role: string) => {
     try {
-      await usersApi.updateRole(userId, role)
+      await usersApi.update(userId, { role })
       toast.success('Role updated')
       load()
     } catch { toast.error('Failed to update role') }
@@ -64,7 +64,7 @@ export function UsersPage() {
   const deactivate = async (userId: string) => {
     if (!confirm('Deactivate this user?')) return
     try {
-      await usersApi.deactivate(userId)
+      await usersApi.update(userId, { is_active: false })
       toast.success('User deactivated')
       load()
     } catch { toast.error('Failed to deactivate user') }
