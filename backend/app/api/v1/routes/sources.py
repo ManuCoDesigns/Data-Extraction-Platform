@@ -553,7 +553,7 @@ async def _extract_with_llm(content: bytes, ext: str, schema_definition: dict, s
     The model is told exactly what fields to extract, their types, and what
     the extraction instructions say — same instructions human extractors follow.
     """
-    import anthropic, re
+    import re
     from app.core.config import settings
 
     # Extract readable text from the document
@@ -656,15 +656,13 @@ Example of WRONG manufacturing_sites (never do this):
 
 Return a JSON array of all records found."""
 
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
-    response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=8000,
-        system=system_prompt,
-        messages=[{"role": "user", "content": user_message}],
+    from google import genai as _genai
+    _client = _genai.Client(api_key=settings.GEMINI_API_KEY)
+    _response = _client.models.generate_content(
+        model=settings.LLM_MODEL,
+        contents=system_prompt + "\n\n" + user_message,
     )
-
-    raw_text = response.content[0].text if response.content else ""
+    raw_text = _response.text if _response.text else ""
 
     # Strip markdown fences if model added them despite instructions
     clean = raw_text.strip()
@@ -1349,10 +1347,10 @@ async def llm_verify_source(
     ]
     extraction_instructions = schema_definition.get("extraction_instructions", "")
 
-    # Process in batches of 20 to stay within Claude's context window
-    import anthropic
+    # Process in batches of 20 to stay within context window
     from app.core.config import settings
-    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    from google import genai as _genai
+    _client = _genai.Client(api_key=settings.GEMINI_API_KEY)
 
     BATCH_SIZE = 20
     total = len(records)
@@ -1410,13 +1408,11 @@ Required format:
         }, ensure_ascii=False, default=str)
 
         try:
-            response = client.messages.create(
+            _response = _client.models.generate_content(
                 model=settings.LLM_MODEL,
-                max_tokens=4000,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_content}],
+                contents=system_prompt + "\n\n" + user_content,
             )
-            raw = response.content[0].text if response.content else ""
+            raw = _response.text if _response.text else ""
 
             # Strip markdown fences if present
             import re as _re
