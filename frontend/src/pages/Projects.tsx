@@ -1,264 +1,232 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
-import { Plus, Search, FolderKanban, Trash2, Edit3, Database, ChevronRight, BarChart3, Users, ArrowRight, Globe } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { Plus, FolderKanban, Database, CheckCircle, Clock, ArrowRight, Trash2, Edit3 } from 'lucide-react'
 import { projectsApi } from '@/api/client'
-import type { Project } from '@/types'
-import { Button, Card, Badge, Modal, Input, Textarea, EmptyState, Spinner, ConfirmDialog, cn, toast, safeFromNow } from '@/components/ui'
+import { Modal, Input, Textarea, toast, cn } from '@/components/ui'
+import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
-
-// Project card gradient by index
-const PROJECT_GRADIENTS = [
-  { from: '#2563eb', to: '#4f46e5' },  // blue→indigo
-  { from: '#0891b2', to: '#2563eb' },  // cyan→blue
-  { from: '#059669', to: '#0891b2' },  // emerald→cyan
-  { from: '#7c3aed', to: '#2563eb' },  // violet→blue
-  { from: '#0f766e', to: '#059669' },  // teal→emerald
-  { from: '#1d4ed8', to: '#7c3aed' },  // blue→violet
-]
+import type { Project } from '@/types'
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
-  const [total, setTotal]       = useState(0)
-  const [loading, setLoading]   = useState(true)
-  const [search, setSearch]     = useState('')
-  const [showCreate, setShowCreate] = useState(false)
-  const [editProject, setEditProject] = useState<Project | null>(null)
-  const [deleteProject, setDeleteProject] = useState<Project | null>(null)
-  const [form, setForm] = useState({ name: '', description: '' })
-  const [saving, setSaving]   = useState(false)
-  const [deleting, setDeleting] = useState(false)
+  const [loading,  setLoading]  = useState(true)
+  const [showNew,  setShowNew]  = useState(false)
+  const [name,     setName]     = useState('')
+  const [desc,     setDesc]     = useState('')
+  const [saving,   setSaving]   = useState(false)
   const canManage = useCapability('manage_projects')
+  const { user }  = useAuthStore()
+  const navigate  = useNavigate()
 
-  const load = () =>
-    projectsApi.list().then(r => {
-      setProjects(r.items || r)
-      setTotal(r.total || (r.items || r).length)
-    }).finally(() => setLoading(false))
+  const load = () => {
+    setLoading(true)
+    projectsApi.list().then((r: any) => {
+      setProjects(Array.isArray(r) ? r : r?.items ?? [])
+    }).catch(() => {}).finally(() => setLoading(false))
+  }
 
-  useEffect(() => {
-    load()
-    const iv = setInterval(load, 30_000)
-    return () => clearInterval(iv)
-  }, [])
+  useEffect(() => { load() }, [])
 
-  const filtered = projects.filter(p =>
-    p.name.toLowerCase().includes(search.toLowerCase()) ||
-    (p.description || '').toLowerCase().includes(search.toLowerCase())
-  )
-
-  const handleCreate = async (e: React.FormEvent) => {
+  const create = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!form.name.trim()) return
+    if (!name.trim()) return
     setSaving(true)
     try {
-      await projectsApi.create({ name: form.name, description: form.description || undefined })
+      await projectsApi.create({ name: name.trim(), description: desc.trim() })
       toast.success('Project created')
-      setShowCreate(false)
-      setForm({ name: '', description: '' })
+      setShowNew(false); setName(''); setDesc('')
       load()
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to create project')
-    } finally { setSaving(false) }
+    } catch { toast.error('Failed to create project') }
+    finally { setSaving(false) }
   }
 
-  const handleEdit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!editProject || !form.name.trim()) return
-    setSaving(true)
-    try {
-      await projectsApi.update(editProject.id, { name: form.name, description: form.description || undefined })
-      toast.success('Project updated')
-      setEditProject(null)
-      load()
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to update project')
-    } finally { setSaving(false) }
-  }
+  const totalSources   = (p: Project) => (p as any).total_sources   ?? 0
+  const approvedSources = (p: Project) => (p as any).approved_sources ?? 0
+  const pct = (p: Project) => totalSources(p) > 0
+    ? Math.round((approvedSources(p) / totalSources(p)) * 100) : 0
 
-  const handleDelete = async () => {
-    if (!deleteProject) return
-    setDeleting(true)
-    try {
-      await projectsApi.delete(deleteProject.id)
-      toast.success('Project deleted')
-      setDeleteProject(null)
-      load()
-    } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Failed to delete project')
-    } finally { setDeleting(false) }
+  const statusColor = (p: Project) => {
+    const s = (p as any).status ?? ''
+    if (s === 'active')   return { bg: '#ecfdf5', color: '#059669', label: 'Active' }
+    if (s === 'paused')   return { bg: '#fffbeb', color: '#d97706', label: 'Paused' }
+    if (s === 'archived') return { bg: '#f1f5f9', color: '#64748b', label: 'Archived' }
+    return { bg: '#eff6ff', color: '#2563eb', label: 'Active' }
   }
-
-  const openEdit = (p: Project) => {
-    setEditProject(p)
-    setForm({ name: p.name, description: p.description || '' })
-  }
-
-  if (loading) return (
-    <div className="flex justify-center items-center py-24">
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
-        <Spinner className="w-8 h-8" />
-        <p style={{ fontSize: 13, color: '#94a3b8' }}>Loading projects…</p>
-      </div>
-    </div>
-  )
 
   return (
-    <div style={{ padding: '32px', maxWidth: 1200, margin: '0 auto' }}>
+    <div style={{ padding: '24px 28px', maxWidth: 1200, margin: '0 auto' }}>
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', marginBottom: 28, flexWrap: 'wrap', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
-          <h1 style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: 0 }}>Projects</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Projects</h1>
           <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-            {total} project{total !== 1 ? 's' : ''} · each project is a data acquisition campaign
+            {projects.length} project{projects.length !== 1 ? 's' : ''} · manage extraction pipelines
           </p>
         </div>
         {canManage && (
-          <Button onClick={() => { setForm({ name: '', description: '' }); setShowCreate(true) }}
-            style={{ background: 'linear-gradient(135deg, #2563eb, #4f46e5)', border: 'none', color: '#fff', padding: '10px 20px', borderRadius: 12, fontWeight: 600 }}>
-            <Plus className="w-4 h-4" /> New Project
-          </Button>
+          <button onClick={() => setShowNew(true)} style={{
+            display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px',
+            background: 'linear-gradient(135deg,#2563eb,#4f46e5)', color: '#fff',
+            border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+          }}>
+            <Plus style={{ width: 16, height: 16 }} /> New Project
+          </button>
         )}
       </div>
 
-      {/* Search */}
-      <div style={{ position: 'relative', maxWidth: 380, marginBottom: 28 }}>
-        <Search style={{ position: 'absolute', left: 14, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: '#94a3b8' }} />
-        <input type="text" placeholder="Search projects…" value={search} onChange={e => setSearch(e.target.value)}
-          style={{ width: '100%', paddingLeft: 42, paddingRight: 16, paddingTop: 10, paddingBottom: 10, border: '1px solid #e2e8f0', borderRadius: 12, fontSize: 14, outline: 'none', background: '#fff', boxShadow: '0 1px 3px rgba(0,0,0,0.06)', boxSizing: 'border-box' }}
-          onFocus={e => { e.target.style.borderColor = '#2563eb'; e.target.style.boxShadow = '0 0 0 3px #dbeafe' }}
-          onBlur={e => { e.target.style.borderColor = '#e2e8f0'; e.target.style.boxShadow = '0 1px 3px rgba(0,0,0,0.06)' }}
-        />
-      </div>
-
-      {filtered.length === 0 ? (
-        <EmptyState
-          title={search ? 'No projects match your search' : 'No projects yet'}
-          description={canManage ? 'Create your first project to start organizing your extraction work.' : 'No projects available.'}
-          action={canManage && !search ? <Button onClick={() => setShowCreate(true)}><Plus className="w-4 h-4" /> New Project</Button> : undefined}
-        />
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 20 }}>
-          {filtered.map((p, idx) => {
-            const grad = PROJECT_GRADIENTS[idx % PROJECT_GRADIENTS.length]
-            const approvedPct = (p as any).approved_pct ?? 0
-            return (
-              <div key={p.id} style={{ background: '#fff', borderRadius: 18, overflow: 'hidden', boxShadow: '0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px #f1f5f9', transition: 'box-shadow 0.2s, transform 0.2s' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 8px 24px rgba(0,0,0,0.14)'; (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.boxShadow = '0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px #f1f5f9'; (e.currentTarget as HTMLElement).style.transform = 'translateY(0)' }}>
-
-                {/* Gradient header */}
-                <div style={{ background: `linear-gradient(135deg, ${grad.from}, ${grad.to})`, padding: '20px 22px 16px', position: 'relative', overflow: 'hidden' }}>
-                  {/* Decorative circles */}
-                  <div style={{ position: 'absolute', top: -20, right: -20, width: 80, height: 80, borderRadius: '50%', background: 'rgba(255,255,255,0.08)' }} />
-                  <div style={{ position: 'absolute', bottom: -10, right: 30, width: 50, height: 50, borderRadius: '50%', background: 'rgba(255,255,255,0.06)' }} />
-
-                  <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                    <div style={{ background: 'rgba(255,255,255,0.15)', borderRadius: 12, padding: 10, backdropFilter: 'blur(8px)' }}>
-                      <FolderKanban style={{ width: 20, height: 20, color: '#fff' }} />
-                    </div>
-                    <span style={{ fontSize: 10, fontWeight: 700, padding: '4px 10px', borderRadius: 20, background: p.status === 'active' ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)', color: '#fff', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                      {p.status}
-                    </span>
-                  </div>
-
-                  <h3 style={{ fontSize: 16, fontWeight: 700, color: '#fff', margin: '12px 0 4px', lineHeight: 1.3 }}>{p.name}</h3>
-                  <p style={{ fontSize: 11, color: 'rgba(255,255,255,0.6)', margin: 0 }}>Updated {safeFromNow(p.updated_at)}</p>
-                </div>
-
-                {/* Body */}
-                <div style={{ padding: '16px 22px' }}>
-                  {p.description && (
-                    <p style={{ fontSize: 13, color: '#64748b', margin: '0 0 14px', lineHeight: 1.5, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                      {p.description}
-                    </p>
-                  )}
-
-                  {/* Stats row */}
-                  <div style={{ display: 'flex', gap: 16, margin: '0 0 16px' }}>
-                    {[
-                      { icon: Database, label: 'Sources', value: p.job_count ?? '—' },
-                      { icon: Users, label: 'Members', value: p.member_count ?? '—' },
-                    ].map(({ icon: Icon, label, value }) => (
-                      <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <Icon style={{ width: 13, height: 13, color: '#94a3b8' }} />
-                        <span style={{ fontSize: 12, color: '#94a3b8' }}>{value} {label}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Actions */}
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingTop: 14, borderTop: '1px solid #f1f5f9' }}>
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <Link to={`/projects/${p.id}`}
-                        style={{ fontSize: 12, fontWeight: 600, color: '#2563eb', textDecoration: 'none', padding: '6px 12px', background: '#eff6ff', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <BarChart3 style={{ width: 12, height: 12 }} /> Overview
-                      </Link>
-                      <Link to={`/projects/${p.id}/sources`}
-                        style={{ fontSize: 12, fontWeight: 600, color: '#059669', textDecoration: 'none', padding: '6px 12px', background: '#ecfdf5', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
-                        <Database style={{ width: 12, height: 12 }} /> Sources
-                      </Link>
-                    </div>
-
-                    {canManage && (
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button onClick={() => openEdit(p)}
-                          style={{ padding: 6, background: 'none', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', color: '#94a3b8', display: 'flex', alignItems: 'center' }}
-                          title="Edit project"
-                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#2563eb'; (e.currentTarget as HTMLElement).style.borderColor = '#bfdbfe'; (e.currentTarget as HTMLElement).style.background = '#eff6ff' }}
-                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; (e.currentTarget as HTMLElement).style.borderColor = '#e2e8f0'; (e.currentTarget as HTMLElement).style.background = 'none' }}>
-                          <Edit3 style={{ width: 13, height: 13 }} />
-                        </button>
-                        <button onClick={() => setDeleteProject(p)}
-                          style={{ padding: 6, background: 'none', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', color: '#94a3b8', display: 'flex', alignItems: 'center' }}
-                          title="Delete project"
-                          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#ef4444'; (e.currentTarget as HTMLElement).style.borderColor = '#fecaca'; (e.currentTarget as HTMLElement).style.background = '#fef2f2' }}
-                          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#94a3b8'; (e.currentTarget as HTMLElement).style.borderColor = '#e2e8f0'; (e.currentTarget as HTMLElement).style.background = 'none' }}>
-                          <Trash2 style={{ width: 13, height: 13 }} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )
-          })}
+      {/* Stats row */}
+      {projects.length > 0 && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
+          {[
+            { label: 'Total Projects', value: projects.length, color: '#2563eb', bg: '#eff6ff' },
+            { label: 'Total Sources',  value: projects.reduce((a,p) => a + totalSources(p), 0), color: '#7c3aed', bg: '#faf5ff' },
+            { label: 'Approved',       value: projects.reduce((a,p) => a + approvedSources(p), 0), color: '#059669', bg: '#ecfdf5' },
+            { label: 'Avg Completion', value: projects.length > 0
+              ? Math.round(projects.reduce((a,p) => a + pct(p), 0) / projects.length) + '%'
+              : '0%', color: '#d97706', bg: '#fffbeb' },
+          ].map(({ label, value, color, bg }) => (
+            <div key={label} style={{ background: '#fff', border: '1px solid #e2e8f0',
+              borderRadius: 14, padding: '16px 18px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
+              <p style={{ fontSize: 24, fontWeight: 800, color, margin: 0 }}>{value}</p>
+              <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', margin: '4px 0 0' }}>{label}</p>
+            </div>
+          ))}
         </div>
       )}
 
-      {/* Create modal */}
-      <Modal open={showCreate} onClose={() => setShowCreate(false)} title="New Project" description="Create a new data acquisition project.">
-        <form onSubmit={handleCreate} className="space-y-4">
-          <Input label="Project name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-            placeholder="e.g. Critical Materials Intelligence 2025" required autoFocus />
-          <Textarea label="Description (optional)" rows={3} value={form.description}
-            onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-            placeholder="What is this project collecting?" />
-          <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" type="button" onClick={() => setShowCreate(false)}>Cancel</Button>
-            <Button type="submit" loading={saving} disabled={!form.name.trim()}>
-              <Plus className="w-4 h-4" /> Create Project
-            </Button>
+      {/* Projects table */}
+      {loading ? (
+        <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>Loading projects…</div>
+      ) : projects.length === 0 ? (
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
+          padding: 60, textAlign: 'center' }}>
+          <FolderKanban style={{ width: 40, height: 40, color: '#e2e8f0', margin: '0 auto 12px' }} />
+          <p style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', margin: '0 0 6px' }}>No projects yet</p>
+          <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 20px' }}>Create your first project to get started</p>
+          {canManage && (
+            <button onClick={() => setShowNew(true)} style={{
+              padding: '9px 20px', background: '#2563eb', color: '#fff',
+              border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              Create Project
+            </button>
+          )}
+        </div>
+      ) : (
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
+          overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                {['Project','Status','Sources','Approved','Progress','Last Updated',''].map(h => (
+                  <th key={h} style={{ padding: '11px 16px', textAlign: 'left', fontSize: 10,
+                    fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.07em',
+                    whiteSpace: 'nowrap' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {projects.map((p, i) => {
+                const { bg, color, label } = statusColor(p)
+                const progress = pct(p)
+                return (
+                  <tr key={p.id}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
+                    style={{ borderBottom: i < projects.length - 1 ? '1px solid #f8fafc' : 'none' }}>
+                    <td style={{ padding: '14px 16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ width: 36, height: 36, borderRadius: 10, background: '#eff6ff',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <FolderKanban style={{ width: 16, height: 16, color: '#2563eb' }} />
+                        </div>
+                        <div>
+                          <p style={{ fontSize: 14, fontWeight: 600, color: '#1e293b', margin: 0 }}>{p.name}</p>
+                          {p.description && (
+                            <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0',
+                              maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {p.description}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 9px',
+                        borderRadius: 20, background: bg, color }}>{label}</span>
+                    </td>
+                    <td style={{ padding: '14px 16px', fontSize: 14, fontWeight: 700, color: '#1e293b' }}>
+                      {totalSources(p)}
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: '#059669' }}>
+                        {approvedSources(p)}
+                      </span>
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ background: '#e2e8f0', borderRadius: 99, height: 6, width: 80, overflow: 'hidden' }}>
+                          <div style={{ background: progress === 100 ? '#10b981' : '#2563eb',
+                            height: '100%', width: `${progress}%`, borderRadius: 99 }} />
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 600,
+                          color: progress === 100 ? '#059669' : '#2563eb' }}>
+                          {progress}%
+                        </span>
+                      </div>
+                    </td>
+                    <td style={{ padding: '14px 16px', fontSize: 12, color: '#94a3b8' }}>
+                      {p.updated_at ? new Date(p.updated_at).toLocaleDateString() : '—'}
+                    </td>
+                    <td style={{ padding: '14px 16px' }}>
+                      <Link to={`/projects/${p.id}/sources`}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
+                          fontWeight: 700, color: '#2563eb', textDecoration: 'none',
+                          padding: '5px 12px', borderRadius: 8,
+                          background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                        Open <ArrowRight style={{ width: 12, height: 12 }} />
+                      </Link>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* New project modal */}
+      <Modal open={showNew} onClose={() => setShowNew(false)} title="New Project">
+        <form onSubmit={create} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Project name *
+            </label>
+            <Input value={name} onChange={e => setName(e.target.value)}
+              placeholder="e.g. WebTailBench 2026" required />
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Description
+            </label>
+            <Textarea value={desc} onChange={e => setDesc(e.target.value)}
+              placeholder="Brief description of what this project extracts" rows={3} />
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8 }}>
+            <button type="button" onClick={() => setShowNew(false)}
+              style={{ padding: '9px 18px', background: '#f1f5f9', border: 'none',
+                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#64748b' }}>
+              Cancel
+            </button>
+            <button type="submit" disabled={saving || !name.trim()}
+              style={{ padding: '9px 18px', background: '#2563eb', color: '#fff',
+                border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? .7 : 1 }}>
+              {saving ? 'Creating…' : 'Create Project'}
+            </button>
           </div>
         </form>
       </Modal>
-
-      {/* Edit modal */}
-      <Modal open={!!editProject} onClose={() => setEditProject(null)} title="Edit Project">
-        <form onSubmit={handleEdit} className="space-y-4">
-          <Input label="Project name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} required autoFocus />
-          <Textarea label="Description" rows={3} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-          <div className="flex justify-end gap-3 pt-2">
-            <Button variant="secondary" type="button" onClick={() => setEditProject(null)}>Cancel</Button>
-            <Button type="submit" loading={saving} disabled={!form.name.trim()}>Save Changes</Button>
-          </div>
-        </form>
-      </Modal>
-
-      <ConfirmDialog open={!!deleteProject} title="Delete Project"
-        description={`"${deleteProject?.name}" and all its data will be permanently deleted. This cannot be undone.`}
-        confirmLabel="Delete Project" variant="danger" loading={deleting}
-        onConfirm={handleDelete} onCancel={() => setDeleteProject(null)} />
     </div>
   )
 }
