@@ -17,8 +17,7 @@ fixed inline via PATCH without a full re-upload.
 """
 import io, json, math
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Form
-from typing import List
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import pandas as pd
@@ -223,11 +222,13 @@ def create_source(
     if not _is_project_admin(current_user, project):
         raise HTTPException(status_code=403, detail="Only project admins can create sources")
 
-    schema = db.query(Schema).filter(Schema.id == payload.schema_id, Schema.project_id == project_id).first()
-    if not schema:
-        raise HTTPException(status_code=404, detail="Schema not found in this project")
-    if not db.query(SchemaVersion).filter(SchemaVersion.schema_id == schema.id).first():
-        raise HTTPException(status_code=422, detail="Schema has no versions — add fields first")
+    if payload.schema_id:
+        schema = db.query(Schema).filter(Schema.id == payload.schema_id, Schema.project_id == project_id).first()
+        if not schema:
+            raise HTTPException(status_code=404, detail="Schema not found in this project")
+        if not db.query(SchemaVersion).filter(SchemaVersion.schema_id == schema.id).first():
+            raise HTTPException(status_code=422, detail="Schema has no versions — add fields first")
+    # else: no schema assigned — source uses flexible/no-schema extraction, always considered valid
 
     source = Source(
         project_id=project_id, schema_id=payload.schema_id, name=payload.name,
@@ -364,7 +365,8 @@ async def upload_to_source(
     # ── Route: AI extraction (PDF / TXT) ──────────────────────────────────────
     if ext in AI_EXTRACTION_EXTENSIONS:
         try:
-            rows = await _extract_with_llm(content, ext, schema_ver.definition, source)
+            _schema_def = schema_ver.definition if schema_ver else {"flexible_validation": True, "fields": []}
+            rows = await _extract_with_llm(content, ext, _schema_def, source)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"AI extraction failed: {str(e)}")
         if not rows:
@@ -496,9 +498,7 @@ async def upload_to_source(
             # Always enforce is_verified=false
             mapped["is_verified"] = False
 
-        _flexible = bool(schema_ver and schema_ver.definition and
-                       schema_ver.definition.get("flexible_validation"))
-        is_valid, errors = validate_record(mapped, schema_fields, flexible=_flexible)
+        is_valid, errors = validate_record(mapped, schema_fields)
         if is_valid:
             valid_count += 1
         record = ExtractedRecord(
@@ -553,7 +553,7 @@ async def _extract_with_llm(content: bytes, ext: str, schema_definition: dict, s
     The model is told exactly what fields to extract, their types, and what
     the extraction instructions say — same instructions human extractors follow.
     """
-    import re
+    import anthropic, re
     from app.core.config import settings
 
     # Extract readable text from the document
@@ -656,13 +656,15 @@ Example of WRONG manufacturing_sites (never do this):
 
 Return a JSON array of all records found."""
 
-    from google import genai as _genai
-    _client = _genai.Client(api_key=settings.GEMINI_API_KEY)
-    _response = _client.models.generate_content(
-        model=settings.LLM_MODEL,
-        contents=system_prompt + '\n\n' + user_message,
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=8000,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
     )
-    raw_text = _response.text if _response.text else ""
+
+    raw_text = response.content[0].text if response.content else ""
 
     # Strip markdown fences if model added them despite instructions
     clean = raw_text.strip()
@@ -871,39 +873,7 @@ def review_source_record(
     if payload.action not in ("approve", "reject"):
         raise HTTPException(status_code=422, detail="action must be 'approve' or 'reject'")
 
-    from datetime import datetime, timezone as _tz
-    now = datetime.now(_tz.utc)
-
-    # Flag suspiciously fast reviews (< 90 seconds) for admin investigation
-    review_seconds = None
-    if record.review_started_at:
-        review_seconds = int((now - record.review_started_at).total_seconds())
-        if review_seconds < 90:
-            warnings = list(record.pipeline_warnings or [])
-            warnings.append({
-                "type": "fast_review",
-                "seconds": review_seconds,
-                "reviewer": current_user.email,
-                "ts": now.isoformat(),
-                "threshold": 90,
-            })
-            record.pipeline_warnings = warnings
-
-    if payload.action == "approve":
-        record.review_status  = ReviewStatus.PENDING_ADMIN_REVIEW
-        record.revision_count = (record.revision_count or 0) + 1
-        record.admin_review_started_at = now
-        fc = record.reviewer_field_comments or {}
-        if payload.note:
-            fc.setdefault("_general",[]).append({"comment":payload.note,"user":current_user.email,"role":"reviewer","ts":now.isoformat()})
-            record.reviewer_field_comments = fc
-    else:
-        record.review_status    = ReviewStatus.REJECTED
-        record.correction_count = (record.correction_count or 0) + 1
-        fc = record.reviewer_field_comments or {}
-        if payload.note:
-            fc.setdefault("_general",[]).append({"comment":payload.note,"user":current_user.email,"role":"reviewer","type":"rejection","ts":now.isoformat()})
-            record.reviewer_field_comments = fc
+    record.review_status = ReviewStatus.APPROVED if payload.action == "approve" else ReviewStatus.REJECTED
     record.review_note = payload.note
     record.reviewed_by = current_user.id
     record.reviewed_at = datetime.now(timezone.utc)
@@ -985,255 +955,6 @@ def approve_source(
     return _serialize_source(source)
 
 
-# ─── Multi-file upload ───────────────────────────────────────────────────────
-
-@router.post("/{source_id}/upload-multi", response_model=SourceUploadSummary)
-async def upload_multi_to_source(
-    source_id: str,
-    files: List[UploadFile] = File(...),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Upload multiple JSON files at once to a source.
-    All records from all files are merged and stored as one batch.
-    Useful for WebTailBench and other projects where each task is a separate .json file.
-    Only JSON files are accepted via this endpoint.
-    """
-    source = _get_source_or_404(source_id, db)
-    if not _is_assigned_extractor(current_user, source):
-        raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
-
-    if not files:
-        raise HTTPException(status_code=422, detail="No files provided.")
-
-    import os as _os
-
-    schema_ver = db.query(SchemaVersion).filter(
-        SchemaVersion.schema_id == source.schema_id
-    ).order_by(SchemaVersion.version.desc()).first()
-
-    schema_fields = []
-    if schema_ver and schema_ver.definition:
-        schema_fields = schema_ver.definition.get("fields", [])
-    fixed_fields = {f["name"]: f["fixed_value"] for f in schema_fields if "fixed_value" in f}
-
-    all_rows: list[dict] = []
-    errors: list[str] = []
-    files_ok = 0
-
-    for upload in files:
-        fname = upload.filename or ""
-        ext = _os.path.splitext(fname)[1].lower()
-        if ext not in (".json", ".csv", ".xlsx", ".xls"):
-            errors.append(f"{fname}: unsupported type (use .json, .csv, .xlsx)")
-            continue
-        try:
-            content_bytes = await upload.read()
-            rows = _parse_rows(content_bytes, ext, fname)
-            if not rows:
-                errors.append(f"{fname}: no records found")
-                continue
-            # Apply fixed fields
-            for row in rows:
-                for k, v in fixed_fields.items():
-                    row[k] = v
-            all_rows.extend(rows)
-            files_ok += 1
-        except Exception as e:
-            errors.append(f"{fname}: {str(e)[:100]}")
-
-    if not all_rows:
-        detail = f"No records extracted from {len(files)} file(s)."
-        if errors:
-            detail += " Errors: " + "; ".join(errors[:3])
-        raise HTTPException(status_code=422, detail=detail)
-
-    # Clear existing records then write the merged batch
-    old_job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
-    if old_job_ids:
-        db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(old_job_ids)).delete(synchronize_session=False)
-        db.query(ExtractionJob).filter(ExtractionJob.id.in_(old_job_ids)).delete(synchronize_session=False)
-
-    job = ExtractionJob(
-        project_id=source.project_id, source_id=source_id,
-        schema_id=source.schema_id,
-        schema_version=schema_ver.version if schema_ver else 1,
-        name=f"{source.name} — multi-file upload ({files_ok} files) {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
-        source_file_name=f"{files_ok} files",
-        source_file_size_bytes=sum(0 for _ in files),
-        source_type=FileSourceType.CSV,
-        status=JobStatus.READY_FOR_REVIEW,
-        total_raw_records=len(all_rows),
-        total_extracted=len(all_rows),
-        created_by=current_user.id,
-    )
-    db.add(job)
-    db.flush()
-
-    valid_count = 0
-    for row in all_rows:
-        mapped = {k: v for k, v in row.items()}
-        is_valid, validation_errors = _validate_record(mapped, schema_fields)
-        rec = ExtractedRecord(
-            job_id=job.id,
-            extracted_fields=mapped,
-            raw_text=json.dumps(mapped, ensure_ascii=False, default=str),
-            is_schema_valid=is_valid,
-            schema_errors=validation_errors,
-            review_status=ReviewStatus.PENDING,
-            extraction_method="structured",
-        )
-        db.add(rec)
-        if is_valid:
-            valid_count += 1
-
-    db.flush()
-    _recompute_counts(source, db)
-    db.add(AuditLog(
-        user_id=current_user.id, project_id=source.project_id,
-        action=AuditAction.RECORD_CREATED,
-        after_value={"files": files_ok, "records": len(all_rows), "errors": errors},
-    ))
-    db.commit()
-    db.refresh(source)
-
-    return SourceUploadSummary(
-        source_id=source_id, job_id=job.id,
-        total_records=len(all_rows), valid_records=valid_count,
-        invalid_records=len(all_rows) - valid_count,
-        extraction_method="multi_file",
-        files_processed=files_ok,
-        file_breakdown=[{"filename": e, "error": e} for e in errors],
-    )
-
-
-# ─── Admin Final Review ──────────────────────────────────────────────────────
-
-@router.post("/{source_id}/records/{record_id}/admin-review")
-def admin_review_record(
-    source_id: str, record_id: str,
-    payload: dict,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Admin does the final sign-off on a record.
-    - action = "approve" -> record moves to APPROVED (fully complete)
-    - action = "return"  -> record goes back to PENDING (returned for correction)
-    Increments correction_count when returning.
-    """
-    source = _get_source_or_404(source_id, db)
-    if not _is_org_admin(current_user):
-        user_roles = _user_roles(current_user)
-        if "project_admin" not in user_roles and "qa_lead" not in user_roles:
-            raise HTTPException(status_code=403, detail="Only admins can do final review")
-
-    record = db.query(ExtractedRecord).filter(ExtractedRecord.id == record_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
-
-    action = payload.get("action", "approve")
-    note   = payload.get("note", "")
-    field_comments = payload.get("field_comments", {})
-
-    from datetime import datetime, timezone
-    now = datetime.now(timezone.utc)
-
-    if action == "approve":
-        record.review_status       = ReviewStatus.APPROVED
-        record.admin_reviewed_by   = current_user.id
-        record.admin_reviewed_at   = now
-        record.admin_review_note   = note
-        if field_comments:
-            existing = record.reviewer_field_comments or {}
-            for field, comment in field_comments.items():
-                existing.setdefault(field, []).append({
-                    "comment": comment, "user": current_user.email,
-                    "role": "admin", "ts": now.isoformat()
-                })
-            record.reviewer_field_comments = existing
-        db.add(AuditLog(
-            user_id=current_user.id, project_id=source.project_id,
-            record_id=record_id,
-            action=AuditAction.RECORD_ADMIN_REVIEWED,
-            after_value={"action": "approved", "note": note},
-        ))
-    else:  # return for correction
-        record.review_status    = ReviewStatus.PENDING
-        record.correction_count = (record.correction_count or 0) + 1
-        record.admin_review_note = note
-        record.extraction_started_at = now  # reset extraction timer
-        if field_comments:
-            existing = record.reviewer_field_comments or {}
-            for field, comment in field_comments.items():
-                existing.setdefault(field, []).append({
-                    "comment": comment, "user": current_user.email,
-                    "role": "admin", "ts": now.isoformat(), "type": "correction"
-                })
-            record.reviewer_field_comments = existing
-        db.add(AuditLog(
-            user_id=current_user.id, project_id=source.project_id,
-            record_id=record_id,
-            action=AuditAction.RECORD_RETURNED_FOR_CORRECTION,
-            after_value={"note": note, "correction_count": record.correction_count},
-        ))
-
-    db.commit()
-    return {"status": "ok", "record_id": record_id, "action": action,
-            "correction_count": record.correction_count or 0}
-
-
-# ─── Record Timeline ──────────────────────────────────────────────────────────
-
-@router.get("/{source_id}/records/{record_id}/timeline")
-def record_timeline(
-    source_id: str, record_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Returns the full audit history for a record, with time-spent calculations.
-    """
-    source = _get_source_or_404(source_id, db)
-    record = db.query(ExtractedRecord).filter(ExtractedRecord.id == record_id).first()
-    if not record:
-        raise HTTPException(status_code=404, detail="Record not found")
-
-    logs = (db.query(AuditLog)
-        .filter(AuditLog.record_id == record_id)
-        .order_by(AuditLog.timestamp.asc())
-        .all())
-
-    # Calculate time between events
-    events = []
-    prev_ts = record.created_at
-    for log in logs:
-        delta_secs = None
-        if prev_ts and log.timestamp:
-            delta_secs = int((log.timestamp - prev_ts).total_seconds())
-        events.append({
-            "action":     log.action.value,
-            "user_id":    log.user_id,
-            "timestamp":  log.timestamp.isoformat() if log.timestamp else None,
-            "seconds_since_previous": delta_secs,
-            "after_value": log.after_value,
-        })
-        prev_ts = log.timestamp
-
-    return {
-        "record_id":       record_id,
-        "current_status":  record.review_status.value,
-        "revision_count":  record.revision_count  or 0,
-        "correction_count": record.correction_count or 0,
-        "created_at":      record.created_at.isoformat() if record.created_at else None,
-        "reviewed_at":     record.reviewed_at.isoformat() if record.reviewed_at else None,
-        "admin_reviewed_at": record.admin_reviewed_at.isoformat() if record.admin_reviewed_at else None,
-        "reviewer_field_comments": record.reviewer_field_comments or {},
-        "events":          events,
-    }
-
-
 # ─── Export package ──────────────────────────────────────────────────────────
 
 @router.get("/{source_id}/export")
@@ -1291,7 +1012,7 @@ def export_source(source_id: str, db: Session = Depends(get_db), current_user: U
 {source.notes or '(none recorded)'}
 
 ---
-Generated by Data Extraction Platform on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
+Generated by Xtrium DataOps on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
 """
 
     import zipfile
@@ -1475,11 +1196,14 @@ async def scrape_source_website(
     if not source.website_url:
         raise HTTPException(status_code=422, detail="This source has no website URL set. Edit the source to add one first.")
 
-    schema_ver = db.query(SchemaVersion).filter(
-        SchemaVersion.schema_id == source.schema_id
-    ).order_by(SchemaVersion.version.desc()).first()
-    if not schema_ver:
-        raise HTTPException(status_code=422, detail="This source's schema has no field definitions yet.")
+    schema_ver = None
+    if source.schema_id:
+        schema_ver = db.query(SchemaVersion).filter(
+            SchemaVersion.schema_id == source.schema_id
+        ).order_by(SchemaVersion.version.desc()).first()
+        if not schema_ver:
+            raise HTTPException(status_code=422, detail="This source's schema has no field definitions yet.")
+    # else: no schema assigned — proceed with flexible extraction (no field constraints)
 
     # Fetch the website
     from app.services.web_scraper import fetch_url_text
@@ -1494,14 +1218,16 @@ async def scrape_source_website(
         raise HTTPException(status_code=422, detail="The page returned no readable text. It may require JavaScript or a login.")
 
     # Run AI extraction on the fetched text
-    schema_fields = schema_ver.definition.get("fields", [])
+    _schema_def = schema_ver.definition if schema_ver else {"flexible_validation": True, "fields": [],
+        "extraction_instructions": "Extract all relevant data from the page matching the task description."}
+    schema_fields = _schema_def.get("fields", [])
     try:
-        rows = await _extract_with_llm(web_text.encode("utf-8"), ".txt", schema_ver.definition, source)
+        rows = await _extract_with_llm(web_text.encode("utf-8"), ".txt", _schema_def, source)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"AI extraction failed: {str(e)}")
 
     if not rows:
-        raise HTTPException(status_code=422, detail="AI found no records matching the schema on this page. The page structure may not match the schema, or the content is behind a login.")
+        raise HTTPException(status_code=422, detail="AI found no records on this page. The page structure may not match what was expected, or the content is behind a login.")
 
     # Clear previous records and create new job
     old_job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
@@ -1524,9 +1250,7 @@ async def scrape_source_website(
     valid_count = 0
     for row in rows:
         mapped = {k: v for k, v in row.items() if k != "_raw_text"}
-        _flexible = bool(schema_ver and schema_ver.definition and
-                       schema_ver.definition.get("flexible_validation"))
-        is_valid, errors = validate_record(mapped, schema_fields, flexible=_flexible)
+        is_valid, errors = validate_record(mapped, schema_fields)
         if is_valid:
             valid_count += 1
         record = ExtractedRecord(
@@ -1587,23 +1311,12 @@ async def llm_verify_source(
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Access denied")
 
-    # ── Detect mode ──────────────────────────────────────────────────────────
+    if not source.website_url:
+        raise HTTPException(status_code=422, detail="No website URL — cannot verify without a source to check against.")
+
     schema_ver = db.query(SchemaVersion).filter(
         SchemaVersion.schema_id == source.schema_id
     ).order_by(SchemaVersion.version.desc()).first()
-
-    schema_definition = schema_ver.definition if schema_ver else {}
-    is_flexible     = bool(schema_definition.get("flexible_validation"))
-    description     = source.description or ""
-    is_task_mode    = is_flexible or any(
-        kw in description for kw in ("TASK", "task_summary", "SCORING CRITERIA")
-    )
-
-    if not is_task_mode and not source.website_url:
-        raise HTTPException(
-            status_code=422,
-            detail="No website URL — cannot verify without a source to check against."
-        )
 
     records = db.query(ExtractedRecord).join(ExtractionJob).filter(
         ExtractionJob.source_id == source_id,
@@ -1612,70 +1325,58 @@ async def llm_verify_source(
     if not records:
         raise HTTPException(status_code=422, detail="No records to verify.")
 
-    fields_def  = schema_definition.get("fields", [])
-    field_ctx   = [
-        {"name": f["name"], "type": f.get("type","string"),
-         "required": f.get("required",False), "description": f.get("description","")}
+    # Fetch the live website
+    from app.services.web_scraper import fetch_url_text
+    try:
+        web_text, meta = await fetch_url_text(source.website_url)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch source website: {str(e)}")
+
+    if not web_text.strip():
+        raise HTTPException(status_code=422, detail="The source website returned no readable text — may require JavaScript or login.")
+
+    schema_definition = schema_ver.definition if schema_ver else {}
+    fields_def = schema_definition.get("fields", [])
+    field_context = [
+        {
+            "name": f["name"],
+            "type": f.get("type", "string"),
+            "required": f.get("required", False),
+            "description": f.get("description", ""),
+            "enum": f.get("enum", []),
+        }
         for f in fields_def if "fixed_value" not in f
     ]
-    ext_instr = schema_definition.get("extraction_instructions", "")
+    extraction_instructions = schema_definition.get("extraction_instructions", "")
 
-    # ── Build system prompt based on mode ────────────────────────────────────
-    if is_task_mode:
-        system_prompt = f"""You are a QA reviewer for the  data operations team (SOP-DS-003).
-You will be given benchmark tasks and submitted extraction records.
+    # Process in batches of 20 to stay within Claude's context window
+    import anthropic
+    from app.core.config import settings
+    client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
 
-Your job:
-1. Read the task and scoring criteria carefully
-2. Evaluate each record's content field against the task requirements
-3. Check source_url is a real page URL (not AI link, not empty)
-4. Check content is a meaningful JSON object (not empty dict)
-5. Flag gaps, vague answers, or missing evidence per the SOP rules
+    BATCH_SIZE = 20
+    total = len(records)
+    verified_count = 0
+    flagged_count = 0
+    error_count = 0
 
-SOP rules:
-- No hallucinated values — null is better than a guess
-- Source traceability required — source_url must directly support the content
-- Flag incomplete answers that do not meet the criteria point count
-- PASS if the record answers the task with sufficient evidence
-
-Respond ONLY with valid JSON. No markdown, no preamble.
-Required format:
-{{
-  "results": [
-    {{
-      "record_id": "<id>",
-      "verdict": "PASS" | "FLAG" | "SKIP",
-      "summary": "<one sentence assessment>",
-      "task_answered": true,
-      "criteria_coverage": ["criterion 1 — covered", "criterion 2 — missing"],
-      "flags": [
-        {{
-          "field": "<field_name>",
-          "issue": "<what is wrong or missing>",
-          "suggested_value": "<what is needed>",
-          "confidence": 0.9
-        }}
-      ]
-    }}
-  ]
-}}"""
-    else:
-        system_prompt = f"""You are a data quality verifier for a structured data extraction system.
+    system_prompt = f"""You are a data quality verifier for a structured data extraction system.
 
 Your job: cross-check extracted records against the actual text from the source website and flag any discrepancies.
 
-Schema: {schema_definition.get("name", "Data Schema")}
-{f"Extraction rules: {ext_instr}" if ext_instr else ""}
+Schema: {schema_definition.get('name', 'Data Schema')}
+{f'Extraction rules: {extraction_instructions}' if extraction_instructions else ''}
 
 Schema fields to verify:
-{json.dumps(field_ctx, indent=2)}
+{json.dumps(field_context, indent=2)}
 
-For each record, check whether field values are:
+The source website text will be provided. For each record, check whether its field values are:
 1. Supported by the website content (PASS)
-2. Inconsistent or likely wrong (FLAG)
-3. Unverifiable from this page (SKIP)
+2. Inconsistent or likely wrong (FLAG with specific correction)
+3. Unverifiable from this page (SKIP - note it cannot be confirmed)
 
 Respond ONLY with valid JSON. No markdown, no preamble.
+
 Required format:
 {{
   "results": [
@@ -1684,36 +1385,16 @@ Required format:
       "verdict": "PASS" | "FLAG" | "SKIP",
       "summary": "<one sentence>",
       "flags": [
-        {{"field": "<field_name>", "issue": "<what wrong>",
-          "suggested_value": "<correct value>", "confidence": 0.9}}
+        {{
+          "field": "<field_name>",
+          "issue": "<what's wrong>",
+          "suggested_value": "<what the website says it should be>",
+          "confidence": 0.0-1.0
+        }}
       ]
     }}
   ]
 }}"""
-
-    # ── Fetch website when not in task mode ──────────────────────────────────
-    web_text = ""
-    if not is_task_mode:
-        from app.services.web_scraper import fetch_url_text
-        try:
-            web_text, _ = await fetch_url_text(source.website_url)
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"Could not fetch source website: {str(e)}")
-        if not web_text.strip():
-            raise HTTPException(status_code=422,
-                detail="The source website returned no readable text.")
-
-    # ── Initialise Gemini ────────────────────────────────────────────────────
-    from google import genai as _genai
-    from app.core.config import settings
-    _client = _genai.Client(api_key=settings.GEMINI_API_KEY)
-    # system_prompt passed inline
-
-    BATCH_SIZE = 20
-    total = len(records)
-    verified_count = 0
-    flagged_count  = 0
-    error_count    = 0
 
     for batch_start in range(0, total, BATCH_SIZE):
         batch = records[batch_start: batch_start + BATCH_SIZE]
@@ -1723,20 +1404,19 @@ Required format:
             for r in batch
         ]
 
-        if is_task_mode:
-            user_content = json.dumps({
-                "task_and_criteria": description[:3000],
-                "records_to_evaluate": records_payload,
-            }, ensure_ascii=False, default=str)
-        else:
-            user_content = json.dumps({
-                "website_text": web_text[:50000],
-                "records_to_verify": records_payload,
-            }, ensure_ascii=False, default=str)
+        user_content = json.dumps({
+            "website_text": web_text[:50000],
+            "records_to_verify": records_payload,
+        }, ensure_ascii=False, default=str)
 
         try:
-            response = _client.models.generate_content(model=settings.LLM_MODEL, contents=system_prompt + "\n\n" + user_content)
-            raw = response.text if response.text else ""
+            response = client.messages.create(
+                model=settings.LLM_MODEL,
+                max_tokens=4000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_content}],
+            )
+            raw = response.content[0].text if response.content else ""
 
             # Strip markdown fences if present
             import re as _re

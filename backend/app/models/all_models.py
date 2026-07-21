@@ -1,5 +1,5 @@
 """
-All database models for the Data Extraction Platform.
+All database models for the Xtrium DataOps Platform.
 Single file for clarity — split by domain if it grows past ~600 lines.
 """
 import uuid
@@ -78,7 +78,6 @@ class ReviewStatus(str, enum.Enum):
     SKIPPED = "skipped"
     QUARANTINED = "quarantined"
     ESCALATED = "escalated"
-    PENDING_ADMIN_REVIEW = "pending_admin_review"
 
 
 class LLMVerdict(str, enum.Enum):
@@ -119,10 +118,6 @@ class AuditAction(str, enum.Enum):
     SOURCE_DATA_UPLOADED = "source_data_uploaded"
     SOURCE_RECORD_FIXED = "source_record_fixed"
     SOURCE_APPROVED = "source_approved"
-    RECORD_ADMIN_REVIEWED = "record_admin_reviewed"
-    RECORD_RETURNED_FOR_CORRECTION = "record_returned_for_correction"
-    RECORD_REVISION_STARTED = "record_revision_started"
-    RECORD_SENT_TO_ADMIN = "record_sent_to_admin"
 
 
 class SourceStatus(str, enum.Enum):
@@ -294,7 +289,7 @@ class SchemaVersion(Base):
     __tablename__ = "schema_versions"
 
     id = Column(String(36), primary_key=True, default=new_uuid)
-    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=False)
+    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)  # nullable: some sources have no fixed schema
     version = Column(Integer, nullable=False)
     definition = Column(JSON, nullable=False)  # Full JSON schema definition
     is_locked = Column(Boolean, default=False)
@@ -320,7 +315,7 @@ class Source(Base):
 
     id = Column(String(36), primary_key=True, default=new_uuid)
     project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
-    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=False)
+    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)  # nullable: some sources have no fixed schema
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     website_url = Column(String(1024), nullable=True)
@@ -361,7 +356,7 @@ class ExtractionJob(Base):
     id = Column(String(36), primary_key=True, default=new_uuid)
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
     source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=True, index=True)
-    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=False)
+    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)  # nullable: some sources have no fixed schema
     schema_version = Column(Integer, nullable=False)
     name = Column(String(255), nullable=False)
     source_file_url = Column(String(1024), nullable=True)
@@ -448,19 +443,6 @@ class ExtractedRecord(Base):
     web_check_summary = Column(Text, nullable=True)
     extracted_fields = Column(JSON, nullable=False, default=dict)
     raw_text = Column(Text, nullable=False)
-    # Admin final review
-    admin_review_note       = Column(Text, nullable=True)
-    admin_reviewed_by       = Column(String(36), ForeignKey("users.id"), nullable=True)
-    admin_reviewed_at       = Column(DateTime(timezone=True), nullable=True)
-    # Revision / correction cycle tracking
-    revision_count          = Column(Integer, default=0, server_default="0", nullable=False)
-    correction_count        = Column(Integer, default=0, server_default="0", nullable=False)
-    # Time tracking — when each stage started
-    extraction_started_at   = Column(DateTime(timezone=True), nullable=True)
-    review_started_at       = Column(DateTime(timezone=True), nullable=True)
-    admin_review_started_at = Column(DateTime(timezone=True), nullable=True)
-    # Per-field reviewer comments {field_name: [{comment, user, ts}]}
-    reviewer_field_comments = Column(JSON, default=dict, server_default="{}")
     is_submitted = Column(Boolean, default=False)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
     canonical_name = Column(String(512), nullable=True, index=True)
@@ -468,8 +450,7 @@ class ExtractedRecord(Base):
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
     job = relationship("ExtractionJob", back_populates="records")
-    reviewer       = relationship("User", foreign_keys=[reviewed_by])
-    admin_reviewer = relationship("User", foreign_keys=[admin_reviewed_by])
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
     llm_reviews = relationship("LLMCallLog", back_populates="record")
     validation_results = relationship("ValidationResult", back_populates="record")
 

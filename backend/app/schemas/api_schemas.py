@@ -1,5 +1,5 @@
 """
-Pydantic v2 request/response schemas for the Data Extraction Platform API.
+Pydantic v2 request/response schemas for the Xtrium DataOps Platform API.
 """
 from __future__ import annotations
 from datetime import datetime
@@ -248,7 +248,7 @@ class SourceCreate(BaseModel):
     name: str
     description: Optional[str] = None
     website_url: Optional[str] = None
-    schema_id: str
+    schema_id: Optional[str] = None  # None = no fixed schema (flexible extraction only)
     assigned_extractor_id: Optional[str] = None
     assigned_reviewer_id: Optional[str] = None
 
