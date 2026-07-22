@@ -125,6 +125,8 @@ export const projectsApi = {
     a.click()
     URL.revokeObjectURL(url)
   },
+  exportPreview: (projectId: string) =>
+    api.get(`/projects/${projectId}/export-preview`).then(r => r.data),
   exportPackage: async (projectId: string, projectName = 'project') => {
     const r = await api.get(`/projects/${projectId}/export-package`, { responseType: 'blob' })
     const url = URL.createObjectURL(new Blob([r.data], { type: 'application/zip' }))
@@ -191,6 +193,8 @@ export const submissionApi = {
 export const statsApi = {
   dashboard: () => api.get('/stats/dashboard').then(r => r.data),
   sourcesSummary: () => api.get('/stats/sources-summary').then(r => r.data),
+  productivity: (projectId?: string) =>
+    api.get('/stats/productivity', { params: projectId ? { project_id: projectId } : {} }).then(r => r.data),
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
