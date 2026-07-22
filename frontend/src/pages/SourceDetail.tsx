@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { JsonRecordViewer } from './JsonRecordViewer'
 import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
-  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen
+  Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
+  ChevronRight, Folder
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -47,6 +48,7 @@ export function SourceDetailPage() {
   const [folderFiles, setFolderFiles] = useState<FileList | null>(null)
   const folderRef = useRef<HTMLInputElement>(null)
   const [uploadMode, setUploadMode] = useState<'file' | 'folder'>('file')
+  const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
   const [showAssign, setShowAssign] = useState(false)
   const [editRecord, setEditRecord] = useState<any | null>(null)
   const [editFields, setEditFields] = useState<Record<string, string>>({})
@@ -359,6 +361,68 @@ export function SourceDetailPage() {
   const allRecordsApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
   const pendingCount = records.filter(r => r.review_status === 'pending').length
   const approvedCount = records.filter(r => r.review_status === 'approved').length
+
+  // ── Folder / subfolder grouping ──────────────────────────────────────────
+  // Records uploaded via folder-picker or ZIP carry `_source_file` (full
+  // relative path e.g. "NETL_METALLIC/subfolder/id_72.json") in extracted_fields.
+  // Build a tree of folders + records so the UI mirrors the uploaded structure.
+  type DisplayItem =
+    | { kind: 'folder'; path: string; depth: number; count: number }
+    | { kind: 'record'; record: any; depth: number }
+
+  const displayItems = useMemo<DisplayItem[]>(() => {
+    const hasFolders = records.some(r => typeof r.extracted_fields?._source_file === 'string' && r.extracted_fields._source_file.includes('/'))
+    if (!hasFolders) {
+      return records.map(r => ({ kind: 'record', record: r, depth: 0 } as DisplayItem))
+    }
+
+    type Node = { records: any[]; children: Map<string, Node> }
+    const root: Node = { records: [], children: new Map() }
+
+    for (const r of records) {
+      const sf = r.extracted_fields?._source_file as string | undefined
+      if (!sf || !sf.includes('/')) { root.records.push(r); continue }
+      const parts = sf.split('/')
+      const folderParts = parts.slice(0, -1)
+      let node = root
+      for (const part of folderParts) {
+        if (!node.children.has(part)) node.children.set(part, { records: [], children: new Map() })
+        node = node.children.get(part)!
+      }
+      node.records.push(r)
+    }
+
+    const countAll = (node: Node): number => {
+      let n = node.records.length
+      for (const child of node.children.values()) n += countAll(child)
+      return n
+    }
+
+    const items: DisplayItem[] = []
+    for (const r of root.records) items.push({ kind: 'record', record: r, depth: 0 })
+
+    const walk = (node: Node, pathPrefix: string, depth: number) => {
+      const sorted = Array.from(node.children.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+      for (const [name, child] of sorted) {
+        const fullPath = pathPrefix ? `${pathPrefix}/${name}` : name
+        items.push({ kind: 'folder', path: fullPath, depth, count: countAll(child) })
+        if (!collapsedFolders.has(fullPath)) {
+          for (const r of child.records) items.push({ kind: 'record', record: r, depth: depth + 1 })
+          walk(child, fullPath, depth + 1)
+        }
+      }
+    }
+    walk(root, '', 0)
+    return items
+  }, [records, collapsedFolders])
+
+  const toggleFolder = (path: string) => {
+    setCollapsedFolders(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path); else next.add(path)
+      return next
+    })
+  }
 
   return (
     <div className="p-8 space-y-6">
@@ -709,9 +773,32 @@ export function SourceDetailPage() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
-                    {records.map((r, idx) => {
+                    {displayItems.map((item, i) => {
+                      if (item.kind === 'folder') {
+                        const isCollapsed = collapsedFolders.has(item.path)
+                        return (
+                          <tr key={'folder-' + item.path}
+                            onClick={() => toggleFolder(item.path)}
+                            style={{ cursor: 'pointer', background: '#f8fafc' }}
+                            className="hover:bg-gray-100 transition">
+                            <td colSpan={7} style={{ padding: '7px 16px', paddingLeft: 16 + item.depth * 20 }}>
+                              <div className="flex items-center gap-2">
+                                {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
+                                <Folder className="w-3.5 h-3.5 text-amber-500" />
+                                <span className="text-xs font-semibold text-gray-600">{item.path.split('/').pop()}</span>
+                                <span className="text-xs text-gray-400">({item.count} record{item.count !== 1 ? 's' : ''})</span>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      }
+
+                      const r = item.record
+                      const idx = records.findIndex(x => x.id === r.id)
                       const ef = r.extracted_fields || {}
-                      const primaryName = String(ef.company_name || ef.material_name || r.canonical_name || r.id.slice(0, 8))
+                      const sourceFile = ef._source_file as string | undefined
+                      const fileName = sourceFile ? sourceFile.split('/').pop()!.replace(/\.(json|csv|xlsx?|pdf|txt)$/i, '') : null
+                      const primaryName = String(fileName || ef.company_name || ef.material_name || r.canonical_name || r.id.slice(0, 8))
                       const sector = ef.industry_sector as string | undefined
                       const tier = ef.supply_chain_tier as number | undefined
                       const sites = Array.isArray(ef.manufacturing_sites) ? ef.manufacturing_sites.length : 0
@@ -726,8 +813,11 @@ export function SourceDetailPage() {
                           className="hover:bg-slate-50 transition"
                           onClick={() => setActiveRecordIndex(idx)}
                         >
-                          <td className="px-5 py-3">
+                          <td className="px-5 py-3" style={{ paddingLeft: 20 + item.depth * 20 }}>
                             <p className="font-semibold text-gray-900 truncate max-w-[200px]">{primaryName}</p>
+                            {sourceFile && (
+                              <p className="text-[10px] text-gray-400 mt-0.5 font-mono truncate max-w-[200px]" title={sourceFile}>{sourceFile}</p>
+                            )}
                             <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                               {sector && <span className="text-xs text-gray-400">{sector}</span>}
                               {tier && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-1.5 rounded">tier {tier}</span>}

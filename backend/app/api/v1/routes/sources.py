@@ -613,8 +613,11 @@ async def upload_multi_to_source(
     for f in files:
         raw = await f.read()
         total_size += len(raw)
-        # Folder pickers send relative paths like "folder/sub/file.json" — keep just the filename
-        fname = (f.filename or "upload").replace("\\", "/").split("/")[-1]
+        # Folder pickers send relative paths like "TopFolder/sub/file.json" in f.filename
+        # (frontend sets this via webkitRelativePath). Keep the FULL path for grouping
+        # in the UI, and just the basename for type-detection / breakdown display.
+        full_path = (f.filename or "upload").replace("\\", "/")
+        fname = full_path.split("/")[-1]
         ext = _os.path.splitext(fname)[1].lower()
 
         if not ext or ext not in ALLOWED_UPLOAD_EXTENSIONS:
@@ -634,6 +637,11 @@ async def upload_multi_to_source(
         except Exception as e:
             file_breakdown.append({"filename": fname, "rows": 0, "error": str(e)[:150]})
             continue
+
+        # Tag each row with its original folder path (unless _parse_zip already tagged it)
+        for row in rows:
+            if isinstance(row, dict) and "_source_file" not in row:
+                row["_source_file"] = full_path
 
         if ext != ".zip":  # zip breakdown already appended above (per inner file)
             file_breakdown.append({"filename": fname, "rows": len(rows)})
@@ -821,6 +829,10 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
     Parse a ZIP archive containing JSON files (or CSV/Excel files).
     Returns (rows, file_breakdown) where file_breakdown is a list of
     {filename, rows, skipped_reason} dicts for the UI summary.
+
+    Each returned row is tagged with "_source_file" = its full path inside
+    the archive (e.g. "NETL_METALLIC/subfolder/id_72.json"), so the UI can
+    reconstruct and display the original folder/subfolder structure.
     """
     import zipfile as zf_mod
     import os as _os
@@ -844,10 +856,16 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
         except Exception as e:
             return [], str(e)[:120]
 
+    def _tag(rows: list[dict], full_path: str) -> list[dict]:
+        for row in rows:
+            if isinstance(row, dict) and "_source_file" not in row:
+                row["_source_file"] = full_path
+        return rows
+
     with zf_mod.ZipFile(io.BytesIO(content)) as zf:
         names = [n for n in zf.namelist() if not is_skippable(n) and not n.endswith("/")]
         for name in names:
-            fname = name.split("/")[-1]  # just the filename
+            fname = name.split("/")[-1]  # just the filename, for type detection
             ext = _os.path.splitext(fname)[1].lower()
             if ext == ".zip":
                 # One level of nesting — unzip inner ZIP and process its members
@@ -859,12 +877,15 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
                                 continue
                             inner_fname = inner_name.split("/")[-1]
                             rows, err = parse_member(inner_fname, inner_zf.read(inner_name))
+                            full_path = f"{name.rsplit('.', 1)[0]}/{inner_name}"
+                            rows = _tag(rows, full_path)
                             breakdown.append({"filename": f"{fname}/{inner_fname}", "rows": len(rows), "error": err})
                             all_rows.extend(rows)
                 except Exception as e:
                     breakdown.append({"filename": fname, "rows": 0, "error": f"inner ZIP error: {str(e)[:80]}"})
             elif ext in SUPPORTED:
                 rows, err = parse_member(fname, zf.read(name))
+                rows = _tag(rows, name)  # full internal path, preserves subfolders
                 breakdown.append({"filename": fname, "rows": len(rows), "error": err})
                 all_rows.extend(rows)
             # else: skip silently (images, READMEs, etc.)
