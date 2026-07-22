@@ -6,7 +6,7 @@ import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
   Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
-  ChevronRight, Folder
+  Folder
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
