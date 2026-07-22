@@ -169,7 +169,7 @@ class JobStateHistoryOut(BaseModel):
 class RecordOut(BaseModel):
     id: str
     job_id: str
-    schema_version: int
+    schema_version: Optional[int] = None
     extraction_confidence: str
     pipeline_warnings: list
     is_schema_valid: bool = True
@@ -220,7 +220,7 @@ class SubmissionBatchOut(BaseModel):
     submitted_by: str
     destination: str
     record_count: int
-    schema_version: int
+    schema_version: Optional[int] = None
     payload_sha256: Optional[str]
     file_url: Optional[str]
     status: str
