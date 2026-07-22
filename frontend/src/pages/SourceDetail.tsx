@@ -46,6 +46,7 @@ export function SourceDetailPage() {
   const fileRef = useRef<HTMLInputElement>(null)
   const [folderFiles, setFolderFiles] = useState<FileList | null>(null)
   const folderRef = useRef<HTMLInputElement>(null)
+  const [uploadMode, setUploadMode] = useState<'file' | 'folder'>('file')
   const [showAssign, setShowAssign] = useState(false)
   const [editRecord, setEditRecord] = useState<any | null>(null)
   const [editFields, setEditFields] = useState<Record<string, string>>({})
@@ -839,122 +840,148 @@ export function SourceDetailPage() {
       )}
 
       {/* Upload modal */}
-      <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Upload extracted data to this source — individual files or a ZIP bundle.">
-        <form onSubmit={handleUpload} className="space-y-4">
-          {source.total_records > 0 && (
-            <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-xs text-amber-700">
-              Re-uploading replaces all {source.total_records} existing records in this source.
-            </div>
-          )}
+      <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Add extracted data to this source.">
+        <form onSubmit={handleUpload} className="flex flex-col" style={{ maxHeight: '72vh' }}>
 
-          {/* File type legend */}
-          <div className="grid grid-cols-2 gap-2 text-xs">
-            {[
-              { icon: '🗂️', label: 'ZIP of JSONs', desc: 'Bundle from extractor script — all files processed at once' },
-              { icon: '📄', label: 'JSON / CSV / Excel', desc: 'Single structured file with multiple records' },
-              { icon: '📋', label: 'PDF / TXT', desc: 'Raw document — AI extracts records automatically' },
-            ].map(({ icon, label, desc }) => (
-              <div key={label} className="flex items-start gap-2 p-2.5 bg-gray-50 rounded-lg border border-gray-100">
-                <span className="text-base leading-none mt-0.5">{icon}</span>
-                <div>
-                  <p className="font-medium text-gray-700">{label}</p>
-                  <p className="text-gray-400 leading-relaxed mt-0.5">{desc}</p>
-                </div>
-              </div>
-            ))}
-            <div className="flex items-start gap-2 p-2.5 bg-brand-50 rounded-lg border border-brand-100">
-              <span className="text-base leading-none mt-0.5">⚡</span>
-              <div>
-                <p className="font-medium text-brand-700">Auto-Scrape</p>
-                <p className="text-brand-500 leading-relaxed mt-0.5">Use the scrape button to pull directly from the source URL</p>
-              </div>
-            </div>
-          </div>
+          {/* Scrollable body */}
+          <div className="overflow-y-auto scrollbar-thin -mx-6 px-6 space-y-4" style={{ paddingBottom: 4 }}>
 
-          {/* Drop zone */}
-          <div
-            onClick={() => !uploading && fileRef.current?.click()}
-            className={cn(
-              'border-2 border-dashed rounded-xl p-6 text-center cursor-pointer transition',
-              file ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
-              uploading && 'opacity-60 cursor-not-allowed'
+            {source.total_records > 0 && (
+              <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700">
+                Re-uploading replaces all {source.total_records} existing records.
+              </div>
             )}
-          >
-            <input
-              ref={fileRef}
-              type="file"
-              accept=".csv,.xlsx,.xls,.json,.pdf,.txt,.zip"
-              className="hidden"
-              onChange={e => { setFile(e.target.files?.[0] ?? null); setFolderFiles(null) }}
-            />
-            <Upload className="w-6 h-6 mx-auto text-gray-400 mb-2" />
-            {file ? (
-              <div>
-                <p className="text-sm font-semibold text-brand-700">{file.name}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{(file.size / 1024).toFixed(1)} KB</p>
-                {file.name.toLowerCase().endsWith('.zip') && (
-                  <p className="text-xs text-brand-600 mt-1.5 font-medium">ZIP detected — all JSON/CSV/Excel files inside will be processed</p>
+
+            {/* Mode tabs */}
+            <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
+              {([
+                { key: 'file',   label: 'File',   icon: Upload },
+                { key: 'folder', label: 'Folder',  icon: FolderOpen },
+              ] as const).map(({ key, label, icon: Icon }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => { setUploadMode(key); if (key === 'folder') setFile(null); else setFolderFiles(null) }}
+                  className={cn(
+                    'flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-sm font-medium transition',
+                    uploadMode === key ? 'bg-white text-brand-700 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  )}
+                >
+                  <Icon className="w-3.5 h-3.5" /> {label}
+                </button>
+              ))}
+            </div>
+
+            {/* FILE mode */}
+            {uploadMode === 'file' && (
+              <>
+                <div
+                  onClick={() => !uploading && fileRef.current?.click()}
+                  className={cn(
+                    'border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition',
+                    file ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
+                    uploading && 'opacity-60 cursor-not-allowed'
+                  )}
+                >
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".csv,.xlsx,.xls,.json,.pdf,.txt,.zip"
+                    className="hidden"
+                    onChange={e => { setFile(e.target.files?.[0] ?? null); setFolderFiles(null) }}
+                  />
+                  <Upload className="w-6 h-6 mx-auto text-gray-400 mb-2" />
+                  {file ? (
+                    <div>
+                      <p className="text-sm font-semibold text-brand-700">{file.name}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{(file.size / 1024).toFixed(1)} KB</p>
+                      {file.name.toLowerCase().endsWith('.zip') && (
+                        <p className="text-xs text-brand-600 mt-1.5 font-medium">ZIP detected — all files inside will be processed</p>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-sm text-gray-600 font-medium">Drop a file or click to browse</p>
+                      <p className="text-xs text-gray-400 mt-1">ZIP · JSON · CSV · Excel · PDF · TXT</p>
+                    </div>
+                  )}
+                </div>
+
+                {file && /\.(pdf|txt)$/i.test(file.name) && (
+                  <div className="flex items-start gap-2 bg-purple-50 border border-purple-200 rounded-xl p-3">
+                    <Brain className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
+                    <p className="text-xs text-purple-700">
+                      <strong>AI extraction</strong> — reads the document and extracts records automatically. Takes 10–30s.
+                    </p>
+                  </div>
+                )}
+              </>
+            )}
+
+            {/* FOLDER mode */}
+            {uploadMode === 'folder' && (
+              <div
+                onClick={() => !uploading && folderRef.current?.click()}
+                className={cn(
+                  'border-2 border-dashed rounded-xl p-5 text-center cursor-pointer transition',
+                  folderFiles && folderFiles.length > 0 ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
+                  uploading && 'opacity-60 cursor-not-allowed'
+                )}
+              >
+                <input
+                  ref={folderRef}
+                  type="file"
+                  // @ts-ignore — non-standard attributes, supported by all major browsers for folder selection
+                  webkitdirectory=""
+                  directory=""
+                  multiple
+                  className="hidden"
+                  onChange={e => { setFolderFiles(e.target.files); setFile(null) }}
+                />
+                <FolderOpen className="w-6 h-6 mx-auto text-gray-400 mb-2" />
+                {folderFiles && folderFiles.length > 0 ? (
+                  <div>
+                    <p className="text-sm font-semibold text-brand-700">{folderFiles.length} files selected</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {(Array.from(folderFiles).reduce((s, f) => s + f.size, 0) / 1024).toFixed(1)} KB total
+                    </p>
+                  </div>
+                ) : (
+                  <div>
+                    <p className="text-sm text-gray-600 font-medium">Select a folder</p>
+                    <p className="text-xs text-gray-400 mt-1">Every file inside is processed together — matches SOP folder deliveries</p>
+                  </div>
                 )}
               </div>
-            ) : (
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Drop a file or click to browse</p>
-                <p className="text-xs text-gray-400 mt-1">ZIP · JSON · CSV · Excel · PDF · TXT</p>
-              </div>
             )}
+
+            {/* Compact file-type legend */}
+            <details className="group">
+              <summary className="text-xs text-gray-400 cursor-pointer select-none flex items-center gap-1 hover:text-gray-600">
+                <ChevronDown className="w-3 h-3 transition group-open:rotate-180" /> What file types are supported?
+              </summary>
+              <div className="grid grid-cols-2 gap-2 text-xs mt-2">
+                {[
+                  { icon: '🗂️', label: 'ZIP / Folder', desc: 'All files inside processed at once' },
+                  { icon: '📄', label: 'JSON / CSV / Excel', desc: 'Structured file with records' },
+                  { icon: '📋', label: 'PDF / TXT', desc: 'AI extracts records automatically' },
+                  { icon: '⚡', label: 'Auto-Scrape', desc: 'Use the scrape button instead', accent: true },
+                ].map(({ icon, label, desc, accent }) => (
+                  <div key={label} className={cn('flex items-start gap-2 p-2 rounded-lg border',
+                    accent ? 'bg-brand-50 border-brand-100' : 'bg-gray-50 border-gray-100')}>
+                    <span className="text-sm leading-none mt-0.5">{icon}</span>
+                    <div>
+                      <p className={cn('font-medium', accent ? 'text-brand-700' : 'text-gray-700')}>{label}</p>
+                      <p className={cn('leading-snug mt-0.5', accent ? 'text-brand-500' : 'text-gray-400')}>{desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
           </div>
 
-          {file && /\.(pdf|txt)$/i.test(file.name) && (
-            <div className="flex items-start gap-2 bg-purple-50 border border-purple-200 rounded-xl p-3">
-              <Brain className="w-4 h-4 text-purple-600 shrink-0 mt-0.5" />
-              <p className="text-xs text-purple-700">
-                <strong>AI extraction</strong> — Claude will read this document and extract records matching the schema. Takes 10–30 seconds.
-              </p>
-            </div>
-          )}
-
-          {/* Folder upload — for SOPs where source data ships as a folder of files */}
-          <div className="relative flex items-center gap-3">
-            <div className="flex-1 h-px bg-gray-200" />
-            <span className="text-xs text-gray-400 font-medium">OR</span>
-            <div className="flex-1 h-px bg-gray-200" />
-          </div>
-
-          <div
-            onClick={() => !uploading && folderRef.current?.click()}
-            className={cn(
-              'border-2 border-dashed rounded-xl p-4 text-center cursor-pointer transition',
-              folderFiles && folderFiles.length > 0 ? 'border-brand-400 bg-brand-50' : 'border-gray-300 hover:border-brand-400 hover:bg-gray-50',
-              uploading && 'opacity-60 cursor-not-allowed'
-            )}
-          >
-            <input
-              ref={folderRef}
-              type="file"
-              // @ts-ignore — non-standard attributes, but supported by all major browsers for folder selection
-              webkitdirectory=""
-              directory=""
-              multiple
-              className="hidden"
-              onChange={e => { setFolderFiles(e.target.files); setFile(null) }}
-            />
-            <FolderOpen className="w-5 h-5 mx-auto text-gray-400 mb-1.5" />
-            {folderFiles && folderFiles.length > 0 ? (
-              <div>
-                <p className="text-sm font-semibold text-brand-700">{folderFiles.length} files selected</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {(Array.from(folderFiles).reduce((s, f) => s + f.size, 0) / 1024).toFixed(1)} KB total
-                </p>
-              </div>
-            ) : (
-              <div>
-                <p className="text-sm text-gray-600 font-medium">Select a folder</p>
-                <p className="text-xs text-gray-400 mt-1">Every file inside is processed together — matches SOP folder deliveries</p>
-              </div>
-            )}
-          </div>
-
-          <div className="flex justify-end gap-3 pt-2">
+          {/* Sticky footer */}
+          <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-gray-100">
             <Button variant="secondary" type="button" onClick={() => setShowUpload(false)} disabled={uploading}>Cancel</Button>
             <Button type="submit" loading={uploading} disabled={!file && !(folderFiles && folderFiles.length > 0)}>
               {uploading
