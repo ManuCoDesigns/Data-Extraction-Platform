@@ -6,7 +6,7 @@ import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
   Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
-  Folder
+  ChevronRight, Folder
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -49,6 +49,61 @@ export function SourceDetailPage() {
   const folderRef = useRef<HTMLInputElement>(null)
   const [uploadMode, setUploadMode] = useState<'file' | 'folder'>('file')
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
+
+  // ── Folder / subfolder grouping ──────────────────────────────────────────
+  // Records uploaded via folder-picker or ZIP carry `_source_file` (full
+  // relative path e.g. "NETL_METALLIC/subfolder/id_72.json") in extracted_fields.
+  // Build a tree of folders + records so the UI mirrors the uploaded structure.
+  type DisplayItem =
+    | { kind: 'folder'; path: string; depth: number; count: number }
+    | { kind: 'record'; record: any; depth: number }
+
+  const displayItems = useMemo<DisplayItem[]>(() => {
+    const hasFolders = records.some(r => typeof r.extracted_fields?._source_file === 'string' && r.extracted_fields._source_file.includes('/'))
+    if (!hasFolders) {
+      return records.map(r => ({ kind: 'record', record: r, depth: 0 } as DisplayItem))
+    }
+
+    type Node = { records: any[]; children: Map<string, Node> }
+    const root: Node = { records: [], children: new Map() }
+
+    for (const r of records) {
+      const sf = r.extracted_fields?._source_file as string | undefined
+      if (!sf || !sf.includes('/')) { root.records.push(r); continue }
+      const parts = sf.split('/')
+      const folderParts = parts.slice(0, -1)
+      let node = root
+      for (const part of folderParts) {
+        if (!node.children.has(part)) node.children.set(part, { records: [], children: new Map() })
+        node = node.children.get(part)!
+      }
+      node.records.push(r)
+    }
+
+    const countAll = (node: Node): number => {
+      let n = node.records.length
+      for (const child of node.children.values()) n += countAll(child)
+      return n
+    }
+
+    const items: DisplayItem[] = []
+    for (const r of root.records) items.push({ kind: 'record', record: r, depth: 0 })
+
+    const walk = (node: Node, pathPrefix: string, depth: number) => {
+      const sorted = Array.from(node.children.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+      for (const [name, child] of sorted) {
+        const fullPath = pathPrefix ? `${pathPrefix}/${name}` : name
+        items.push({ kind: 'folder', path: fullPath, depth, count: countAll(child) })
+        if (!collapsedFolders.has(fullPath)) {
+          for (const r of child.records) items.push({ kind: 'record', record: r, depth: depth + 1 })
+          walk(child, fullPath, depth + 1)
+        }
+      }
+    }
+    walk(root, '', 0)
+    return items
+  }, [records, collapsedFolders])
+
   const [showAssign, setShowAssign] = useState(false)
   const [editRecord, setEditRecord] = useState<any | null>(null)
   const [editFields, setEditFields] = useState<Record<string, string>>({})
@@ -361,60 +416,6 @@ export function SourceDetailPage() {
   const allRecordsApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
   const pendingCount = records.filter(r => r.review_status === 'pending').length
   const approvedCount = records.filter(r => r.review_status === 'approved').length
-
-  // ── Folder / subfolder grouping ──────────────────────────────────────────
-  // Records uploaded via folder-picker or ZIP carry `_source_file` (full
-  // relative path e.g. "NETL_METALLIC/subfolder/id_72.json") in extracted_fields.
-  // Build a tree of folders + records so the UI mirrors the uploaded structure.
-  type DisplayItem =
-    | { kind: 'folder'; path: string; depth: number; count: number }
-    | { kind: 'record'; record: any; depth: number }
-
-  const displayItems = useMemo<DisplayItem[]>(() => {
-    const hasFolders = records.some(r => typeof r.extracted_fields?._source_file === 'string' && r.extracted_fields._source_file.includes('/'))
-    if (!hasFolders) {
-      return records.map(r => ({ kind: 'record', record: r, depth: 0 } as DisplayItem))
-    }
-
-    type Node = { records: any[]; children: Map<string, Node> }
-    const root: Node = { records: [], children: new Map() }
-
-    for (const r of records) {
-      const sf = r.extracted_fields?._source_file as string | undefined
-      if (!sf || !sf.includes('/')) { root.records.push(r); continue }
-      const parts = sf.split('/')
-      const folderParts = parts.slice(0, -1)
-      let node = root
-      for (const part of folderParts) {
-        if (!node.children.has(part)) node.children.set(part, { records: [], children: new Map() })
-        node = node.children.get(part)!
-      }
-      node.records.push(r)
-    }
-
-    const countAll = (node: Node): number => {
-      let n = node.records.length
-      for (const child of node.children.values()) n += countAll(child)
-      return n
-    }
-
-    const items: DisplayItem[] = []
-    for (const r of root.records) items.push({ kind: 'record', record: r, depth: 0 })
-
-    const walk = (node: Node, pathPrefix: string, depth: number) => {
-      const sorted = Array.from(node.children.entries()).sort((a, b) => a[0].localeCompare(b[0]))
-      for (const [name, child] of sorted) {
-        const fullPath = pathPrefix ? `${pathPrefix}/${name}` : name
-        items.push({ kind: 'folder', path: fullPath, depth, count: countAll(child) })
-        if (!collapsedFolders.has(fullPath)) {
-          for (const r of child.records) items.push({ kind: 'record', record: r, depth: depth + 1 })
-          walk(child, fullPath, depth + 1)
-        }
-      }
-    }
-    walk(root, '', 0)
-    return items
-  }, [records, collapsedFolders])
 
   const toggleFolder = (path: string) => {
     setCollapsedFolders(prev => {
