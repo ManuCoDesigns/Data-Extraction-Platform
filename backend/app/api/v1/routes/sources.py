@@ -396,6 +396,27 @@ async def upload_to_source(
         file_breakdown = []
         files_processed = 1
 
+    return _finalize_upload(
+        source=source, source_id=source_id, rows=rows, ext=ext,
+        extraction_method=extraction_method, file_breakdown=file_breakdown,
+        files_processed=files_processed, display_filename=file.filename or "upload",
+        content_len=len(content), schema_ver=schema_ver, schema_fields=schema_fields,
+        current_user=current_user, db=db,
+    )
+
+
+def _finalize_upload(
+    source: "Source", source_id: str, rows: list[dict], ext: str,
+    extraction_method: str, file_breakdown: list[dict], files_processed: int,
+    display_filename: str, content_len: int,
+    schema_ver, schema_fields: list[dict],
+    current_user: "User", db: Session,
+) -> "SourceUploadSummary":
+    """
+    Shared logic for turning parsed rows into an ExtractionJob + ExtractedRecords.
+    Used by both single-file upload and multi-file/folder upload — keeps the
+    schema-mapping, field-inference, and validation logic in exactly one place.
+    """
     # Clear any previous records for this source (re-upload replaces everything)
     old_job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
     if old_job_ids:
@@ -412,7 +433,7 @@ async def upload_to_source(
         project_id=source.project_id, source_id=source_id,
         schema_id=source.schema_id, schema_version=(schema_ver.version if schema_ver else None),
         name=f"{source.name} — {extraction_method} upload {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
-        source_file_name=file.filename, source_file_size_bytes=len(content),
+        source_file_name=display_filename, source_file_size_bytes=content_len,
         source_type=file_ext_type, status=JobStatus.READY_FOR_REVIEW,
         total_raw_records=len(rows), total_extracted=len(rows),
         created_by=current_user.id,
@@ -524,7 +545,7 @@ async def upload_to_source(
         db.add(AuditLog(
             user_id=current_user.id, project_id=source.project_id,
             action=AuditAction.SOURCE_DATA_UPLOADED,
-            after_value={"file": file.filename, "method": extraction_method, "rows": len(rows), "valid": valid_count, "invalid": invalid_count},
+            after_value={"file": display_filename, "method": extraction_method, "rows": len(rows), "valid": valid_count, "invalid": invalid_count},
         ))
         db.commit()
     except Exception as db_err:
@@ -543,6 +564,98 @@ async def upload_to_source(
         extraction_method=extraction_method,
         files_processed=files_processed,
         file_breakdown=file_breakdown,
+    )
+
+
+@router.post("/{source_id}/upload-multi", response_model=SourceUploadSummary)
+async def upload_multi_to_source(
+    source_id: str,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Folder / multi-file upload — for SOPs where source data ships as a folder
+    of files rather than one archive. Select an entire folder in the browser
+    (folder picker sends every file inside it in one request) and each file
+    is parsed with the same logic as a single upload:
+
+      - JSON / CSV / Excel  -> parsed directly as structured rows
+      - PDF / TXT           -> AI extraction (same as single-file AI upload)
+      - .zip inside folder  -> unzipped and its contents parsed too (one level)
+
+    All rows across every file are combined into a single ExtractionJob,
+    same as if they'd been uploaded as one ZIP.
+    """
+    source = _get_source_or_404(source_id, db)
+    if not _is_assigned_extractor(current_user, source):
+        raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
+
+    if not files:
+        raise HTTPException(status_code=422, detail="No files provided.")
+
+    import os as _os
+
+    schema_ver = None
+    if source.schema_id:
+        schema_ver = db.query(SchemaVersion).filter(
+            SchemaVersion.schema_id == source.schema_id
+        ).order_by(SchemaVersion.version.desc()).first()
+    schema_fields = []
+    if schema_ver and schema_ver.definition:
+        schema_fields = schema_ver.definition.get("fields", [])
+
+    all_rows: list[dict] = []
+    file_breakdown: list[dict] = []
+    ai_used = False
+    total_size = 0
+
+    for f in files:
+        raw = await f.read()
+        total_size += len(raw)
+        # Folder pickers send relative paths like "folder/sub/file.json" — keep just the filename
+        fname = (f.filename or "upload").replace("\\", "/").split("/")[-1]
+        ext = _os.path.splitext(fname)[1].lower()
+
+        if not ext or ext not in ALLOWED_UPLOAD_EXTENSIONS:
+            file_breakdown.append({"filename": fname, "rows": 0, "error": f"unsupported type '{ext or 'unknown'}'"})
+            continue
+
+        try:
+            if ext in AI_EXTRACTION_EXTENSIONS:
+                _schema_def = schema_ver.definition if schema_ver else {"flexible_validation": True, "fields": []}
+                rows = await _extract_with_llm(raw, ext, _schema_def, source)
+                ai_used = True
+            elif ext == ".zip":
+                rows, inner_breakdown = _parse_zip(raw)
+                file_breakdown.extend(inner_breakdown)
+            else:
+                rows = _parse_rows(raw, ext, fname)
+        except Exception as e:
+            file_breakdown.append({"filename": fname, "rows": 0, "error": str(e)[:150]})
+            continue
+
+        if ext != ".zip":  # zip breakdown already appended above (per inner file)
+            file_breakdown.append({"filename": fname, "rows": len(rows)})
+        all_rows.extend(rows)
+
+    if not all_rows:
+        skipped = [f for f in file_breakdown if f.get("error")]
+        detail = f"No records found across {len(files)} file(s)."
+        if skipped:
+            detail += f" Errors: {'; '.join(x['filename'] + ': ' + x['error'] for x in skipped[:3])}"
+        raise HTTPException(status_code=422, detail=detail)
+
+    extraction_method = "llm" if ai_used else "structured"
+    files_processed = len([f for f in file_breakdown if not f.get("error")])
+
+    return _finalize_upload(
+        source=source, source_id=source_id, rows=all_rows, ext=".zip",
+        extraction_method=extraction_method, file_breakdown=file_breakdown,
+        files_processed=files_processed,
+        display_filename=f"{len(files)} files (folder upload)",
+        content_len=total_size, schema_ver=schema_ver, schema_fields=schema_fields,
+        current_user=current_user, db=db,
     )
 
 

@@ -125,8 +125,6 @@ export const projectsApi = {
     a.click()
     URL.revokeObjectURL(url)
   },
-  exportPreview: (projectId: string) =>
-    api.get(`/projects/${projectId}/export-preview`).then(r => r.data),
   exportPackage: async (projectId: string, projectName = 'project') => {
     const r = await api.get(`/projects/${projectId}/export-package`, { responseType: 'blob' })
     const url = URL.createObjectURL(new Blob([r.data], { type: 'application/zip' }))
@@ -193,8 +191,6 @@ export const submissionApi = {
 export const statsApi = {
   dashboard: () => api.get('/stats/dashboard').then(r => r.data),
   sourcesSummary: () => api.get('/stats/sources-summary').then(r => r.data),
-  productivity: (projectId?: string) =>
-    api.get('/stats/productivity', { params: projectId ? { project_id: projectId } : {} }).then(r => r.data),
 }
 
 // ─── Notifications ────────────────────────────────────────────────────────────
@@ -274,21 +270,17 @@ export const sourcesApi = {
   get: (id: string) => api.get(`/sources/${id}`).then(r => r.data),
   update: (id: string, data: object) => api.patch(`/sources/${id}`, data).then(r => r.data),
   delete: (id: string) => api.delete(`/sources/${id}`).then(r => r.data),
-  adminReview: (sourceId: string, recordId: string, payload: {action: string; note: string; field_comments?: Record<string,string>}) =>
-    api.post(`/sources/${sourceId}/records/${recordId}/admin-review`, payload).then(r => r.data),
-  getTimeline: (sourceId: string, recordId: string) =>
-    api.get(`/sources/${sourceId}/records/${recordId}/timeline`).then(r => r.data),
-  uploadMulti: (id: string, files: File[]) => {
-    const fd = new FormData()
-    files.forEach(f => fd.append('files', f))
-    return api.post(`/sources/${id}/upload-multi`, fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }).then(r => r.data)
-  },
   upload: (id: string, formData: FormData) =>
     api.post(`/sources/${id}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data),
+  uploadMulti: (id: string, files: File[]) => {
+    const formData = new FormData()
+    files.forEach(f => formData.append('files', f, (f as any).webkitRelativePath || f.name))
+    return api.post(`/sources/${id}/upload-multi`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then(r => r.data)
+  },
   records: (id: string, params?: object) =>
     api.get(`/sources/${id}/records`, { params }).then(r => r.data),
   fixRecord: (sourceId: string, recordId: string, extracted_fields: object) =>
