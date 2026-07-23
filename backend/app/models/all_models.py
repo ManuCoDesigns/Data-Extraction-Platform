@@ -490,7 +490,7 @@ class LLMCallLog(Base):
 
     id = Column(String(36), primary_key=True, default=new_uuid)
     record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="CASCADE"), nullable=False)
-    job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=False)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False)
     model = Column(String(100), nullable=False)
     input_tokens = Column(Integer, nullable=True)
     output_tokens = Column(Integer, nullable=True)
@@ -526,7 +526,7 @@ class SubmissionBatch(Base):
     __tablename__ = "submission_batches"
 
     id = Column(String(36), primary_key=True, default=new_uuid)
-    job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=False)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="SET NULL"), nullable=True)
     submitted_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     destination = Column(String(100), nullable=False)
     record_count = Column(Integer, nullable=False)
@@ -566,9 +566,9 @@ class AuditLog(Base):
     timestamp = Column(DateTime(timezone=True), default=now_utc, nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=True)
-    source_id = Column(String(36), ForeignKey("sources.id"), nullable=True, index=True)
-    job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=True)
-    record_id = Column(String(36), ForeignKey("extracted_records.id"), nullable=True)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="SET NULL"), nullable=True, index=True)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="SET NULL"), nullable=True)
+    record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="SET NULL"), nullable=True)
     action = Column(SAEnum(AuditAction), nullable=False)
     before_value = Column(JSON, nullable=True)
     after_value = Column(JSON, nullable=True)

@@ -228,9 +228,14 @@ export function TeamWorkloadPage() {
                       )}
                     </td>
                     <td style={{ padding: '12px 14px' }}>
-                      {s.reviewer_elapsed && (
+                      {s.reviewer_elapsed ? (
                         <span style={{ fontSize: 11, fontWeight: 600, color: '#7c3aed', display: 'flex', alignItems: 'center', gap: 3 }}>
                           <Clock style={{ width: 11, height: 11 }} /> {s.reviewer_elapsed}
+                        </span>
+                      ) : s.waiting_elapsed && (
+                        <span title="No reviewer has opened this yet — time since it became ready"
+                          style={{ fontSize: 11, fontWeight: 600, color: '#d97706', display: 'flex', alignItems: 'center', gap: 3 }}>
+                          <Clock style={{ width: 11, height: 11 }} /> waiting {s.waiting_elapsed}
                         </span>
                       )}
                     </td>

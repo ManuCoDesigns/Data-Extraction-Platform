@@ -161,9 +161,26 @@ def _get_source_or_404(source_id: str, db: Session) -> Source:
 
 
 def _recompute_counts(source: Source, db: Session):
-    records = db.query(ExtractedRecord).join(ExtractionJob).filter(
-        ExtractionJob.source_id == source.id
-    ).all()
+    """
+    Only counts records from the MOST RECENT extraction job for this source.
+    Defensive by design: if an old job ever fails to get cleaned up on
+    re-upload (e.g. a stale FK constraint blocking deletion), stale records
+    from it must never silently inflate the visible count again.
+    """
+    latest_job = (
+        db.query(ExtractionJob)
+        .filter(ExtractionJob.source_id == source.id)
+        .order_by(ExtractionJob.created_at.desc())
+        .first()
+    )
+    if not latest_job:
+        source.total_records = 0
+        source.valid_records = 0
+        source.invalid_records = 0
+        source.approved_records = 0
+        return
+
+    records = db.query(ExtractedRecord).filter(ExtractedRecord.job_id == latest_job.id).all()
     source.total_records = len(records)
     source.valid_records = sum(1 for r in records if r.is_schema_valid)
     source.invalid_records = source.total_records - source.valid_records
@@ -326,6 +343,12 @@ def team_workload(
 
         llm_started = getattr(s, "llm_verification_started_at", None)
 
+        # For READY_FOR_REVIEW sources, a reviewer may not have opened it yet
+        # (review_started_at is still null) — show how long it's been WAITING
+        # in the queue instead of leaving the time column blank.
+        is_waiting_for_review = s.status == SourceStatus.READY_FOR_REVIEW and not s.review_started_at
+        waiting_since = getattr(s, "llm_verification_completed_at", None) or s.extraction_completed_at
+
         rows.append({
             "source_id": s.id,
             "source_name": s.name,
@@ -338,7 +361,9 @@ def team_workload(
             "llm_verifying": is_llm_verifying,
             "llm_elapsed": elapsed_label(llm_started) if is_llm_verifying else None,
             "reviewer": reviewer,
-            "reviewer_elapsed": elapsed_label(s.review_started_at) if is_reviewing else None,
+            "reviewer_elapsed": elapsed_label(s.review_started_at) if is_reviewing and s.review_started_at else None,
+            "waiting_for_review": is_waiting_for_review,
+            "waiting_elapsed": elapsed_label(waiting_since) if is_waiting_for_review else None,
             "total_records": s.total_records or 0,
             "valid_records": s.valid_records or 0,
             "invalid_records": s.invalid_records or 0,
@@ -482,6 +507,11 @@ def get_source(source_id: str, db: Session = Depends(get_db), current_user: User
     source = _get_source_or_404(source_id, db)
     if not _can_access(current_user, source.project):
         raise HTTPException(status_code=403, detail="Access denied")
+    # Self-heal: if an older bug ever left stale counts (e.g. from an old job
+    # that failed to clean up on re-upload), correct them the moment anyone
+    # opens the source — cheap, and keeps the number always trustworthy.
+    _recompute_counts(source, db)
+    db.commit()
     return _serialize_source(source)
 
 
@@ -1143,10 +1173,14 @@ def list_source_records(
         if not member:
             raise HTTPException(status_code=403, detail="Access denied")
 
-    q = (
-        db.query(ExtractedRecord)
-        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+    latest_job = (
+        db.query(ExtractionJob)
         .filter(ExtractionJob.source_id == source_id)
+        .order_by(ExtractionJob.created_at.desc())
+        .first()
+    )
+    q = db.query(ExtractedRecord).filter(
+        ExtractedRecord.job_id == (latest_job.id if latest_job else None)
     )
     if validity == "valid":
         q = q.filter(ExtractedRecord.is_schema_valid == True)
