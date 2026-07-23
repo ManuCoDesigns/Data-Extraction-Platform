@@ -285,6 +285,25 @@ export const sourcesApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },
+  workload: (projectId?: string) =>
+    api.get('/sources/workload', { params: projectId ? { project_id: projectId } : {} }).then(r => r.data),
+  exportTimesheet: async (projectId?: string) => {
+    const res = await api.get('/sources/export/timesheet', {
+      params: projectId ? { project_id: projectId } : {},
+      responseType: 'blob',
+    })
+    const disposition = res.headers['content-disposition'] as string | undefined
+    const match = disposition?.match(/filename="?([^"]+)"?/)
+    const filename = match?.[1] || `delivery_timesheet_${new Date().toISOString().slice(0, 10)}.xlsx`
+    const url = window.URL.createObjectURL(new Blob([res.data]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    window.URL.revokeObjectURL(url)
+  },
   records: (id: string, params?: object) =>
     api.get(`/sources/${id}/records`, { params }).then(r => r.data),
   fixRecord: (sourceId: string, recordId: string, extracted_fields: object) =>

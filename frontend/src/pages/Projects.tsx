@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, FolderKanban, Database, CheckCircle, Clock, ArrowRight, Trash2, Edit3 } from 'lucide-react'
-import { projectsApi } from '@/api/client'
+import { Plus, FolderKanban, Database, CheckCircle, Clock, ArrowRight, Trash2, Edit3, Download } from 'lucide-react'
+import { projectsApi, sourcesApi } from '@/api/client'
 import { Modal, Input, Textarea, toast, cn } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
@@ -26,6 +26,19 @@ export function ProjectsPage() {
   }
 
   useEffect(() => { load() }, [])
+
+  const [exporting, setExporting] = useState<string | null>(null)
+  const exportTimesheet = async (projectId?: string) => {
+    setExporting(projectId ?? 'all')
+    try {
+      await sourcesApi.exportTimesheet(projectId)
+      toast.success('Timesheet downloaded')
+    } catch {
+      toast.error('Failed to export timesheet')
+    } finally {
+      setExporting(null)
+    }
+  }
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -64,15 +77,26 @@ export function ProjectsPage() {
             {projects.length} project{projects.length !== 1 ? 's' : ''} · manage extraction pipelines
           </p>
         </div>
-        {canManage && (
-          <button onClick={() => setShowNew(true)} style={{
-            display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px',
-            background: 'linear-gradient(135deg,#2563eb,#4f46e5)', color: '#fff',
-            border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={() => exportTimesheet()} disabled={exporting === 'all' || projects.length === 0}
+            title="Download delivery timesheet for all projects" style={{
+            display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px',
+            background: '#fff', color: '#374151', border: '1px solid #e2e8f0',
+            borderRadius: 10, fontSize: 13, fontWeight: 600,
+            cursor: exporting === 'all' ? 'not-allowed' : 'pointer', opacity: exporting === 'all' ? .6 : 1,
           }}>
-            <Plus style={{ width: 16, height: 16 }} /> New Project
+            <Download style={{ width: 15, height: 15 }} /> {exporting === 'all' ? 'Exporting…' : 'Export Timesheet'}
           </button>
-        )}
+          {canManage && (
+            <button onClick={() => setShowNew(true)} style={{
+              display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px',
+              background: 'linear-gradient(135deg,#2563eb,#4f46e5)', color: '#fff',
+              border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+            }}>
+              <Plus style={{ width: 16, height: 16 }} /> New Project
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats row */}
@@ -179,13 +203,24 @@ export function ProjectsPage() {
                       {p.updated_at ? new Date(p.updated_at).toLocaleDateString() : '—'}
                     </td>
                     <td style={{ padding: '14px 16px' }}>
-                      <Link to={`/projects/${p.id}/sources`}
-                        style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
-                          fontWeight: 700, color: '#2563eb', textDecoration: 'none',
-                          padding: '5px 12px', borderRadius: 8,
-                          background: '#eff6ff', border: '1px solid #bfdbfe' }}>
-                        Open <ArrowRight style={{ width: 12, height: 12 }} />
-                      </Link>
+                      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
+                        <button onClick={e => { e.stopPropagation(); exportTimesheet(p.id) }}
+                          disabled={exporting === p.id}
+                          title="Download delivery timesheet for this project"
+                          style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
+                            border: '1px solid #e2e8f0', color: '#64748b',
+                            cursor: exporting === p.id ? 'not-allowed' : 'pointer',
+                            opacity: exporting === p.id ? .6 : 1, display: 'flex', alignItems: 'center' }}>
+                          <Download style={{ width: 13, height: 13 }} />
+                        </button>
+                        <Link to={`/projects/${p.id}/sources`}
+                          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
+                            fontWeight: 700, color: '#2563eb', textDecoration: 'none',
+                            padding: '5px 12px', borderRadius: 8,
+                            background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                          Open <ArrowRight style={{ width: 12, height: 12 }} />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 )

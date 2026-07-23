@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from 'react'
 import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
-  Menu, X, Shield,
+  Menu, X, Shield, Activity,
 } from 'lucide-react'
 import { cn, ToastContainer } from '@/components/ui'
 import { notificationsApi } from '@/api/client'
@@ -49,6 +49,7 @@ export function AppLayout() {
     { to: '/',         icon: LayoutDashboard, label: 'Dashboard',  show: true },
     { to: '/sources',  icon: Database,        label: 'Sources',    show: true },
     { to: '/projects', icon: FolderKanban,    label: 'Projects',   show: true },
+    { to: '/workload', icon: Activity,        label: 'Team Workload', show: true },
     { to: '/schemas',  icon: Layers,          label: 'Schemas',    show: isAdmin && canManageSchemas },
   ].filter(n => n.show)
 
@@ -161,7 +162,7 @@ export function AppLayout() {
                     background: n.is_read ? '#fff' : '#eff6ff',
                   }}>
                     <p style={{ fontSize: 13, color: '#1e293b', margin: '0 0 2px', fontWeight: n.is_read ? 400 : 600 }}>
-                      {n.title}
+                      {n.message}
                     </p>
                     <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
                       {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
