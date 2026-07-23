@@ -28,6 +28,7 @@ from app.models.all_models import (
     Source, SourceStatus, Project, ProjectMember, User, Schema, SchemaVersion,
     ExtractionJob, ExtractedRecord, JobStatus, SourceType as FileSourceType,
     ExtractionConfidence, ReviewStatus, AuditLog, AuditAction, Notification,
+    LLMCallLog, SubmissionBatch,
 )
 from app.schemas.api_schemas import (
     SourceCreate, SourceUpdate, SourceOut, SourceUploadSummary,
@@ -158,6 +159,36 @@ def _get_source_or_404(source_id: str, db: Session) -> Source:
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
     return source
+
+
+def _safe_clear_old_jobs(source_id: str, db: Session) -> int:
+    """
+    Deletes every ExtractionJob (and its ExtractedRecords) for a source,
+    detaching all referencing rows (audit_log, llm_call_log, submission_batches)
+    first. Postgres's own ON DELETE SET NULL trigger has proven unreliable on
+    this constraint on some connections (raises "referential integrity query
+    gave unexpected result") — doing the detach ourselves sidesteps it
+    entirely. Returns the number of records deleted.
+    """
+    job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
+    if not job_ids:
+        return 0
+
+    record_ids = [r.id for r in db.query(ExtractedRecord.id).filter(ExtractedRecord.job_id.in_(job_ids)).all()]
+    if record_ids:
+        db.query(AuditLog).filter(AuditLog.record_id.in_(record_ids)).update(
+            {"record_id": None}, synchronize_session=False
+        )
+    db.query(AuditLog).filter(AuditLog.job_id.in_(job_ids)).update(
+        {"job_id": None}, synchronize_session=False
+    )
+    db.query(LLMCallLog).filter(LLMCallLog.job_id.in_(job_ids)).delete(synchronize_session=False)
+    db.query(SubmissionBatch).filter(SubmissionBatch.job_id.in_(job_ids)).update(
+        {"job_id": None}, synchronize_session=False
+    )
+    deleted = db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
+    db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
+    return deleted
 
 
 def _recompute_counts(source: Source, db: Session):
@@ -676,10 +707,7 @@ def _finalize_upload(
     schema-mapping, field-inference, and validation logic in exactly one place.
     """
     # Clear any previous records for this source (re-upload replaces everything)
-    old_job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
-    if old_job_ids:
-        db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(old_job_ids)).delete(synchronize_session=False)
-        db.query(ExtractionJob).filter(ExtractionJob.id.in_(old_job_ids)).delete(synchronize_session=False)
+    _safe_clear_old_jobs(source_id, db)
 
     file_ext_type = {
         ".csv": FileSourceType.CSV, ".xlsx": FileSourceType.EXCEL,
@@ -2004,10 +2032,7 @@ async def scrape_source_website(
         raise HTTPException(status_code=422, detail="AI found no records on this page. The page structure may not match what was expected, or the content is behind a login.")
 
     # Clear previous records and create new job
-    old_job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
-    if old_job_ids:
-        db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(old_job_ids)).delete(synchronize_session=False)
-        db.query(ExtractionJob).filter(ExtractionJob.id.in_(old_job_ids)).delete(synchronize_session=False)
+    _safe_clear_old_jobs(source_id, db)
 
     job = ExtractionJob(
         project_id=source.project_id, source_id=source_id,
@@ -2354,17 +2379,7 @@ def reset_source(
     records_deleted = 0
 
     if clear_records:
-        # ExtractedRecord links to Source through ExtractionJob (no direct source_id)
-        job_ids = [j.id for j in db.query(ExtractionJob).filter(
-            ExtractionJob.source_id == source_id
-        ).all()]
-        if job_ids:
-            records_deleted = db.query(ExtractedRecord).filter(
-                ExtractedRecord.job_id.in_(job_ids)
-            ).delete(synchronize_session=False)
-        db.query(ExtractionJob).filter(
-            ExtractionJob.source_id == source_id
-        ).delete(synchronize_session=False)
+        records_deleted = _safe_clear_old_jobs(source_id, db)
 
     source.status = SourceStatus.NOT_STARTED
     source.total_records = 0
