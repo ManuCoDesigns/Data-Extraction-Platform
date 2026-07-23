@@ -287,6 +287,8 @@ export const sourcesApi = {
   },
   workload: (projectId?: string) =>
     api.get('/sources/workload', { params: projectId ? { project_id: projectId } : {} }).then(r => r.data),
+  escalations: (mineOnly = true, projectId?: string) =>
+    api.get('/sources/escalations', { params: { mine_only: mineOnly, project_id: projectId } }).then(r => r.data),
   adminReview: (sourceId: string, recordId: string, payload: { action: string; note: string; field_comments?: Record<string, string> }) =>
     api.post(`/sources/${sourceId}/records/${recordId}/admin-review`, payload).then(r => r.data),
   getTimeline: (sourceId: string, recordId: string) =>
