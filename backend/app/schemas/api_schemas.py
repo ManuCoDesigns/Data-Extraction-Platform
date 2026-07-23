@@ -295,6 +295,7 @@ class SourceOut(BaseModel):
     review_started_at: Optional[datetime]
     review_completed_at: Optional[datetime]
     approved_at: Optional[datetime]
+    reset_count: int = 0
     created_by: str
 
     model_config = {"from_attributes": True}

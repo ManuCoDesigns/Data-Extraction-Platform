@@ -124,6 +124,7 @@ def _serialize_source(s: Source) -> SourceOut:
         llm_verification_completed_at=getattr(s, "llm_verification_completed_at", None),
         review_started_at=s.review_started_at, review_completed_at=s.review_completed_at,
         approved_at=s.approved_at, created_by=s.created_by,
+        reset_count=getattr(s, "reset_count", 0) or 0,
     )
 
 
@@ -370,6 +371,109 @@ def team_workload(
         "unclaimed_count": len([r for r in rows if r["unclaimed"]]),
         "llm_verifying_count": len([r for r in rows if r["llm_verifying"]]),
         "generated_at": now.isoformat(),
+    }
+
+
+# ─── Escalations — records sent back with feedback ────────────────────────────
+
+@router.get("/escalations")
+def list_escalations(
+    project_id: str | None = None,
+    mine_only: bool = True,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Every record currently sitting with the extractor because it was sent
+    back — either by a reviewer (reject) or by an admin (return for
+    correction) — along with the actual feedback message and who wrote it.
+
+    mine_only=True (default) scopes to sources where the current user is
+    the assigned extractor. Admins/reviewers can pass mine_only=false to
+    see everything across a project.
+    """
+    user_roles = {r.role.value for r in current_user.roles}
+    is_admin = "org_admin" in user_roles or "project_admin" in user_roles
+
+    q = db.query(ExtractedRecord).join(
+        ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id
+    ).join(
+        Source, ExtractionJob.source_id == Source.id
+    ).filter(
+        ExtractedRecord.review_status.in_([ReviewStatus.REJECTED, ReviewStatus.PENDING]),
+        ExtractedRecord.correction_count > 0,
+    )
+
+    if project_id:
+        q = q.filter(Source.project_id == project_id)
+    if mine_only and not is_admin:
+        q = q.filter(Source.assigned_extractor_id == current_user.id)
+    elif mine_only:
+        # Admins asking for "mine" still means sources assigned to them specifically
+        q = q.filter(Source.assigned_extractor_id == current_user.id)
+
+    records = q.order_by(ExtractedRecord.updated_at.desc()).all()
+
+    projects_cache: dict[str, str] = {}
+    def project_name(pid: str) -> str:
+        if pid not in projects_cache:
+            p = db.query(Project).filter(Project.id == pid).first()
+            projects_cache[pid] = p.name if p else "Unknown Project"
+        return projects_cache[pid]
+
+    escalations = []
+    for r in records:
+        job = db.query(ExtractionJob).filter(ExtractionJob.id == r.job_id).first()
+        source = db.query(Source).filter(Source.id == job.source_id).first() if job else None
+        if not source:
+            continue
+
+        # Pull the most recent correction-type comment for the headline message
+        latest_message = ""
+        latest_by = ""
+        latest_role = ""
+        latest_ts = None
+        comments = r.reviewer_field_comments or {}
+        all_entries = []
+        for field, entries in comments.items():
+            for e in (entries or []):
+                if e.get("type") in ("correction", "rejection"):
+                    all_entries.append({**e, "field": field})
+        if all_entries:
+            all_entries.sort(key=lambda e: e.get("ts", ""))
+            last = all_entries[-1]
+            latest_message = last.get("comment", "")
+            latest_by = last.get("user", "")
+            latest_role = last.get("role", "")
+            latest_ts = last.get("ts")
+        elif r.review_note:
+            latest_message = r.review_note
+
+        record_label = None
+        if isinstance(r.extracted_fields, dict):
+            record_label = r.extracted_fields.get("_source_file")
+            if record_label:
+                record_label = record_label.split("/")[-1]
+        record_label = record_label or (r.canonical_name or r.id[:8])
+
+        escalations.append({
+            "record_id": r.id,
+            "source_id": source.id,
+            "source_name": source.name,
+            "project_id": source.project_id,
+            "project_name": project_name(source.project_id),
+            "record_label": record_label,
+            "correction_count": r.correction_count or 0,
+            "message": latest_message,
+            "by": latest_by,
+            "role": latest_role,
+            "when": latest_ts or (r.updated_at.isoformat() if r.updated_at else None),
+            "all_messages": all_entries,
+        })
+
+    return {
+        "escalations": escalations,
+        "count": len(escalations),
     }
 
 
@@ -1541,25 +1645,26 @@ def export_timesheet(
                         "By": "", "Role": "", "Type": "Correction", "When": "",
                     })
 
-        # ── Full workflow activity log (every step, every record) ─────────
-        if records:
-            audit_entries = (
-                db.query(AuditLog)
-                .filter(AuditLog.record_id.in_([r.id for r in records]))
-                .order_by(AuditLog.timestamp.asc())
-                .all()
-            )
-            for e in audit_entries:
-                note = ""
-                if isinstance(e.after_value, dict):
-                    note = e.after_value.get("note") or e.after_value.get("action") or ""
-                activity_rows.append({
-                    "Source": s.name,
-                    "Action": e.action.value.replace("_", " ").title(),
-                    "By": _uname(e.user_id),
-                    "Note": note,
-                    "When": e.timestamp.strftime("%Y-%m-%d %H:%M") if e.timestamp else "",
-                })
+        # ── Full workflow activity log (every step, every record + source-level events) ──
+        from sqlalchemy import or_ as _or_
+        record_ids = [r.id for r in records]
+        audit_entries = (
+            db.query(AuditLog)
+            .filter(_or_(AuditLog.source_id == s.id, AuditLog.record_id.in_(record_ids)))
+            .order_by(AuditLog.timestamp.asc())
+            .all()
+        )
+        for e in audit_entries:
+            note = ""
+            if isinstance(e.after_value, dict):
+                note = e.after_value.get("note") or e.after_value.get("reason") or e.after_value.get("action") or ""
+            activity_rows.append({
+                "Source": s.name,
+                "Action": e.action.value.replace("_", " ").title(),
+                "By": _uname(e.user_id),
+                "Note": note,
+                "When": e.timestamp.strftime("%Y-%m-%d %H:%M") if e.timestamp else "",
+            })
 
         total = len(records)
         approved = [r for r in records if r.review_status == ReviewStatus.APPROVED]
@@ -1618,6 +1723,7 @@ def export_timesheet(
             "Review Duration": _stage_duration(s.review_started_at, s.review_completed_at),
             "Delivered At": delivered_at.strftime("%Y-%m-%d %H:%M") if delivered_at else "",
             "Total Duration": duration_str,
+            "Resets": getattr(s, "reset_count", 0) or 0,
             "Total Records": total,
             "Approved Records": len(approved),
             "Extractor": extractor_name,
@@ -1658,7 +1764,7 @@ def export_timesheet(
         _style_sheet(writer, df, "Delivery Timesheet", "2563EB", {
             "Source": 38, "Status": 16, "Extraction Started": 18,
             "Extraction Duration": 18, "LLM Verification Duration": 20, "Review Duration": 16,
-            "Delivered At": 18, "Total Duration": 16, "Total Records": 14, "Approved Records": 16,
+            "Delivered At": 18, "Total Duration": 16, "Resets": 10, "Total Records": 14, "Approved Records": 16,
             "Extractor": 20, "Reviewer": 20, "Admin Approved By": 20,
         })
         _style_sheet(writer, df_corrections, "Corrections & Feedback", "DC2626", {
@@ -2184,6 +2290,7 @@ def get_source_schema(
 def reset_source(
     source_id: str,
     clear_records: bool = True,
+    reason: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -2191,6 +2298,13 @@ def reset_source(
     Admin-only: Reset a source back to 'not_started'.
     Optionally wipe all extracted records (default: True).
     Use this to recover from bad extractions or test data.
+
+    IMPORTANT: extraction_started_at (and the LLM verification timestamps)
+    are intentionally NOT cleared. The client-facing timesheet reports total
+    elapsed time from when work truly began — a reset because the wrong
+    file was uploaded is wasted time that should still count, not a reason
+    to make the clock look like it started fresh. The reset itself is
+    logged with a reason so it's fully visible in the report.
     """
     source = _get_source_or_404(source_id, db)
 
@@ -2202,13 +2316,16 @@ def reset_source(
         if not member or member.role.value not in ("project_admin", "org_admin"):
             raise HTTPException(status_code=403, detail="Only admins can reset sources")
 
+    previous_status = source.status.value
+    records_deleted = 0
+
     if clear_records:
         # ExtractedRecord links to Source through ExtractionJob (no direct source_id)
         job_ids = [j.id for j in db.query(ExtractionJob).filter(
             ExtractionJob.source_id == source_id
         ).all()]
         if job_ids:
-            db.query(ExtractedRecord).filter(
+            records_deleted = db.query(ExtractedRecord).filter(
                 ExtractedRecord.job_id.in_(job_ids)
             ).delete(synchronize_session=False)
         db.query(ExtractionJob).filter(
@@ -2220,12 +2337,29 @@ def reset_source(
     source.valid_records = 0
     source.invalid_records = 0
     source.approved_records = 0
-    source.extraction_started_at = None
-    source.extraction_completed_at = None
+    # extraction_started_at / llm_verification_started_at / completed_at are
+    # deliberately preserved — see docstring above.
     source.review_started_at = None
+    source.review_completed_at = None
     source.approved_at = None
     source.web_verified = None
     source.web_check_summary = None
+    source.reset_count = (source.reset_count or 0) + 1
+
+    db.add(AuditLog(
+        user_id=current_user.id, project_id=source.project_id, source_id=source.id,
+        action=AuditAction.SOURCE_RESET,
+        before_value={"status": previous_status},
+        after_value={
+            "status": "not_started",
+            "reason": reason or "",
+            "records_cleared": clear_records,
+            "records_deleted": records_deleted,
+            "reset_count": source.reset_count,
+            "extraction_timer_preserved": True,
+        },
+    ))
+
     db.commit()
     db.refresh(source)
 
@@ -2234,6 +2368,7 @@ def reset_source(
         "source_id": source_id,
         "status": source.status,
         "records_cleared": clear_records,
+        "reset_count": source.reset_count,
     }
 
 

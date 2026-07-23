@@ -14,6 +14,7 @@ import { ReviewPage } from '@/pages/Review'
 import { SchemasPage } from '@/pages/Schemas'
 import { UsersPage } from '@/pages/Users'
 import { TeamWorkloadPage } from '@/pages/TeamWorkload'
+import { EscalationsPage } from '@/pages/Escalations'
 import { ProfilePage } from '@/pages/Profile'
 import { SettingsPage } from '@/pages/Settings'
 import { useAuthStore } from '@/store/auth'
@@ -119,6 +120,11 @@ export function App() {
           <Route
             path="workload"
             element={<TeamWorkloadPage />}
+          />
+
+          <Route
+            path="escalations"
+            element={<EscalationsPage />}
           />
 
           <Route path="jobs" element={<Navigate to="/projects" replace />} />

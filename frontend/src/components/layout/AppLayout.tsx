@@ -4,10 +4,10 @@ import { useEffect, useState, useRef } from 'react'
 import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
-  Menu, X, Shield, Activity,
+  Menu, X, Shield, Activity, AlertTriangle,
 } from 'lucide-react'
 import { cn, ToastContainer } from '@/components/ui'
-import { notificationsApi } from '@/api/client'
+import { notificationsApi, sourcesApi } from '@/api/client'
 import { useCapability } from '@/lib/permissions'
 import type { Notification } from '@/types'
 import { formatDistanceToNow } from 'date-fns'
@@ -20,6 +20,7 @@ export function AppLayout() {
   const [showNotif, setShowNotif] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
+  const [escalationCount, setEscalationCount] = useState(0)
 
   const canManageUsers   = useCapability('manage_users')
   const canManageSchemas = useCapability('manage_schemas')
@@ -42,15 +43,24 @@ export function AppLayout() {
     return () => clearInterval(iv)
   }, [user])
 
+  useEffect(() => {
+    if (!user) return
+    const loadEscalations = () => sourcesApi.escalations(true).then((d: any) => setEscalationCount(d?.count ?? 0)).catch(() => {})
+    loadEscalations()
+    const iv = setInterval(loadEscalations, 60000)
+    return () => clearInterval(iv)
+  }, [user])
+
   if (!user) return null
   const unread = notifications.filter(n => !n.is_read).length
 
   const mainNav = [
-    { to: '/',         icon: LayoutDashboard, label: 'Dashboard',  show: true },
-    { to: '/sources',  icon: Database,        label: 'Sources',    show: true },
-    { to: '/projects', icon: FolderKanban,    label: 'Projects',   show: true },
-    { to: '/workload', icon: Activity,        label: 'Team Workload', show: true },
-    { to: '/schemas',  icon: Layers,          label: 'Schemas',    show: isAdmin && canManageSchemas },
+    { to: '/',            icon: LayoutDashboard, label: 'Dashboard',    show: true },
+    { to: '/sources',     icon: Database,        label: 'Sources',      show: true },
+    { to: '/escalations', icon: AlertTriangle,   label: 'Escalations',  show: true, badge: escalationCount },
+    { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true },
+    { to: '/workload',    icon: Activity,        label: 'Team Workload', show: true },
+    { to: '/schemas',     icon: Layers,          label: 'Schemas',      show: isAdmin && canManageSchemas },
   ].filter(n => n.show)
 
   const adminNav = [
@@ -59,7 +69,7 @@ export function AppLayout() {
     { to: '/help',        icon: BookOpen, label: 'Help',     show: true },
   ].filter(n => n.show)
 
-  const NavItem = ({ to, icon: Icon, label, exact = false }: any) => (
+  const NavItem = ({ to, icon: Icon, label, exact = false, badge }: any) => (
     <NavLink to={to} end={exact}
       style={({ isActive }) => ({
         display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
@@ -71,7 +81,14 @@ export function AppLayout() {
       onMouseEnter={e => { const el = e.currentTarget as HTMLElement; if (!el.style.background.includes('eff6ff')) el.style.background = '#f8fafc' }}
       onMouseLeave={e => { const el = e.currentTarget as HTMLElement; if (!el.style.background.includes('eff6ff')) el.style.background = 'transparent' }}>
       <Icon style={{ width: 16, height: 16, flexShrink: 0 }} />
-      {label}
+      <span style={{ flex: 1 }}>{label}</span>
+      {badge > 0 && (
+        <span style={{
+          minWidth: 18, height: 18, padding: '0 5px', borderRadius: 20,
+          background: '#dc2626', color: '#fff', fontSize: 10, fontWeight: 700,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>{badge > 9 ? '9+' : badge}</span>
+      )}
     </NavLink>
   )
 

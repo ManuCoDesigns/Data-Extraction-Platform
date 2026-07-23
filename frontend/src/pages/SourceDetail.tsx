@@ -6,7 +6,7 @@ import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
   Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
-  Folder
+  Folder, AlertTriangle
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -37,6 +37,20 @@ export function SourceDetailPage() {
   const [members, setMembers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('records')
+
+  // ── Stage duration formatting — used by the always-visible timing bar ──────
+  const formatDuration = (start: string | null | undefined, end: string | null | undefined) => {
+    if (!start) return null
+    const startD = new Date(start)
+    const endD = end ? new Date(end) : new Date()
+    const ms = endD.getTime() - startD.getTime()
+    if (ms < 0) return null
+    const hrs = ms / 3600000
+    if (hrs < 1) return `${Math.round(ms / 60000)}m`
+    if (hrs < 24) return `${hrs.toFixed(1)}h`
+    const days = Math.floor(hrs / 24)
+    return `${days}d ${Math.round(hrs % 24)}h`
+  }
   const [validityFilter, setValidityFilter] = useState('')
   const [showUpload, setShowUpload] = useState(false)
   const [showEditSource, setShowEditSource] = useState(false)
@@ -151,6 +165,7 @@ export function SourceDetailPage() {
   const [showReset, setShowReset] = useState(false)
   const [resetting, setResetting] = useState(false)
   const [resetClearRecords, setResetClearRecords] = useState(true)
+  const [resetReason, setResetReason] = useState('')
   const [deleteRecord, setDeleteRecord] = useState<any | null>(null)
   const [deleting, setDeleting] = useState(false)
   // New capabilities
@@ -370,12 +385,14 @@ export function SourceDetailPage() {
     }
   }
 
-  const handleReset = async () => {    if (!sourceId) return
+  const handleReset = async () => {
+    if (!sourceId) return
     setResetting(true)
     try {
-      await sourcesApi.reset(sourceId, resetClearRecords)
+      await sourcesApi.reset(sourceId, resetClearRecords, resetReason)
       toast.success(`Source reset to "Not Started"${resetClearRecords ? ' — all records cleared' : ''}`)
       setShowReset(false)
+      setResetReason('')
       load()
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Reset failed')
@@ -478,6 +495,14 @@ export function SourceDetailPage() {
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">{source.name}</h1>
             <Badge variant={meta.color}>{meta.label}</Badge>
+            {(source as any).reset_count > 0 && (
+              <span title="This source has been reset — the extraction timer was preserved through each reset"
+                style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20,
+                  background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa',
+                  display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <RotateCcw style={{ width: 11, height: 11 }} /> Reset ×{(source as any).reset_count}
+              </span>
+            )}
           </div>
           {source.website_url && (
             <a href={source.website_url} target="_blank" rel="noopener noreferrer"
@@ -647,6 +672,107 @@ export function SourceDetailPage() {
 
       {tab === 'records' && (
         <div className="space-y-4">
+
+          {/* ── Timing bar — always visible, survives resets and delivery ── */}
+          {(source.extraction_started_at || (source as any).llm_verification_started_at || source.review_started_at) && (
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12,
+              padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center',
+              gap: 18, flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Clock style={{ width: 13, height: 13, color: '#64748b' }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                  Time in pipeline
+                </span>
+              </div>
+              {[
+                { label: 'Extraction', start: source.extraction_started_at, end: source.extraction_completed_at, color: '#3b82f6' },
+                { label: 'LLM Verify', start: (source as any).llm_verification_started_at, end: (source as any).llm_verification_completed_at, color: '#059669' },
+                { label: 'Review', start: source.review_started_at, end: source.review_completed_at, color: '#7c3aed' },
+              ].map(({ label, start, end, color }) => {
+                const d = formatDuration(start, end)
+                if (!d) return null
+                return (
+                  <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
+                    <span style={{ fontSize: 12, color: '#64748b' }}>{label}:</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: end ? '#1e293b' : color }}>
+                      {d}{!end && ' (ongoing)'}
+                    </span>
+                  </div>
+                )
+              })}
+              {source.extraction_started_at && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 'auto' }}>
+                  <span style={{ fontSize: 12, color: '#64748b' }}>Total:</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: source.approved_at ? '#059669' : '#0f172a' }}>
+                    {formatDuration(source.extraction_started_at, source.approved_at)}
+                    {!source.approved_at && ' (ongoing)'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Escalation banner — sent-back records with feedback, shown prominently ── */}
+          {(() => {
+            const escalated = records.filter((r: any) =>
+              (r.correction_count ?? 0) > 0 &&
+              (r.review_status === 'pending' || r.review_status === 'rejected')
+            )
+            if (escalated.length === 0) return null
+            return (
+              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12,
+                padding: '14px 18px', marginBottom: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                  <AlertTriangle style={{ width: 17, height: 17, color: '#dc2626', flexShrink: 0 }} />
+                  <p style={{ fontSize: 13, fontWeight: 700, color: '#991b1b', margin: 0 }}>
+                    {escalated.length} record{escalated.length !== 1 ? 's' : ''} sent back for correction
+                  </p>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {escalated.slice(0, 3).map((r: any) => {
+                    const comments = r.reviewer_field_comments || {}
+                    const all: any[] = []
+                    Object.entries(comments).forEach(([field, entries]: [string, any]) => {
+                      (entries || []).forEach((e: any) => {
+                        if (e.type === 'correction' || e.type === 'rejection') all.push({ ...e, field })
+                      })
+                    })
+                    all.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''))
+                    const latest = all[all.length - 1]
+                    const ef = r.extracted_fields || {}
+                    const sourceFile = ef._source_file as string | undefined
+                    const label = sourceFile ? sourceFile.split('/').pop()!.replace(/\.(json|csv|xlsx?|pdf|txt)$/i, '') : (r.canonical_name || r.id.slice(0, 8))
+                    return (
+                      <div key={r.id} onClick={() => { const idx = records.findIndex((x: any) => x.id === r.id); if (idx >= 0) setActiveRecordIndex(idx) }}
+                        style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: 10,
+                          padding: '10px 12px', cursor: 'pointer' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{label}</span>
+                          {r.correction_count > 1 && (
+                            <span style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', background: '#fef2f2',
+                              padding: '1px 6px', borderRadius: 20 }}>×{r.correction_count}</span>
+                          )}
+                        </div>
+                        {latest?.comment ? (
+                          <p style={{ fontSize: 12, color: '#7f1d1d', margin: 0 }}>
+                            "{latest.comment}" <span style={{ color: '#94a3b8' }}>— {latest.user}</span>
+                          </p>
+                        ) : r.review_note ? (
+                          <p style={{ fontSize: 12, color: '#7f1d1d', margin: 0 }}>"{r.review_note}"</p>
+                        ) : null}
+                      </div>
+                    )
+                  })}
+                  {escalated.length > 3 && (
+                    <Link to="/escalations" style={{ fontSize: 12, color: '#dc2626', fontWeight: 600, textDecoration: 'none' }}>
+                      + {escalated.length - 3} more →
+                    </Link>
+                  )}
+                </div>
+              </div>
+            )
+          })()}
 
           {/* ── Workflow next-step banner ── */}
           {source.status === 'approved' ? (
@@ -982,16 +1108,21 @@ export function SourceDetailPage() {
       {tab === 'details' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <Card className="p-6 space-y-3">
-            <h3 className="text-sm font-semibold text-gray-700 mb-2">Source Information</h3>
+            <h3 className="text-sm font-semibold text-gray-700 mb-2">Timing & Pipeline History</h3>
             {[
               { label: 'Schema', value: source.schema_name },
               { label: 'Description', value: source.description || '(none)' },
               { label: 'Website', value: source.website_url || '(none)' },
               { label: 'Created', value: safeFormat(source.created_at, 'MMM d, yyyy HH:mm') },
               { label: 'Extraction started', value: source.extraction_started_at ? format(new Date(source.extraction_started_at), 'MMM d, HH:mm') : '—' },
-              { label: 'Extraction completed', value: source.extraction_completed_at ? format(new Date(source.extraction_completed_at), 'MMM d, HH:mm') : '—' },
+              { label: 'Extraction duration', value: formatDuration(source.extraction_started_at, source.extraction_completed_at) ?? '—' },
+              { label: 'LLM verification started', value: (source as any).llm_verification_started_at ? format(new Date((source as any).llm_verification_started_at), 'MMM d, HH:mm') : '—' },
+              { label: 'LLM verification duration', value: formatDuration((source as any).llm_verification_started_at, (source as any).llm_verification_completed_at) ?? '—' },
               { label: 'Review started', value: source.review_started_at ? format(new Date(source.review_started_at), 'MMM d, HH:mm') : '—' },
-              { label: 'Approved', value: source.approved_at ? format(new Date(source.approved_at), 'MMM d, HH:mm') : '—' },
+              { label: 'Review duration', value: formatDuration(source.review_started_at, source.review_completed_at) ?? '—' },
+              { label: 'Approved / Delivered', value: source.approved_at ? format(new Date(source.approved_at), 'MMM d, HH:mm') : '—' },
+              { label: 'Total time (claim → delivery)', value: formatDuration(source.extraction_started_at, source.approved_at) ?? '—' },
+              { label: 'Times reset', value: (source as any).reset_count > 0 ? `${(source as any).reset_count}×` : 'Never' },
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between text-sm border-b border-gray-50 pb-2 last:border-0">
                 <span className="text-gray-500">{label}</span>
@@ -1261,6 +1392,18 @@ export function SourceDetailPage() {
           {!resetClearRecords && (
             <p className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg">Records will be kept but the status, review progress, and timestamps will be reset.</p>
           )}
+          <div>
+            <label className="text-sm font-semibold text-gray-800 block mb-1.5">Reason for reset</label>
+            <textarea value={resetReason} onChange={e => setResetReason(e.target.value)}
+              placeholder="e.g. Wrong file uploaded — extractor grabbed data from the wrong product page"
+              rows={2}
+              className="w-full text-sm px-3 py-2 border border-gray-200 rounded-xl outline-none resize-y focus:border-orange-400" />
+            <p className="text-xs text-gray-400 mt-1">Recorded in the audit log and shown on the client delivery report.</p>
+          </div>
+          <div className="bg-blue-50 border border-blue-100 rounded-xl p-3 text-xs text-blue-700 flex items-start gap-2">
+            <Clock className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+            <span>The extraction timer is <strong>not</strong> restarted — total time-to-delivery will still include this setback, so it stays visible in reporting.</span>
+          </div>
           <div className="flex justify-end gap-3 pt-2">
             <Button variant="secondary" onClick={() => setShowReset(false)} disabled={resetting}>Cancel</Button>
             <Button onClick={handleReset} loading={resetting} className="!bg-orange-500 hover:!bg-orange-600">

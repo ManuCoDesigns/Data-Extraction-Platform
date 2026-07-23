@@ -93,6 +93,7 @@ class AuditAction(str, enum.Enum):
     RECORD_RETURNED_FOR_CORRECTION = "record_returned_for_correction"
     RECORD_REVISION_STARTED = "record_revision_started"
     RECORD_SENT_TO_ADMIN = "record_sent_to_admin"
+    SOURCE_RESET = "source_reset"
     RECORD_REJECTED = "record_rejected"
     FIELD_OVERRIDDEN = "field_overridden"
     RECORD_ESCALATED = "record_escalated"
@@ -346,6 +347,7 @@ class Source(Base):
     review_started_at = Column(DateTime(timezone=True), nullable=True)
     review_completed_at = Column(DateTime(timezone=True), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
+    reset_count = Column(Integer, default=0, server_default="0", nullable=False)
 
     created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
 
@@ -564,6 +566,7 @@ class AuditLog(Base):
     timestamp = Column(DateTime(timezone=True), default=now_utc, nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=True)
+    source_id = Column(String(36), ForeignKey("sources.id"), nullable=True, index=True)
     job_id = Column(String(36), ForeignKey("extraction_jobs.id"), nullable=True)
     record_id = Column(String(36), ForeignKey("extracted_records.id"), nullable=True)
     action = Column(SAEnum(AuditAction), nullable=False)
