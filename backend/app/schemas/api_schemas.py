@@ -290,6 +290,8 @@ class SourceOut(BaseModel):
     updated_at: datetime
     extraction_started_at: Optional[datetime]
     extraction_completed_at: Optional[datetime]
+    llm_verification_started_at: Optional[datetime] = None
+    llm_verification_completed_at: Optional[datetime] = None
     review_started_at: Optional[datetime]
     review_completed_at: Optional[datetime]
     approved_at: Optional[datetime]

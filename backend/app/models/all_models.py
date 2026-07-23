@@ -341,6 +341,8 @@ class Source(Base):
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     extraction_started_at = Column(DateTime(timezone=True), nullable=True)
     extraction_completed_at = Column(DateTime(timezone=True), nullable=True)
+    llm_verification_started_at = Column(DateTime(timezone=True), nullable=True)
+    llm_verification_completed_at = Column(DateTime(timezone=True), nullable=True)
     review_started_at = Column(DateTime(timezone=True), nullable=True)
     review_completed_at = Column(DateTime(timezone=True), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)

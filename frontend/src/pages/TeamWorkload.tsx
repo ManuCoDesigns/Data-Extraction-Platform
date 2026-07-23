@@ -5,12 +5,12 @@ import { sourcesApi, projectsApi } from '@/api/client'
 
 const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
   not_started:       { label: 'Not Started',       color: '#64748b', bg: '#f1f5f9' },
-  extracting:        { label: 'Extracting',        color: '#3b82f6', bg: '#eff6ff' },
-  needs_fixes:       { label: 'Needs Fixes',        color: '#f59e0b', bg: '#fffbeb' },
+  extracting:        { label: 'Extraction',        color: '#3b82f6', bg: '#eff6ff' },
+  needs_fixes:       { label: 'Extraction (Fixes)', color: '#f59e0b', bg: '#fffbeb' },
   ready_for_review:  { label: 'Ready for Review',   color: '#6366f1', bg: '#eef2ff' },
-  in_review:         { label: 'In Review',          color: '#a855f7', bg: '#faf5ff' },
+  in_review:         { label: 'Human Review',       color: '#a855f7', bg: '#faf5ff' },
   changes_requested: { label: 'Corrections Needed', color: '#ef4444', bg: '#fef2f2' },
-  llm_verification:  { label: 'LLM Check',          color: '#a855f7', bg: '#faf5ff' },
+  llm_verification:  { label: 'LLM Verification',   color: '#059669', bg: '#ecfdf5' },
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -69,6 +69,7 @@ export function TeamWorkloadPage() {
   const sources: any[] = data?.sources ?? []
   const byPerson: any[] = data?.by_person ?? []
   const unclaimedCount: number = data?.unclaimed_count ?? 0
+  const llmVerifyingCount: number = data?.llm_verifying_count ?? 0
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 1200, margin: '0 auto' }}>
@@ -107,7 +108,7 @@ export function TeamWorkloadPage() {
       ) : (
         <>
           {/* KPI row */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 20 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
             <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 18px' }}>
               <p style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>{sources.length}</p>
               <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', margin: '4px 0 0' }}>Active Sources</p>
@@ -115,6 +116,11 @@ export function TeamWorkloadPage() {
             <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 18px' }}>
               <p style={{ fontSize: 24, fontWeight: 800, color: '#7c3aed', margin: 0 }}>{byPerson.length}</p>
               <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', margin: '4px 0 0' }}>People Working</p>
+            </div>
+            <div style={{ background: llmVerifyingCount > 0 ? '#ecfdf5' : '#fff',
+              border: `1px solid ${llmVerifyingCount > 0 ? '#bbf7d0' : '#e2e8f0'}`, borderRadius: 14, padding: '16px 18px' }}>
+              <p style={{ fontSize: 24, fontWeight: 800, color: llmVerifyingCount > 0 ? '#059669' : '#0f172a', margin: 0 }}>{llmVerifyingCount}</p>
+              <p style={{ fontSize: 12, fontWeight: 600, color: llmVerifyingCount > 0 ? '#059669' : '#64748b', margin: '4px 0 0' }}>LLM Verifying</p>
             </div>
             <div style={{ background: unclaimedCount > 0 ? '#fef2f2' : '#fff',
               border: `1px solid ${unclaimedCount > 0 ? '#fecaca' : '#e2e8f0'}`, borderRadius: 14, padding: '16px 18px' }}>
@@ -200,7 +206,12 @@ export function TeamWorkloadPage() {
                       )}
                     </td>
                     <td style={{ padding: '12px 14px' }}>
-                      {s.extractor_elapsed && (
+                      {s.llm_verifying ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: '#059669', background: '#ecfdf5',
+                          padding: '2px 8px', borderRadius: 20, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                          🤖 LLM {s.llm_elapsed}
+                        </span>
+                      ) : s.extractor_elapsed && (
                         <span style={{ fontSize: 11, fontWeight: 600, color: '#3b82f6', display: 'flex', alignItems: 'center', gap: 3 }}>
                           <Clock style={{ width: 11, height: 11 }} /> {s.extractor_elapsed}
                         </span>

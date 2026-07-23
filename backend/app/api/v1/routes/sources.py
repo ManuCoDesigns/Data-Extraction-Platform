@@ -120,6 +120,8 @@ def _serialize_source(s: Source) -> SourceOut:
         notes=s.notes, created_at=s.created_at, updated_at=s.updated_at,
         extraction_started_at=s.extraction_started_at,
         extraction_completed_at=s.extraction_completed_at,
+        llm_verification_started_at=getattr(s, "llm_verification_started_at", None),
+        llm_verification_completed_at=getattr(s, "llm_verification_completed_at", None),
         review_started_at=s.review_started_at, review_completed_at=s.review_completed_at,
         approved_at=s.approved_at, created_by=s.created_by,
     )
@@ -301,13 +303,27 @@ def team_workload(
             projects_cache[pid] = p.name if p else "Unknown Project"
         return projects_cache[pid]
 
+    STAGE_LABELS = {
+        "not_started":       "Not Started",
+        "extracting":        "Extraction",
+        "needs_fixes":       "Extraction (Fixing Errors)",
+        "llm_verification":  "LLM Verification",
+        "ready_for_review":  "Ready for Human Review",
+        "in_review":         "Human Review",
+        "changes_requested": "Extraction (Corrections)",
+        "approved":          "Delivered",
+    }
+
     rows = []
     for s in sources:
         extractor = user_name(s.assigned_extractor_id)
         reviewer = user_name(s.assigned_reviewer_id)
 
-        is_extracting = s.status in (SourceStatus.EXTRACTING, SourceStatus.NEEDS_FIXES)
-        is_reviewing = s.status in (SourceStatus.IN_REVIEW, SourceStatus.READY_FOR_REVIEW, SourceStatus.CHANGES_REQUESTED)
+        is_extracting = s.status in (SourceStatus.EXTRACTING, SourceStatus.NEEDS_FIXES, SourceStatus.CHANGES_REQUESTED)
+        is_llm_verifying = s.status == SourceStatus.LLM_VERIFICATION
+        is_reviewing = s.status in (SourceStatus.IN_REVIEW, SourceStatus.READY_FOR_REVIEW)
+
+        llm_started = getattr(s, "llm_verification_started_at", None)
 
         rows.append({
             "source_id": s.id,
@@ -315,8 +331,11 @@ def team_workload(
             "project_id": s.project_id,
             "project_name": project_name(s.project_id),
             "status": s.status.value,
+            "pipeline_stage": STAGE_LABELS.get(s.status.value, s.status.value),
             "extractor": extractor,
             "extractor_elapsed": elapsed_label(s.extraction_started_at) if is_extracting else None,
+            "llm_verifying": is_llm_verifying,
+            "llm_elapsed": elapsed_label(llm_started) if is_llm_verifying else None,
             "reviewer": reviewer,
             "reviewer_elapsed": elapsed_label(s.review_started_at) if is_reviewing else None,
             "total_records": s.total_records or 0,
@@ -349,6 +368,7 @@ def team_workload(
         "sources": rows,
         "by_person": list(by_person.values()),
         "unclaimed_count": len([r for r in rows if r["unclaimed"]]),
+        "llm_verifying_count": len([r for r in rows if r["llm_verifying"]]),
         "generated_at": now.isoformat(),
     }
 
@@ -1579,12 +1599,25 @@ def export_timesheet(
                 u = db.query(User).filter(User.id == admin_ids[-1]).first()
                 admin_name = u.full_name if u else ""
 
+        def _stage_duration(t1, t2):
+            if not t1 or not t2:
+                return ""
+            d = t2 - t1
+            h = d.total_seconds() / 3600
+            return f"{h:.1f}h" if h < 24 else f"{d.days}d {int(h % 24)}h"
+
+        llm_start = getattr(s, "llm_verification_started_at", None)
+        llm_end = getattr(s, "llm_verification_completed_at", None)
+
         rows.append({
             "Source": s.name,
             "Status": "Delivered" if fully_delivered else s.status.value.replace("_", " ").title(),
             "Extraction Started": started_at.strftime("%Y-%m-%d %H:%M") if started_at else "",
+            "Extraction Duration": _stage_duration(started_at, s.extraction_completed_at),
+            "LLM Verification Duration": _stage_duration(llm_start, llm_end),
+            "Review Duration": _stage_duration(s.review_started_at, s.review_completed_at),
             "Delivered At": delivered_at.strftime("%Y-%m-%d %H:%M") if delivered_at else "",
-            "Duration": duration_str,
+            "Total Duration": duration_str,
             "Total Records": total,
             "Approved Records": len(approved),
             "Extractor": extractor_name,
@@ -1623,8 +1656,9 @@ def export_timesheet(
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
         _style_sheet(writer, df, "Delivery Timesheet", "2563EB", {
-            "Source": 38, "Status": 16, "Extraction Started": 18, "Delivered At": 18,
-            "Duration": 18, "Total Records": 14, "Approved Records": 16,
+            "Source": 38, "Status": 16, "Extraction Started": 18,
+            "Extraction Duration": 18, "LLM Verification Duration": 20, "Review Duration": 16,
+            "Delivered At": 18, "Total Duration": 16, "Total Records": 14, "Approved Records": 16,
             "Extractor": 20, "Reviewer": 20, "Admin Approved By": 20,
         })
         _style_sheet(writer, df_corrections, "Corrections & Feedback", "DC2626", {
@@ -1925,14 +1959,25 @@ async def llm_verify_source(
     if not records:
         raise HTTPException(status_code=422, detail="No records to verify.")
 
+    # Enter the LLM Verification pipeline stage — timed like every other stage
+    previous_status = source.status
+    if not source.llm_verification_started_at:
+        source.llm_verification_started_at = datetime.now(timezone.utc)
+    source.status = SourceStatus.LLM_VERIFICATION
+    db.flush()
+
     # Fetch the live website
     from app.services.web_scraper import fetch_url_text
     try:
         web_text, meta = await fetch_url_text(source.website_url)
     except Exception as e:
+        source.status = previous_status
+        db.commit()
         raise HTTPException(status_code=502, detail=f"Could not fetch source website: {str(e)}")
 
     if not web_text.strip():
+        source.status = previous_status
+        db.commit()
         raise HTTPException(status_code=422, detail="The source website returned no readable text — may require JavaScript or login.")
 
     schema_definition = schema_ver.definition if schema_ver else {}
@@ -2053,14 +2098,24 @@ Required format:
             else:
                 error_count += 1
 
+            # Per-record trace so it shows up in that record's own timeline
+            db.add(AuditLog(
+                user_id=current_user.id, project_id=source.project_id, record_id=record.id,
+                action=AuditAction.SOURCE_STATUS_CHANGED,
+                after_value={"stage": "llm_verification", "verdict": verdict, "summary": summary},
+            ))
+
         db.flush()
 
-    # Advance source status to llm_verification to reflect this stage ran
-    source.status = SourceStatus.LLM_VERIFICATION
+    # LLM Verification stage complete — stamp end time, hand off to human review queue
+    source.llm_verification_completed_at = datetime.now(timezone.utc)
+    source.status = SourceStatus.READY_FOR_REVIEW
     db.add(AuditLog(
         user_id=current_user.id, project_id=source.project_id,
         action=AuditAction.SOURCE_STATUS_CHANGED,
-        before_value={}, after_value={"status": "llm_verification", "verified": verified_count, "flagged": flagged_count},
+        before_value={"status": previous_status.value},
+        after_value={"status": "ready_for_review", "stage": "llm_verification_complete",
+                     "verified": verified_count, "flagged": flagged_count},
     ))
     db.commit()
 
