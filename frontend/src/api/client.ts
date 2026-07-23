@@ -274,15 +274,21 @@ export const sourcesApi = {
   get: (id: string) => api.get(`/sources/${id}`).then(r => r.data),
   update: (id: string, data: object) => api.patch(`/sources/${id}`, data).then(r => r.data),
   delete: (id: string) => api.delete(`/sources/${id}`).then(r => r.data),
-  upload: (id: string, formData: FormData) =>
+  upload: (id: string, formData: FormData, onProgress?: (pct: number) => void) =>
     api.post(`/sources/${id}/upload`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress
+        ? (e) => onProgress(e.total ? Math.round((e.loaded / e.total) * 100) : 0)
+        : undefined,
     }).then(r => r.data),
-  uploadMulti: (id: string, files: File[]) => {
+  uploadMulti: (id: string, files: File[], onProgress?: (pct: number) => void) => {
     const formData = new FormData()
     files.forEach(f => formData.append('files', f, (f as any).webkitRelativePath || f.name))
     return api.post(`/sources/${id}/upload-multi`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: onProgress
+        ? (e) => onProgress(e.total ? Math.round((e.loaded / e.total) * 100) : 0)
+        : undefined,
     }).then(r => r.data)
   },
   workload: (projectId?: string) =>

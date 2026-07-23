@@ -199,16 +199,37 @@ export function SourceDetailPage() {
   const isExtractor = source?.assigned_extractor_id === user?.id || isAdmin
   const isReviewer = source?.assigned_reviewer_id === user?.id || isAdmin || userRoles.includes('qa_lead')
 
+  const [uploadProgress, setUploadProgress] = useState(0)
+
+  // Turns any axios error into a specific, actionable toast message instead
+  // of a generic "Upload failed" — pins down exactly what went wrong.
+  const describeUploadError = (err: any): string => {
+    if (!err?.response) {
+      if (err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message || '')) {
+        return 'Upload timed out — your connection may be too slow for this file size. Try again or use a smaller file.'
+      }
+      return 'Could not reach the server — check your internet connection and try again.'
+    }
+    const status = err.response.status
+    const detail = err.response.data?.detail
+    if (status === 413) return 'File is too large for the server to accept.'
+    if (status === 422) return detail || 'The file was rejected — check its format matches what this source expects.'
+    if (status === 401 || status === 403) return 'Your session may have expired — refresh the page and try again.'
+    if (status >= 500) return detail ? `Server error: ${detail}` : 'The server hit an unexpected error while processing this upload.'
+    return detail || `Upload failed (HTTP ${status}).`
+  }
+
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!sourceId) return
     if (folderFiles && folderFiles.length > 0) return handleFolderUpload()
     if (!file) return
     setUploading(true)
+    setUploadProgress(0)
     try {
       const fd = new FormData()
       fd.append('file', file)
-      const summary = await sourcesApi.upload(sourceId, fd)
+      const summary = await sourcesApi.upload(sourceId, fd, setUploadProgress)
       const isZip = file.name.toLowerCase().endsWith('.zip')
       const isAI = summary.extraction_method === 'llm'
       const method = isAI ? 'AI extraction' : isZip ? `${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from ZIP` : 'schema mapping'
@@ -217,25 +238,28 @@ export function SourceDetailPage() {
       setFile(null)
       load()
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Upload failed')
+      toast.error(describeUploadError(err))
     } finally {
       setUploading(false)
+      setUploadProgress(0)
     }
   }
 
   const handleFolderUpload = async () => {
     if (!sourceId || !folderFiles || folderFiles.length === 0) return
     setUploading(true)
+    setUploadProgress(0)
     try {
-      const summary = await sourcesApi.uploadMulti(sourceId, Array.from(folderFiles))
+      const summary = await sourcesApi.uploadMulti(sourceId, Array.from(folderFiles), setUploadProgress)
       toast.success(`Uploaded ${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from folder: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
       setShowUpload(false)
       setFolderFiles(null)
       load()
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Folder upload failed')
+      toast.error(describeUploadError(err))
     } finally {
       setUploading(false)
+      setUploadProgress(0)
     }
   }
 
@@ -1280,12 +1304,35 @@ export function SourceDetailPage() {
             </details>
           </div>
 
+          {/* Live progress bar — real bytes-sent percentage, not a spinner */}
+          {uploading && (
+            <div style={{ padding: '0 0 4px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+                  {uploadProgress < 100 ? 'Uploading…' : 'Processing on server…'}
+                </span>
+                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 700 }}>
+                  {uploadProgress < 100 ? `${uploadProgress}%` : ''}
+                </span>
+              </div>
+              <div style={{ background: '#e2e8f0', borderRadius: 99, height: 6, overflow: 'hidden' }}>
+                <div style={{
+                  background: uploadProgress < 100 ? '#2563eb' : '#8b5cf6',
+                  height: '100%', width: uploadProgress < 100 ? `${uploadProgress}%` : '100%',
+                  borderRadius: 99, transition: 'width 0.2s ease',
+                }} />
+              </div>
+            </div>
+          )}
+
           {/* Sticky footer */}
           <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-gray-100">
             <Button variant="secondary" type="button" onClick={() => setShowUpload(false)} disabled={uploading}>Cancel</Button>
             <Button type="submit" loading={uploading} disabled={!file && !(folderFiles && folderFiles.length > 0)}>
               {uploading
-                ? (folderFiles && folderFiles.length > 0 ? `Processing ${folderFiles.length} files…` : file?.name.toLowerCase().endsWith('.zip') ? 'Processing ZIP…' : file && /\.(pdf|txt)$/i.test(file.name) ? 'AI extracting…' : 'Uploading…')
+                ? (uploadProgress < 100
+                    ? `Uploading… ${uploadProgress}%`
+                    : folderFiles && folderFiles.length > 0 ? `Processing ${folderFiles.length} files…` : file?.name.toLowerCase().endsWith('.zip') ? 'Processing ZIP…' : file && /\.(pdf|txt)$/i.test(file.name) ? 'AI extracting…' : 'Processing…')
                 : <><Upload className="w-4 h-4" /> {folderFiles && folderFiles.length > 0 ? `Upload ${folderFiles.length} Files` : 'Upload & Validate'}</>
               }
             </Button>
