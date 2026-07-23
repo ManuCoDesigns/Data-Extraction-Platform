@@ -50,6 +50,45 @@ export function SourceDetailPage() {
   const [uploadMode, setUploadMode] = useState<'file' | 'folder'>('file')
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
 
+  // ── Admin review + Timeline ──────────────────────────────────────────────
+  const [adminReviewing, setAdminReviewing] = useState(false)
+  const [showTimeline, setShowTimeline] = useState<string | null>(null)
+  const [timeline, setTimeline] = useState<any>(null)
+  const [timelineLoading, setTimelineLoading] = useState(false)
+  const [fieldComments, setFieldComments] = useState<Record<string, string>>({})
+  const [adminNote, setAdminNote] = useState('')
+
+  const loadTimeline = async (recordId: string) => {
+    if (!sourceId) return
+    setShowTimeline(recordId)
+    setTimelineLoading(true)
+    try {
+      const t = await sourcesApi.getTimeline(sourceId, recordId)
+      setTimeline(t)
+    } catch {
+      setTimeline(null)
+    } finally {
+      setTimelineLoading(false)
+    }
+  }
+
+  const handleAdminReview = async (recordId: string, action: 'approve' | 'return') => {
+    if (!sourceId) return
+    setAdminReviewing(true)
+    try {
+      await sourcesApi.adminReview(sourceId, recordId, { action, note: adminNote, field_comments: fieldComments })
+      toast.success(action === 'approve' ? 'Record fully approved' : 'Record returned for correction')
+      setAdminNote('')
+      setFieldComments({})
+      setShowTimeline(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Admin review failed')
+    } finally {
+      setAdminReviewing(false)
+    }
+  }
+
   // ── Folder / subfolder grouping ──────────────────────────────────────────
   // Records uploaded via folder-picker or ZIP carry `_source_file` (full
   // relative path e.g. "NETL_METALLIC/subfolder/id_72.json") in extracted_fields.
@@ -871,11 +910,50 @@ export function SourceDetailPage() {
                             )}
                           </td>
                           <td className="px-4 py-3">
-                            <ReviewBadge status={r.review_status} />
-                            {r.review_note && <p className="text-xs text-gray-400 mt-0.5 max-w-[160px] truncate">"{r.review_note}"</p>}
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <ReviewBadge status={r.review_status} />
+                              {(r.correction_count ?? 0) > 0 && (
+                                <span style={{
+                                  fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                                  background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
+                                  display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap',
+                                }}>
+                                  ↩ Returned {r.correction_count}×
+                                </span>
+                              )}
+                              {r.reviewer_field_comments && Object.values(r.reviewer_field_comments).some((arr: any) => Array.isArray(arr) && arr.length > 0) && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); loadTimeline(r.id) }}
+                                  style={{
+                                    fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                                    background: '#faf5ff', color: '#7c3aed', border: '1px solid #e9d5ff',
+                                    cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3,
+                                  }}>
+                                  💬 Feedback
+                                </button>
+                              )}
+                            </div>
+                            {r.review_note && <p className="text-xs text-gray-400 mt-1 max-w-[180px] truncate">"{r.review_note}"</p>}
                           </td>
                           <td className="px-4 py-3 text-right">
                             <div className="flex items-center gap-2 justify-end">
+                              <button
+                                onClick={e => { e.stopPropagation(); loadTimeline(r.id) }}
+                                title="View full history and timing"
+                                style={{
+                                  fontSize: 10, padding: '4px 9px', borderRadius: 8,
+                                  background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0',
+                                  cursor: 'pointer', whiteSpace: 'nowrap',
+                                }}>
+                                📋 History
+                              </button>
+                              {isAdmin && r.review_status === 'pending_admin_review' && (
+                                <span style={{
+                                  fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20,
+                                  background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a',
+                                  whiteSpace: 'nowrap',
+                                }}>Needs your approval</span>
+                              )}
                               <span style={{
                                 fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 20,
                                 background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe',
@@ -1194,6 +1272,161 @@ export function SourceDetailPage() {
 
       {/* Full-screen JSON Record Viewer */}
 
+      {/* Timeline + Admin Review Modal */}
+      {showTimeline && createPortal(
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex',
+          alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }}
+          onClick={() => { setShowTimeline(null); setTimeline(null) }}>
+          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 620, width: '100%',
+            maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+              <div>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>Record Timeline</h3>
+                {timeline && (
+                  <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>
+                    {timeline.revision_count} revision{timeline.revision_count !== 1 ? 's' : ''} · {timeline.correction_count} correction{timeline.correction_count !== 1 ? 's' : ''}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => { setShowTimeline(null); setTimeline(null) }}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 20, color: '#94a3b8' }}>×</button>
+            </div>
+
+            {timelineLoading ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>Loading…</div>
+            ) : !timeline ? (
+              <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>Could not load timeline</div>
+            ) : (
+              <div>
+                {/* Admin final review panel */}
+                {isAdmin && timeline.current_status === 'pending_admin_review' && (
+                  <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12,
+                    padding: '14px 16px', marginBottom: 18 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#92400e', margin: '0 0 8px' }}>
+                      ⚠ This record needs your final approval
+                    </p>
+                    <textarea value={adminNote} onChange={e => setAdminNote(e.target.value)}
+                      placeholder="Optional note (visible in the timeline and export)"
+                      rows={2} style={{ width: '100%', fontSize: 13, padding: '8px 10px', borderRadius: 8,
+                        border: '1px solid #fde68a', outline: 'none', resize: 'vertical', marginBottom: 10,
+                        boxSizing: 'border-box' }} />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button onClick={() => handleAdminReview(showTimeline!, 'approve')} disabled={adminReviewing}
+                        style={{ flex: 1, padding: '8px 14px', background: '#059669', color: '#fff', border: 'none',
+                          borderRadius: 8, fontSize: 13, fontWeight: 700, cursor: adminReviewing ? 'not-allowed' : 'pointer',
+                          opacity: adminReviewing ? .6 : 1 }}>
+                        ✓ Approve — Fully Delivered
+                      </button>
+                      <button onClick={() => handleAdminReview(showTimeline!, 'return')} disabled={adminReviewing}
+                        style={{ flex: 1, padding: '8px 14px', background: '#fff', color: '#dc2626',
+                          border: '1px solid #fecaca', borderRadius: 8, fontSize: 13, fontWeight: 700,
+                          cursor: adminReviewing ? 'not-allowed' : 'pointer', opacity: adminReviewing ? .6 : 1 }}>
+                        ↩ Return for Correction
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Status summary badges */}
+                <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'Current', value: timeline.current_status.replace(/_/g, ' '), color: '#2563eb' },
+                    { label: 'Revisions', value: timeline.revision_count, color: '#7c3aed' },
+                    { label: 'Corrections', value: timeline.correction_count, color: '#dc2626' },
+                  ].map(({ label, value, color }) => (
+                    <div key={label} style={{ background: color + '15', border: `1px solid ${color}30`,
+                      borderRadius: 10, padding: '8px 12px', textAlign: 'center', flex: 1 }}>
+                      <p style={{ fontSize: 16, fontWeight: 800, color, margin: 0, textTransform: 'capitalize' }}>{value}</p>
+                      <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>{label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Timeline events */}
+                <div style={{ position: 'relative', marginBottom: 16 }}>
+                  <div style={{ position: 'absolute', left: 15, top: 0, bottom: 0, width: 2, background: '#e2e8f0' }} />
+                  {(timeline.events || []).map((ev: any, i: number) => (
+                    <div key={i} style={{ display: 'flex', gap: 12, marginBottom: 14, position: 'relative' }}>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#fff',
+                        border: '2px solid #e2e8f0', flexShrink: 0, display: 'flex', alignItems: 'center',
+                        justifyContent: 'center', fontSize: 12, zIndex: 1 }}>
+                        {ev.action.includes('approved') ? '✓' : ev.action.includes('returned') || ev.action.includes('rejected') ? '↩' : '→'}
+                      </div>
+                      <div style={{ flex: 1, paddingTop: 4 }}>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0, textTransform: 'capitalize' }}>
+                          {ev.action.replace(/_/g, ' ')}
+                        </p>
+                        <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
+                          <span style={{ fontSize: 11, color: '#94a3b8' }}>
+                            {ev.timestamp ? new Date(ev.timestamp).toLocaleString() : '—'}
+                          </span>
+                          {ev.seconds_since_previous != null && (
+                            <span style={{ fontSize: 11, color: '#7c3aed', fontWeight: 600 }}>
+                              ⏱ {ev.seconds_since_previous < 60
+                                ? `${ev.seconds_since_previous}s`
+                                : ev.seconds_since_previous < 3600
+                                  ? `${Math.round(ev.seconds_since_previous / 60)}m`
+                                  : `${Math.round(ev.seconds_since_previous / 3600)}h`}
+                            </span>
+                          )}
+                        </div>
+                        {ev.after_value?.note && (
+                          <p style={{ fontSize: 11, color: '#64748b', marginTop: 3,
+                            background: '#f8fafc', borderRadius: 6, padding: '4px 8px' }}>
+                            💬 "{ev.after_value.note}"
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {(timeline.events || []).length === 0 && (
+                    <p style={{ fontSize: 13, color: '#94a3b8', textAlign: 'center', padding: '20px 0' }}>No events recorded yet</p>
+                  )}
+                </div>
+
+                {/* Field comments */}
+                {timeline.reviewer_field_comments && Object.keys(timeline.reviewer_field_comments).length > 0 && (
+                  <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 10 }}>Field Comments</p>
+                    {Object.entries(timeline.reviewer_field_comments as Record<string, any[]>).map(([field, comments]) => (
+                      <div key={field} style={{ marginBottom: 12 }}>
+                        <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase',
+                          letterSpacing: '.05em', marginBottom: 6 }}>
+                          {field === '_general' ? 'General Notes' : field}
+                        </p>
+                        {comments.map((cm: any, i: number) => (
+                          <div key={i} style={{
+                            background: cm.type === 'correction' || cm.type === 'rejection' ? '#fef2f2' : '#f0fdf4',
+                            border: `1px solid ${cm.type === 'correction' || cm.type === 'rejection' ? '#fecaca' : '#bbf7d0'}`,
+                            borderRadius: 10, padding: '8px 12px', marginBottom: 6,
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                              <span style={{ fontSize: 10, fontWeight: 700,
+                                color: cm.role === 'admin' ? '#dc2626' : cm.role === 'reviewer' ? '#7c3aed' : '#2563eb',
+                                background: cm.role === 'admin' ? '#fef2f2' : cm.role === 'reviewer' ? '#faf5ff' : '#eff6ff',
+                                padding: '1px 6px', borderRadius: 20 }}>
+                                {cm.role || 'reviewer'}
+                              </span>
+                              <span style={{ fontSize: 11, color: '#94a3b8' }}>{cm.user}</span>
+                              <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>
+                                {cm.ts ? new Date(cm.ts).toLocaleString() : ''}
+                              </span>
+                            </div>
+                            <p style={{ fontSize: 13, color: '#1e293b', margin: 0 }}>{cm.comment}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
+
     </div>
   )
 }
@@ -1203,6 +1436,7 @@ function ReviewBadge({ status }: { status: string }) {
     pending: { variant: 'gray', label: 'Pending' },
     approved: { variant: 'green', label: 'Approved' },
     rejected: { variant: 'red', label: 'Sent back' },
+    pending_admin_review: { variant: 'amber', label: 'Awaiting Admin' },
   }
   const m = map[status] ?? map.pending
   return <Badge variant={m.variant}>{m.label}</Badge>

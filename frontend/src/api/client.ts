@@ -287,6 +287,10 @@ export const sourcesApi = {
   },
   workload: (projectId?: string) =>
     api.get('/sources/workload', { params: projectId ? { project_id: projectId } : {} }).then(r => r.data),
+  adminReview: (sourceId: string, recordId: string, payload: { action: string; note: string; field_comments?: Record<string, string> }) =>
+    api.post(`/sources/${sourceId}/records/${recordId}/admin-review`, payload).then(r => r.data),
+  getTimeline: (sourceId: string, recordId: string) =>
+    api.get(`/sources/${sourceId}/records/${recordId}/timeline`).then(r => r.data),
   exportTimesheet: async (projectId?: string) => {
     const res = await api.get('/sources/export/timesheet', {
       params: projectId ? { project_id: projectId } : {},

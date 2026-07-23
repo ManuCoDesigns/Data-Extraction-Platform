@@ -142,6 +142,11 @@ def _serialize_record(r: ExtractedRecord) -> RecordOut:
         extracted_fields=r.extracted_fields or {}, raw_text=r.raw_text or "",
         is_submitted=r.is_submitted, canonical_name=r.canonical_name,
         created_at=r.created_at,
+        correction_count=getattr(r, "correction_count", 0) or 0,
+        revision_count=getattr(r, "revision_count", 0) or 0,
+        reviewer_field_comments=getattr(r, "reviewer_field_comments", None) or {},
+        admin_review_note=getattr(r, "admin_review_note", None),
+        admin_reviewed_at=getattr(r, "admin_reviewed_at", None),
     )
 
 
@@ -1005,14 +1010,51 @@ def review_source_record(
     if payload.action not in ("approve", "reject"):
         raise HTTPException(status_code=422, detail="action must be 'approve' or 'reject'")
 
-    record.review_status = ReviewStatus.APPROVED if payload.action == "approve" else ReviewStatus.REJECTED
+    now = datetime.now(timezone.utc)
+
+    if record.review_started_at is None:
+        record.review_started_at = now
+
+    if payload.action == "approve":
+        # Reviewer approval routes to admin for final sign-off (double-review workflow)
+        record.review_status = ReviewStatus.PENDING_ADMIN_REVIEW
+        record.revision_count = (record.revision_count or 0) + 1
+        record.admin_review_started_at = now
+        if payload.note:
+            fc = record.reviewer_field_comments or {}
+            fc.setdefault("_general", []).append({
+                "comment": payload.note, "user": current_user.email,
+                "role": "reviewer", "ts": now.isoformat(),
+            })
+            record.reviewer_field_comments = fc
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id, record_id=record.id,
+            action=AuditAction.RECORD_SENT_TO_ADMIN,
+            after_value={"note": payload.note, "revision_count": record.revision_count},
+        ))
+    else:
+        record.review_status = ReviewStatus.REJECTED
+        record.correction_count = (record.correction_count or 0) + 1
+        if payload.note:
+            fc = record.reviewer_field_comments or {}
+            fc.setdefault("_general", []).append({
+                "comment": payload.note, "user": current_user.email,
+                "role": "reviewer", "type": "rejection", "ts": now.isoformat(),
+            })
+            record.reviewer_field_comments = fc
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id, record_id=record.id,
+            action=AuditAction.RECORD_REJECTED,
+            after_value={"note": payload.note, "correction_count": record.correction_count},
+        ))
+
     record.review_note = payload.note
     record.reviewed_by = current_user.id
-    record.reviewed_at = datetime.now(timezone.utc)
+    record.reviewed_at = now
 
     if source.status not in (SourceStatus.IN_REVIEW,):
         source.status = SourceStatus.IN_REVIEW
-        source.review_started_at = source.review_started_at or datetime.now(timezone.utc)
+        source.review_started_at = source.review_started_at or now
 
     if payload.action == "reject":
         source.status = SourceStatus.CHANGES_REQUESTED
@@ -1029,6 +1071,130 @@ def review_source_record(
     db.commit()
     db.refresh(record)
     return _serialize_record(record)
+
+
+@router.post("/{source_id}/records/{record_id}/admin-review", response_model=RecordOut)
+def admin_review_record(
+    source_id: str, record_id: str, payload: dict,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """
+    Admin final sign-off on a record that a reviewer has already approved.
+      action = "approve" -> record becomes fully APPROVED (delivered)
+      action = "return"  -> record goes back to PENDING, correction_count += 1
+    """
+    source = _get_source_or_404(source_id, db)
+    user_roles = {r.role.value for r in current_user.roles}
+    if "org_admin" not in user_roles and "project_admin" not in user_roles and "qa_lead" not in user_roles:
+        raise HTTPException(status_code=403, detail="Only admins can do the final review")
+
+    record = (
+        db.query(ExtractedRecord)
+        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+        .filter(ExtractedRecord.id == record_id, ExtractionJob.source_id == source_id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found in this source")
+
+    action = payload.get("action", "approve")
+    note = payload.get("note", "")
+    field_comments = payload.get("field_comments", {}) or {}
+    now = datetime.now(timezone.utc)
+
+    if action == "approve":
+        record.review_status = ReviewStatus.APPROVED
+        record.admin_reviewed_by = current_user.id
+        record.admin_reviewed_at = now
+        record.admin_review_note = note
+        if field_comments:
+            fc = record.reviewer_field_comments or {}
+            for field, comment in field_comments.items():
+                fc.setdefault(field, []).append({
+                    "comment": comment, "user": current_user.email,
+                    "role": "admin", "ts": now.isoformat(),
+                })
+            record.reviewer_field_comments = fc
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id, record_id=record.id,
+            action=AuditAction.RECORD_ADMIN_REVIEWED,
+            after_value={"action": "approved", "note": note},
+        ))
+    else:
+        record.review_status = ReviewStatus.PENDING
+        record.correction_count = (record.correction_count or 0) + 1
+        record.admin_review_note = note
+        record.extraction_started_at = record.extraction_started_at or now
+        if field_comments:
+            fc = record.reviewer_field_comments or {}
+            for field, comment in field_comments.items():
+                fc.setdefault(field, []).append({
+                    "comment": comment, "user": current_user.email,
+                    "role": "admin", "ts": now.isoformat(), "type": "correction",
+                })
+            record.reviewer_field_comments = fc
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id, record_id=record.id,
+            action=AuditAction.RECORD_RETURNED_FOR_CORRECTION,
+            after_value={"note": note, "correction_count": record.correction_count},
+        ))
+
+    db.flush()
+    _recompute_counts(source, db)
+    db.commit()
+    db.refresh(record)
+    return _serialize_record(record)
+
+
+@router.get("/{source_id}/records/{record_id}/timeline")
+def record_timeline(
+    source_id: str, record_id: str,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Full audit history for a record, with time-between-steps calculated."""
+    source = _get_source_or_404(source_id, db)
+    record = (
+        db.query(ExtractedRecord)
+        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+        .filter(ExtractedRecord.id == record_id, ExtractionJob.source_id == source_id)
+        .first()
+    )
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.record_id == record_id)
+        .order_by(AuditLog.timestamp.asc())
+        .all()
+    )
+
+    events = []
+    prev_ts = record.created_at
+    for log in logs:
+        delta_secs = None
+        if prev_ts and log.timestamp:
+            delta_secs = int((log.timestamp - prev_ts).total_seconds())
+        events.append({
+            "action": log.action.value,
+            "user_id": log.user_id,
+            "timestamp": log.timestamp.isoformat() if log.timestamp else None,
+            "seconds_since_previous": delta_secs,
+            "after_value": log.after_value,
+        })
+        prev_ts = log.timestamp
+
+    return {
+        "record_id": record_id,
+        "current_status": record.review_status.value,
+        "revision_count": record.revision_count or 0,
+        "correction_count": record.correction_count or 0,
+        "created_at": record.created_at.isoformat() if record.created_at else None,
+        "reviewed_at": record.reviewed_at.isoformat() if record.reviewed_at else None,
+        "admin_reviewed_at": record.admin_reviewed_at.isoformat() if record.admin_reviewed_at else None,
+        "reviewer_field_comments": record.reviewer_field_comments or {},
+        "events": events,
+    }
 
 
 @router.post("/{source_id}/approve", response_model=SourceOut)
@@ -1204,6 +1370,15 @@ def export_timesheet(
         raise HTTPException(status_code=404, detail="No sources found for this project")
 
     rows = []
+    correction_rows = []   # per-record correction/feedback history
+    activity_rows = []     # every workflow step, across all sources
+
+    def _uname(uid: str | None) -> str:
+        if not uid:
+            return ""
+        u = db.query(User).filter(User.id == uid).first()
+        return u.full_name if u else ""
+
     for s in sources:
         jobs = db.query(ExtractionJob).filter(ExtractionJob.source_id == s.id).all()
         job_ids = [j.id for j in jobs]
@@ -1211,6 +1386,61 @@ def export_timesheet(
             db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).all()
             if job_ids else []
         )
+
+        # ── Per-record correction / feedback history ──────────────────────
+        for r in records:
+            record_label = None
+            if isinstance(r.extracted_fields, dict):
+                record_label = r.extracted_fields.get("_source_file")
+                if record_label:
+                    record_label = record_label.split("/")[-1]
+            record_label = record_label or (r.canonical_name if getattr(r, "canonical_name", None) else r.id[:8])
+
+            comments = r.reviewer_field_comments or {}
+            has_any_comment = any(comments.values()) if isinstance(comments, dict) else False
+
+            if (r.correction_count or 0) > 0 or has_any_comment:
+                if isinstance(comments, dict) and comments:
+                    for field, entries in comments.items():
+                        for entry in (entries or []):
+                            correction_rows.append({
+                                "Source": s.name,
+                                "Record": record_label,
+                                "Times Returned": r.correction_count or 0,
+                                "Field": "General" if field == "_general" else field,
+                                "Feedback": entry.get("comment", ""),
+                                "By": entry.get("user", ""),
+                                "Role": (entry.get("role", "") or "").title(),
+                                "Type": "Correction" if entry.get("type") in ("correction", "rejection") else "Note",
+                                "When": entry.get("ts", "")[:16].replace("T", " ") if entry.get("ts") else "",
+                            })
+                else:
+                    correction_rows.append({
+                        "Source": s.name, "Record": record_label,
+                        "Times Returned": r.correction_count or 0,
+                        "Field": "", "Feedback": "(no comment recorded)",
+                        "By": "", "Role": "", "Type": "Correction", "When": "",
+                    })
+
+        # ── Full workflow activity log (every step, every record) ─────────
+        if records:
+            audit_entries = (
+                db.query(AuditLog)
+                .filter(AuditLog.record_id.in_([r.id for r in records]))
+                .order_by(AuditLog.timestamp.asc())
+                .all()
+            )
+            for e in audit_entries:
+                note = ""
+                if isinstance(e.after_value, dict):
+                    note = e.after_value.get("note") or e.after_value.get("action") or ""
+                activity_rows.append({
+                    "Source": s.name,
+                    "Action": e.action.value.replace("_", " ").title(),
+                    "By": _uname(e.user_id),
+                    "Note": note,
+                    "When": e.timestamp.strftime("%Y-%m-%d %H:%M") if e.timestamp else "",
+                })
 
         total = len(records)
         approved = [r for r in records if r.review_status == ReviewStatus.APPROVED]
@@ -1264,31 +1494,47 @@ def export_timesheet(
         })
 
     df = pd.DataFrame(rows)
+    df_corrections = pd.DataFrame(correction_rows)
+    df_activity = pd.DataFrame(activity_rows)
 
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name="Delivery Timesheet")
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
 
-        ws = writer.sheets["Delivery Timesheet"]
-        from openpyxl.styles import Font, PatternFill, Alignment
-        from openpyxl.utils import get_column_letter
-
-        header_fill = PatternFill(start_color="2563EB", end_color="2563EB", fill_type="solid")
+    def _style_sheet(writer, df_, sheet_name, header_color, widths):
+        if df_.empty:
+            df_ = pd.DataFrame([{"Info": "No data for this section"}])
+        df_.to_excel(writer, index=False, sheet_name=sheet_name)
+        ws = writer.sheets[sheet_name]
+        header_fill = PatternFill(start_color=header_color, end_color=header_color, fill_type="solid")
         header_font = Font(color="FFFFFF", bold=True, size=11)
-        for col_idx, col_name in enumerate(df.columns, 1):
+        for col_idx, col_name in enumerate(df_.columns, 1):
             cell = ws.cell(row=1, column=col_idx)
             cell.fill = header_fill
             cell.font = header_font
             cell.alignment = Alignment(horizontal="center", vertical="center")
-
-        widths = {"Source": 38, "Status": 16, "Extraction Started": 18, "Delivered At": 18,
-                  "Duration": 18, "Total Records": 14, "Approved Records": 16,
-                  "Extractor": 20, "Reviewer": 20, "Admin Approved By": 20}
-        for col_idx, col_name in enumerate(df.columns, 1):
-            ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_name, 16)
-
+        for col_idx, col_name in enumerate(df_.columns, 1):
+            ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_name, 18)
         ws.freeze_panes = "A2"
         ws.row_dimensions[1].height = 22
+        for col_idx, col_name in enumerate(df_.columns, 1):
+            if col_name in ("Feedback", "Note"):
+                for row_idx in range(2, len(df_) + 2):
+                    ws.cell(row=row_idx, column=col_idx).alignment = Alignment(wrap_text=True, vertical="top")
+
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        _style_sheet(writer, df, "Delivery Timesheet", "2563EB", {
+            "Source": 38, "Status": 16, "Extraction Started": 18, "Delivered At": 18,
+            "Duration": 18, "Total Records": 14, "Approved Records": 16,
+            "Extractor": 20, "Reviewer": 20, "Admin Approved By": 20,
+        })
+        _style_sheet(writer, df_corrections, "Corrections & Feedback", "DC2626", {
+            "Source": 34, "Record": 24, "Times Returned": 14, "Field": 20,
+            "Feedback": 50, "By": 20, "Role": 14, "Type": 14, "When": 18,
+        })
+        _style_sheet(writer, df_activity, "Full Activity Log", "7C3AED", {
+            "Source": 34, "Action": 26, "By": 20, "Note": 50, "When": 18,
+        })
 
     buf.seek(0)
     filename = f"delivery_timesheet_{datetime.now(timezone.utc).strftime('%Y%m%d')}.xlsx"
@@ -1485,8 +1731,8 @@ def delete_source(
         if not member or member.role.value not in ("project_admin", "org_admin"):
             raise HTTPException(status_code=403, detail="Only admins can delete sources")
 
-    if source.status == SourceStatus.APPROVED:
-        raise HTTPException(status_code=422, detail="Approved sources cannot be deleted. Reset it first.")
+    if source.status == SourceStatus.APPROVED and not is_org_admin:
+        raise HTTPException(status_code=422, detail="Approved sources cannot be deleted. Reset it first, or ask an org admin to delete it.")
 
     source_name = source.name
     source_status = source.status.value

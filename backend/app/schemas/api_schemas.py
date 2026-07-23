@@ -191,6 +191,11 @@ class RecordOut(BaseModel):
     is_submitted: bool
     canonical_name: Optional[str]
     created_at: datetime
+    correction_count: int = 0
+    revision_count: int = 0
+    reviewer_field_comments: dict[str, Any] = {}
+    admin_review_note: Optional[str] = None
+    admin_reviewed_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 

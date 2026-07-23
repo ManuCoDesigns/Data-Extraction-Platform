@@ -78,6 +78,7 @@ class ReviewStatus(str, enum.Enum):
     SKIPPED = "skipped"
     QUARANTINED = "quarantined"
     ESCALATED = "escalated"
+    PENDING_ADMIN_REVIEW = "pending_admin_review"   # reviewer approved; awaiting admin sign-off
 
 
 class LLMVerdict(str, enum.Enum):
@@ -88,6 +89,10 @@ class LLMVerdict(str, enum.Enum):
 
 class AuditAction(str, enum.Enum):
     RECORD_APPROVED = "record_approved"
+    RECORD_ADMIN_REVIEWED = "record_admin_reviewed"
+    RECORD_RETURNED_FOR_CORRECTION = "record_returned_for_correction"
+    RECORD_REVISION_STARTED = "record_revision_started"
+    RECORD_SENT_TO_ADMIN = "record_sent_to_admin"
     RECORD_REJECTED = "record_rejected"
     FIELD_OVERRIDDEN = "field_overridden"
     RECORD_ESCALATED = "record_escalated"
@@ -449,8 +454,23 @@ class ExtractedRecord(Base):
     created_at = Column(DateTime(timezone=True), default=now_utc)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
+    # Admin final review (double-review workflow: reviewer approve -> admin approve)
+    admin_review_note       = Column(Text, nullable=True)
+    admin_reviewed_by       = Column(String(36), ForeignKey("users.id"), nullable=True)
+    admin_reviewed_at       = Column(DateTime(timezone=True), nullable=True)
+    # Revision / correction cycle tracking
+    revision_count          = Column(Integer, default=0, server_default="0", nullable=False)
+    correction_count        = Column(Integer, default=0, server_default="0", nullable=False)
+    # Time tracking per stage
+    extraction_started_at   = Column(DateTime(timezone=True), nullable=True)
+    review_started_at       = Column(DateTime(timezone=True), nullable=True)
+    admin_review_started_at = Column(DateTime(timezone=True), nullable=True)
+    # Per-field reviewer/admin comments: {field_name: [{comment,user,role,ts,type}]}
+    reviewer_field_comments = Column(JSON, default=dict, server_default="{}")
+
     job = relationship("ExtractionJob", back_populates="records")
     reviewer = relationship("User", foreign_keys=[reviewed_by])
+    admin_reviewer = relationship("User", foreign_keys=[admin_reviewed_by])
     llm_reviews = relationship("LLMCallLog", back_populates="record")
     validation_results = relationship("ValidationResult", back_populates="record")
 
