@@ -165,47 +165,33 @@ def _safe_clear_old_jobs(source_id: str, db: Session) -> int:
     """
     Deletes every ExtractionJob (and its ExtractedRecords) for a source.
 
-    IMPORTANT: this deliberately avoids SQLAlchemy's bulk Query.delete()
-    for extracted_records. On this database, a bulk
-    "DELETE FROM extracted_records WHERE job_id IN (...)" reliably triggers:
-        psycopg2.errors.InternalError_: referential integrity query on
-        "extracted_records" from constraint "fk_audit_log_record_id" ...
-        gave unexpected result
-    even after every referencing audit_log row has already been detached
-    (record_id set to NULL) beforehand. This is a Postgres-internal FK
-    trigger issue specific to the bulk statement's query plan, not a data
-    problem. Deleting rows one at a time via raw parameterised SQL uses a
-    completely different (simple, single-row) statement shape that does not
-    trigger it.
+    audit_log.record_id / job_id / source_id are no longer enforced as
+    database-level foreign keys (migration 015) — they were dropped after
+    an in-place ALTER (migration 014) left Postgres's internal RI trigger
+    for this constraint permanently corrupted, breaking every delete that
+    touched extracted_records/extraction_jobs regardless of how the delete
+    was written. With the constraint gone, plain bulk deletes work again.
+    We still null out audit_log references first, purely for data hygiene
+    (so old audit rows don't point at IDs that no longer exist).
     """
     job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
     if not job_ids:
         return 0
 
-    from sqlalchemy import text as _text
-
-    record_ids = [r[0] for r in db.execute(
-        _text("SELECT id FROM extracted_records WHERE job_id = ANY(:job_ids)"),
-        {"job_ids": job_ids},
-    ).fetchall()]
-
-    # Detach every reference first (belt-and-braces, even though the
-    # single-row delete below no longer depends on this to succeed).
+    record_ids = [r.id for r in db.query(ExtractedRecord.id).filter(ExtractedRecord.job_id.in_(job_ids)).all()]
     if record_ids:
-        db.execute(_text("UPDATE audit_log SET record_id = NULL WHERE record_id = ANY(:ids)"), {"ids": record_ids})
-    db.execute(_text("UPDATE audit_log SET job_id = NULL WHERE job_id = ANY(:ids)"), {"ids": job_ids})
-    db.execute(_text("DELETE FROM llm_call_log WHERE job_id = ANY(:ids)"), {"ids": job_ids})
-    db.execute(_text("UPDATE submission_batches SET job_id = NULL WHERE job_id = ANY(:ids)"), {"ids": job_ids})
-
-    # One row at a time — sidesteps the bulk-delete FK trigger bug entirely.
-    deleted = 0
-    for rid in record_ids:
-        db.execute(_text("DELETE FROM extracted_records WHERE id = :id"), {"id": rid})
-        deleted += 1
-
-    for jid in job_ids:
-        db.execute(_text("DELETE FROM extraction_jobs WHERE id = :id"), {"id": jid})
-
+        db.query(AuditLog).filter(AuditLog.record_id.in_(record_ids)).update(
+            {"record_id": None}, synchronize_session=False
+        )
+    db.query(AuditLog).filter(AuditLog.job_id.in_(job_ids)).update(
+        {"job_id": None}, synchronize_session=False
+    )
+    db.query(LLMCallLog).filter(LLMCallLog.job_id.in_(job_ids)).delete(synchronize_session=False)
+    db.query(SubmissionBatch).filter(SubmissionBatch.job_id.in_(job_ids)).update(
+        {"job_id": None}, synchronize_session=False
+    )
+    deleted = db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
+    db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
     return deleted
 
 

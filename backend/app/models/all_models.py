@@ -566,9 +566,15 @@ class AuditLog(Base):
     timestamp = Column(DateTime(timezone=True), default=now_utc, nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=True)
-    source_id = Column(String(36), ForeignKey("sources.id", ondelete="SET NULL"), nullable=True, index=True)
-    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="SET NULL"), nullable=True)
-    record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="SET NULL"), nullable=True)
+    # NOT enforced as DB-level foreign keys on purpose — audit_log is a
+    # logging table and does not need referential integrity enforced by
+    # Postgres. An in-place ALTER of these constraints (migration 014) left
+    # a corrupted internal RI trigger that broke every subsequent delete
+    # touching extracted_records/extraction_jobs; migration 015 drops them
+    # for good. The columns are still meaningfully typed and indexed.
+    source_id = Column(String(36), nullable=True, index=True)
+    job_id = Column(String(36), nullable=True)
+    record_id = Column(String(36), nullable=True)
     action = Column(SAEnum(AuditAction), nullable=False)
     before_value = Column(JSON, nullable=True)
     after_value = Column(JSON, nullable=True)
