@@ -200,6 +200,76 @@ export function SourceDetailPage() {
   const isReviewer = source?.assigned_reviewer_id === user?.id || isAdmin || userRoles.includes('qa_lead')
 
   const [uploadProgress, setUploadProgress] = useState(0)
+  const [splitStatus, setSplitStatus] = useState<string | null>(null)
+
+  // Files above this size get automatically split client-side before
+  // upload, so the server never has to hold a huge file fully in memory —
+  // this is the same idea as the manual split_large_json.py script, just
+  // built into the upload flow so nobody has to run it by hand.
+  const AUTO_SPLIT_THRESHOLD_BYTES = 40 * 1024 * 1024   // 40MB
+  const SPLIT_CHUNK_TARGET_BYTES   = 20 * 1024 * 1024   // ~20MB per chunk
+
+  // Splits a JSON-array file into several smaller JSON files in memory.
+  // Returns null if the file isn't a splittable JSON array (caller falls
+  // back to a normal single-file upload, or an explanatory error for
+  // types that can't be safely auto-split).
+  const splitJsonFile = async (f: File): Promise<File[] | null> => {
+    const text = await f.text()
+    let data: any
+    try { data = JSON.parse(text) } catch { return null }
+    if (!Array.isArray(data)) return null
+
+    const baseName = f.name.replace(/\.json$/i, '')
+    const chunks: File[] = []
+    let current: any[] = []
+    let currentBytes = 2
+
+    for (const record of data) {
+      const recordBytes = new Blob([JSON.stringify(record)]).size + 1
+      if (currentBytes + recordBytes > SPLIT_CHUNK_TARGET_BYTES && current.length > 0) {
+        const blob = new Blob([JSON.stringify(current)], { type: 'application/json' })
+        chunks.push(new File([blob], `${baseName}_part${chunks.length + 1}.json`, { type: 'application/json' }))
+        current = []
+        currentBytes = 2
+      }
+      current.push(record)
+      currentBytes += recordBytes
+    }
+    if (current.length > 0) {
+      const blob = new Blob([JSON.stringify(current)], { type: 'application/json' })
+      chunks.push(new File([blob], `${baseName}_part${chunks.length + 1}.json`, { type: 'application/json' }))
+    }
+    return chunks
+  }
+
+  // Splits a CSV file by rows, keeping the header row in every chunk.
+  const splitCsvFile = (f: File, text: string): File[] => {
+    const lines = text.split(/\r?\n/)
+    const header = lines[0]
+    const baseName = f.name.replace(/\.csv$/i, '')
+    const chunks: File[] = []
+    let current: string[] = [header]
+    let currentBytes = new Blob([header]).size
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i]
+      if (!line.trim()) continue
+      const lineBytes = new Blob([line]).size + 1
+      if (currentBytes + lineBytes > SPLIT_CHUNK_TARGET_BYTES && current.length > 1) {
+        const blob = new Blob([current.join('\n')], { type: 'text/csv' })
+        chunks.push(new File([blob], `${baseName}_part${chunks.length + 1}.csv`, { type: 'text/csv' }))
+        current = [header]
+        currentBytes = new Blob([header]).size
+      }
+      current.push(line)
+      currentBytes += lineBytes
+    }
+    if (current.length > 1) {
+      const blob = new Blob([current.join('\n')], { type: 'text/csv' })
+      chunks.push(new File([blob], `${baseName}_part${chunks.length + 1}.csv`, { type: 'text/csv' }))
+    }
+    return chunks
+  }
 
   // Turns any axios error into a specific, actionable toast message instead
   // of a generic "Upload failed" — pins down exactly what went wrong.
@@ -212,7 +282,7 @@ export function SourceDetailPage() {
     }
     const status = err.response.status
     const detail = err.response.data?.detail
-    if (status === 413) return 'File is too large for the server to accept.'
+    if (status === 413) return detail || 'File is too large for the server to accept.'
     if (status === 422) return detail || 'The file was rejected — check its format matches what this source expects.'
     if (status === 401 || status === 403) return 'Your session may have expired — refresh the page and try again.'
     if (status >= 500) return detail ? `Server error: ${detail}` : 'The server hit an unexpected error while processing this upload.'
@@ -224,6 +294,46 @@ export function SourceDetailPage() {
     if (!sourceId) return
     if (folderFiles && folderFiles.length > 0) return handleFolderUpload()
     if (!file) return
+
+    // Auto-split large JSON/CSV files transparently, then route through
+    // the same folder-upload path — the person never has to think about it.
+    if (file.size > AUTO_SPLIT_THRESHOLD_BYTES) {
+      const ext = file.name.toLowerCase().split('.').pop()
+      if (ext === 'json' || ext === 'csv') {
+        setSplitStatus('Splitting large file…')
+        try {
+          const chunks = ext === 'json'
+            ? await splitJsonFile(file)
+            : splitCsvFile(file, await file.text())
+          setSplitStatus(null)
+          if (chunks && chunks.length > 1) {
+            toast.success(`Large file split into ${chunks.length} parts automatically`)
+            setUploading(true)
+            setUploadProgress(0)
+            try {
+              const summary = await sourcesApi.uploadMulti(sourceId, chunks, setUploadProgress)
+              toast.success(`Uploaded ${summary.files_processed} part${summary.files_processed !== 1 ? 's' : ''}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+              setShowUpload(false)
+              setFile(null)
+              load()
+            } catch (err: any) {
+              toast.error(describeUploadError(err))
+            } finally {
+              setUploading(false)
+              setUploadProgress(0)
+            }
+            return
+          }
+        } catch {
+          setSplitStatus(null)
+          // fall through to normal upload attempt below if splitting failed
+        }
+      } else {
+        toast.error(`This ${ext?.toUpperCase()} file is ${(file.size / 1024 / 1024).toFixed(0)}MB — automatic splitting only works for JSON/CSV. Use Folder Upload with pre-split files instead.`)
+        return
+      }
+    }
+
     setUploading(true)
     setUploadProgress(0)
     try {
@@ -1304,11 +1414,21 @@ export function SourceDetailPage() {
             </details>
           </div>
 
+          {/* Auto-split indicator — shown briefly while a large file is chunked client-side */}
+          {splitStatus && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
+              background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10 }}>
+              <div style={{ width: 14, height: 14, border: '2px solid #bfdbfe', borderTopColor: '#2563eb',
+                borderRadius: '50%', animation: 'dep-spin 0.8s linear infinite' }} />
+              <span style={{ fontSize: 12, color: '#1d4ed8', fontWeight: 600 }}>{splitStatus}</span>
+              <style>{`@keyframes dep-spin{to{transform:rotate(360deg)}}`}</style>
+            </div>
+          )}
+
           {/* Live progress bar — real bytes-sent percentage, not a spinner */}
           {uploading && (
             <div style={{ padding: '0 0 4px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
                   {uploadProgress < 100 ? 'Uploading…' : 'Processing on server…'}
                 </span>
                 <span style={{ fontSize: 11, color: '#64748b', fontWeight: 700 }}>
