@@ -254,6 +254,105 @@ def create_source(
     return _serialize_source(source)
 
 
+# ─── Live Team Workload ──────────────────────────────────────────────────────
+
+@router.get("/workload")
+def team_workload(
+    project_id: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Live "who is handling what" board — every source that isn't fully
+    delivered yet, with its current extractor/reviewer, how long each has
+    had it, and where it's stuck. Powers the Team Workload page.
+    """
+    q = db.query(Source).filter(Source.status != SourceStatus.APPROVED)
+    if project_id:
+        q = q.filter(Source.project_id == project_id)
+    sources = q.order_by(Source.updated_at.desc()).all()
+
+    now = datetime.now(timezone.utc)
+    user_cache: dict[str, str] = {}
+
+    def user_name(uid: str | None) -> str | None:
+        if not uid:
+            return None
+        if uid not in user_cache:
+            u = db.query(User).filter(User.id == uid).first()
+            user_cache[uid] = u.full_name if u else "Unknown"
+        return user_cache[uid]
+
+    def elapsed_label(started: datetime | None) -> str | None:
+        if not started:
+            return None
+        delta = now - started
+        hrs = delta.total_seconds() / 3600
+        if hrs < 1:
+            return f"{int(delta.total_seconds() / 60)}m"
+        if hrs < 24:
+            return f"{hrs:.1f}h"
+        return f"{delta.days}d {int(hrs % 24)}h"
+
+    projects_cache: dict[str, str] = {}
+    def project_name(pid: str) -> str:
+        if pid not in projects_cache:
+            p = db.query(Project).filter(Project.id == pid).first()
+            projects_cache[pid] = p.name if p else "Unknown Project"
+        return projects_cache[pid]
+
+    rows = []
+    for s in sources:
+        extractor = user_name(s.assigned_extractor_id)
+        reviewer = user_name(s.assigned_reviewer_id)
+
+        is_extracting = s.status in (SourceStatus.EXTRACTING, SourceStatus.NEEDS_FIXES)
+        is_reviewing = s.status in (SourceStatus.IN_REVIEW, SourceStatus.READY_FOR_REVIEW, SourceStatus.CHANGES_REQUESTED)
+
+        rows.append({
+            "source_id": s.id,
+            "source_name": s.name,
+            "project_id": s.project_id,
+            "project_name": project_name(s.project_id),
+            "status": s.status.value,
+            "extractor": extractor,
+            "extractor_elapsed": elapsed_label(s.extraction_started_at) if is_extracting else None,
+            "reviewer": reviewer,
+            "reviewer_elapsed": elapsed_label(s.review_started_at) if is_reviewing else None,
+            "total_records": s.total_records or 0,
+            "valid_records": s.valid_records or 0,
+            "invalid_records": s.invalid_records or 0,
+            "approved_records": s.approved_records or 0,
+            "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+            "extraction_started_at": s.extraction_started_at.isoformat() if s.extraction_started_at else None,
+            "unclaimed": not s.assigned_extractor_id,
+        })
+
+    # Per-person summary
+    by_person: dict[str, dict] = {}
+    for r in rows:
+        for role_key, name_key, elapsed_key in [
+            ("extractor", "extractor", "extractor_elapsed"),
+            ("reviewer", "reviewer", "reviewer_elapsed"),
+        ]:
+            name = r[name_key]
+            if not name:
+                continue
+            if name not in by_person:
+                by_person[name] = {"name": name, "extracting": 0, "reviewing": 0}
+            if role_key == "extractor" and r[elapsed_key]:
+                by_person[name]["extracting"] += 1
+            if role_key == "reviewer" and r[elapsed_key]:
+                by_person[name]["reviewing"] += 1
+
+    return {
+        "sources": rows,
+        "by_person": list(by_person.values()),
+        "unclaimed_count": len([r for r in rows if r["unclaimed"]]),
+        "generated_at": now.isoformat(),
+    }
+
+
 @router.get("/{source_id}", response_model=SourceOut)
 def get_source(source_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     source = _get_source_or_404(source_id, db)
@@ -1545,104 +1644,6 @@ def export_timesheet(
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
-
-# ─── Live Team Workload ──────────────────────────────────────────────────────
-
-@router.get("/workload")
-def team_workload(
-    project_id: str | None = None,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Live "who is handling what" board — every source that isn't fully
-    delivered yet, with its current extractor/reviewer, how long each has
-    had it, and where it's stuck. Powers the Team Workload page.
-    """
-    q = db.query(Source).filter(Source.status != SourceStatus.APPROVED)
-    if project_id:
-        q = q.filter(Source.project_id == project_id)
-    sources = q.order_by(Source.updated_at.desc()).all()
-
-    now = datetime.now(timezone.utc)
-    user_cache: dict[str, str] = {}
-
-    def user_name(uid: str | None) -> str | None:
-        if not uid:
-            return None
-        if uid not in user_cache:
-            u = db.query(User).filter(User.id == uid).first()
-            user_cache[uid] = u.full_name if u else "Unknown"
-        return user_cache[uid]
-
-    def elapsed_label(started: datetime | None) -> str | None:
-        if not started:
-            return None
-        delta = now - started
-        hrs = delta.total_seconds() / 3600
-        if hrs < 1:
-            return f"{int(delta.total_seconds() / 60)}m"
-        if hrs < 24:
-            return f"{hrs:.1f}h"
-        return f"{delta.days}d {int(hrs % 24)}h"
-
-    projects_cache: dict[str, str] = {}
-    def project_name(pid: str) -> str:
-        if pid not in projects_cache:
-            p = db.query(Project).filter(Project.id == pid).first()
-            projects_cache[pid] = p.name if p else "Unknown Project"
-        return projects_cache[pid]
-
-    rows = []
-    for s in sources:
-        extractor = user_name(s.assigned_extractor_id)
-        reviewer = user_name(s.assigned_reviewer_id)
-
-        is_extracting = s.status in (SourceStatus.EXTRACTING, SourceStatus.NEEDS_FIXES)
-        is_reviewing = s.status in (SourceStatus.IN_REVIEW, SourceStatus.READY_FOR_REVIEW, SourceStatus.CHANGES_REQUESTED)
-
-        rows.append({
-            "source_id": s.id,
-            "source_name": s.name,
-            "project_id": s.project_id,
-            "project_name": project_name(s.project_id),
-            "status": s.status.value,
-            "extractor": extractor,
-            "extractor_elapsed": elapsed_label(s.extraction_started_at) if is_extracting else None,
-            "reviewer": reviewer,
-            "reviewer_elapsed": elapsed_label(s.review_started_at) if is_reviewing else None,
-            "total_records": s.total_records or 0,
-            "valid_records": s.valid_records or 0,
-            "invalid_records": s.invalid_records or 0,
-            "approved_records": s.approved_records or 0,
-            "updated_at": s.updated_at.isoformat() if s.updated_at else None,
-            "extraction_started_at": s.extraction_started_at.isoformat() if s.extraction_started_at else None,
-            "unclaimed": not s.assigned_extractor_id,
-        })
-
-    # Per-person summary
-    by_person: dict[str, dict] = {}
-    for r in rows:
-        for role_key, name_key, elapsed_key in [
-            ("extractor", "extractor", "extractor_elapsed"),
-            ("reviewer", "reviewer", "reviewer_elapsed"),
-        ]:
-            name = r[name_key]
-            if not name:
-                continue
-            if name not in by_person:
-                by_person[name] = {"name": name, "extracting": 0, "reviewing": 0}
-            if role_key == "extractor" and r[elapsed_key]:
-                by_person[name]["extracting"] += 1
-            if role_key == "reviewer" and r[elapsed_key]:
-                by_person[name]["reviewing"] += 1
-
-    return {
-        "sources": rows,
-        "by_person": list(by_person.values()),
-        "unclaimed_count": len([r for r in rows if r["unclaimed"]]),
-        "generated_at": now.isoformat(),
-    }
 
 
 # ─── Performance analytics ───────────────────────────────────────────────────
