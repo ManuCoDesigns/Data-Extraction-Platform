@@ -162,7 +162,7 @@ export function AppLayout() {
                     background: n.is_read ? '#fff' : '#eff6ff',
                   }}>
                     <p style={{ fontSize: 13, color: '#1e293b', margin: '0 0 2px', fontWeight: n.is_read ? 400 : 600 }}>
-                      {n.message}
+                      {n.title}
                     </p>
                     <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
                       {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
