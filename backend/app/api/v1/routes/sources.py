@@ -1712,9 +1712,7 @@ def delete_source(
     current_user: User = Depends(get_current_user),
 ):
     """Delete a source and all its jobs and records. Only admins can do this."""
-    source = db.query(Source).filter(
-        Source.id == source_id, Source.deleted_at == None
-    ).first()
+    source = db.query(Source).filter(Source.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
