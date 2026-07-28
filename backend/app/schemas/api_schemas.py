@@ -254,6 +254,7 @@ class SourceCreate(BaseModel):
     description: Optional[str] = None
     website_url: Optional[str] = None
     schema_id: Optional[str] = None  # None = no fixed schema (flexible extraction only)
+    category: Optional[str] = None   # groups into a sub-folder within the project
     assigned_extractor_id: Optional[str] = None
     assigned_reviewer_id: Optional[str] = None
 
@@ -276,6 +277,7 @@ class SourceOut(BaseModel):
     name: str
     description: Optional[str]
     website_url: Optional[str]
+    category: Optional[str] = None
     status: str
     assigned_extractor_id: Optional[str]
     assigned_extractor_name: Optional[str] = None

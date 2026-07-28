@@ -325,6 +325,10 @@ class Source(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     website_url = Column(String(1024), nullable=True)
+    # Groups sources into collapsible sub-folders within a project (e.g.
+    # "Government Agency", "Materials Database") — same folder-tree UI
+    # pattern already used for uploaded records, applied one level up here.
+    category = Column(String(255), nullable=True, index=True)
     status = Column(SAEnum(SourceStatus), default=SourceStatus.NOT_STARTED, nullable=False, index=True)
 
     assigned_extractor_id = Column(String(36), ForeignKey("users.id"), nullable=True)

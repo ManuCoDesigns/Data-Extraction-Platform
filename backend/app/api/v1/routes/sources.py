@@ -17,7 +17,7 @@ fixed inline via PATCH without a full re-upload.
 """
 import io, json, math
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import pandas as pd
@@ -39,6 +39,14 @@ from app.services.schema_validator import validate_record, map_row_to_fields
 router = APIRouter(prefix="/sources", tags=["sources"])
 
 ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
+
+# The backend currently reads the whole upload into memory before parsing
+# it (pandas/json need the full content anyway). A 126MB file was enough to
+# get the Railway container OOM-killed mid-request (502, "connection closed
+# unexpectedly") since parsing overhead runs several times the raw file
+# size. Reject oversized uploads immediately, before any memory is spent,
+# with a clear message — instead of a silent 2-minute crash.
+MAX_UPLOAD_SIZE_BYTES = 60 * 1024 * 1024  # 60MB per file
 # Extensions that go through AI extraction (not mechanical row mapping)
 AI_EXTRACTION_EXTENSIONS = {".pdf", ".txt"}
 
@@ -111,6 +119,7 @@ def _serialize_source(s: Source) -> SourceOut:
         id=s.id, project_id=s.project_id, schema_id=s.schema_id,
         schema_name=s.schema.name if s.schema else None,
         name=s.name, description=s.description, website_url=s.website_url,
+        category=getattr(s, "category", None),
         status=s.status.value,
         assigned_extractor_id=s.assigned_extractor_id,
         assigned_extractor_name=s.extractor.full_name if s.extractor else None,
@@ -294,6 +303,7 @@ def create_source(
     source = Source(
         project_id=project_id, schema_id=payload.schema_id, name=payload.name,
         description=payload.description, website_url=payload.website_url,
+        category=payload.category,
         assigned_extractor_id=payload.assigned_extractor_id,
         assigned_reviewer_id=payload.assigned_reviewer_id,
         status=SourceStatus.EXTRACTING if payload.assigned_extractor_id else SourceStatus.NOT_STARTED,
@@ -605,6 +615,7 @@ def update_source(
 @router.post("/{source_id}/upload", response_model=SourceUploadSummary)
 async def upload_to_source(
     source_id: str,
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -624,6 +635,18 @@ async def upload_to_source(
     source = _get_source_or_404(source_id, db)
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
+
+    # Reject oversized uploads before reading anything into memory —
+    # Content-Length is available immediately from the request headers.
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_UPLOAD_SIZE_BYTES:
+        size_mb = int(content_length) / (1024 * 1024)
+        limit_mb = MAX_UPLOAD_SIZE_BYTES / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"File is {size_mb:.1f}MB — the limit is {limit_mb:.0f}MB. "
+                    f"Split it into smaller files, or use folder upload to send several at once.",
+        )
 
     import os as _os
     filename = file.filename or ""
@@ -861,6 +884,7 @@ def _finalize_upload(
 @router.post("/{source_id}/upload-multi", response_model=SourceUploadSummary)
 async def upload_multi_to_source(
     source_id: str,
+    request: Request,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -884,6 +908,19 @@ async def upload_multi_to_source(
 
     if not files:
         raise HTTPException(status_code=422, detail="No files provided.")
+
+    # Reject an oversized TOTAL request before reading anything into memory.
+    # Folder uploads accumulate every file's bytes at once, so this matters
+    # even more here than for a single-file upload.
+    content_length = request.headers.get("content-length")
+    if content_length and int(content_length) > MAX_UPLOAD_SIZE_BYTES:
+        size_mb = int(content_length) / (1024 * 1024)
+        limit_mb = MAX_UPLOAD_SIZE_BYTES / (1024 * 1024)
+        raise HTTPException(
+            status_code=413,
+            detail=f"This folder totals {size_mb:.1f}MB — the limit per upload is {limit_mb:.0f}MB. "
+                    f"Upload it in smaller batches (a few files at a time).",
+        )
 
     import os as _os
 

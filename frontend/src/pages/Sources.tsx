@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Fragment } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   Plus, Globe, Database, LayoutGrid, Table as TableIcon,
@@ -51,6 +51,7 @@ export function SourcesPage() {
   const [schemas, setSchemas] = useState<Schema[]>([])
   const [members, setMembers] = useState<User[]>([])
   const [schemasLoading, setSchemasLoading] = useState(false)
+  const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set())
 
   const loadSchemasAndMembers = (pid: string) => {
     if (!pid) { setSchemas([]); setMembers([]); return }
@@ -72,7 +73,7 @@ export function SourcesPage() {
   const [deleteSource, setDeleteSource] = useState<Source | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [form, setForm] = useState({
-    name: '', description: '', website_url: '', schema_id: '', project_id: projectId ?? '', no_schema: false as boolean,
+    name: '', description: '', website_url: '', category: '', schema_id: '', project_id: projectId ?? '', no_schema: false as boolean,
     assigned_extractor_id: '', assigned_reviewer_id: '',
   })
 
@@ -100,6 +101,30 @@ export function SourcesPage() {
     return true
   })
 
+  // Group sources by category for the table's folder-tree view. Sources
+  // with no category sit at the root, ungrouped — same pattern already
+  // used for uploaded-record folders inside a single source.
+  const categoryGroups = filtered.reduce((acc: Record<string, Source[]>, s: any) => {
+    const cat = s.category || '(Uncategorized)'
+    if (!acc[cat]) acc[cat] = []
+    acc[cat].push(s)
+    return acc
+  }, {})
+  const hasCategories = filtered.some((s: any) => s.category)
+  const sortedCategoryNames = Object.keys(categoryGroups).sort((a, b) => {
+    if (a === '(Uncategorized)') return 1
+    if (b === '(Uncategorized)') return -1
+    return a.localeCompare(b)
+  })
+
+  const toggleCategory = (cat: string) => {
+    setCollapsedCategories(prev => {
+      const next = new Set(prev)
+      if (next.has(cat)) next.delete(cat); else next.add(cat)
+      return next
+    })
+  }
+
   const handleDeleteSource = async () => {
     if (!deleteSource) return
     setDeleting(true)
@@ -122,13 +147,14 @@ export function SourcesPage() {
       const created = await sourcesApi.create(targetProjectId, {
         name: form.name, description: form.description || undefined,
         website_url: form.website_url || undefined,
+        category: form.category || undefined,
         schema_id: form.no_schema ? undefined : form.schema_id,
         assigned_extractor_id: form.assigned_extractor_id || undefined,
         assigned_reviewer_id: form.assigned_reviewer_id || undefined,
       })
       toast.success('Source created')
       setShowCreate(false)
-      setForm({ name: '', description: '', website_url: '', schema_id: '', project_id: projectId ?? '', assigned_extractor_id: '', assigned_reviewer_id: '', no_schema: false })
+      setForm({ name: '', description: '', website_url: '', category: '', schema_id: '', project_id: projectId ?? '', assigned_extractor_id: '', assigned_reviewer_id: '', no_schema: false })
       navigate(`/projects/${targetProjectId}/sources/${created.id}`)
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Failed to create source')
@@ -141,6 +167,48 @@ export function SourcesPage() {
 
   const projectMap = Object.fromEntries(projects.map(p => [p.id, p.name]))
   const pageTitle = isGlobal ? 'Sources' : `${project?.name} — Sources`
+
+  const SourceTableRow = ({ s, indent = false }: { s: any; indent?: boolean }) => (
+    <tr key={s.id} className="hover:bg-gray-50/60 transition">
+      <td className="px-5 py-3" style={{ paddingLeft: indent ? 44 : 20 }}>
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 bg-brand-50 rounded-lg flex items-center justify-center shrink-0">
+            <Database className="w-4 h-4 text-brand-600" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-medium text-gray-900 truncate">{s.name}</p>
+            <p className="text-xs text-gray-400 truncate">{s.schema_name ?? 'No fixed schema'}</p>
+          </div>
+        </div>
+      </td>
+      {isGlobal && <td className="px-4 py-3 text-xs text-gray-500 hidden md:table-cell">{projectMap[s.project_id]}</td>}
+      <td className="px-4 py-3 hidden sm:table-cell">
+        <Badge variant={STATUS_META[s.status as SourceStatus].color}>{STATUS_META[s.status as SourceStatus].label}</Badge>
+      </td>
+      <td className="px-4 py-3 text-xs text-gray-600 hidden md:table-cell">{s.assigned_extractor_name ?? '—'}</td>
+      <td className="px-4 py-3 text-xs text-gray-600 hidden md:table-cell">{s.assigned_reviewer_name ?? '—'}</td>
+      <td className="px-4 py-3 text-right text-xs hidden sm:table-cell">
+        <span className="text-emerald-700 font-medium">{s.valid_records}</span>
+        <span className="text-gray-400"> / </span>
+        <span className="text-gray-700">{s.total_records}</span>
+      </td>
+      <td className="px-4 py-3 text-xs text-gray-400 hidden lg:table-cell">
+        {safeFromNow(s.updated_at)}
+      </td>
+      <td className="px-4 py-3 text-right">
+        <div className="flex items-center gap-2 justify-end">
+          <Link to={`/projects/${s.project_id}/sources/${s.id}`} className="text-brand-600 hover:text-brand-700 text-xs font-medium">
+            Open →
+          </Link>
+          {canManage && (
+            <button onClick={() => setDeleteSource(s)} className="p-1 text-gray-300 hover:text-red-500 transition">
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  )
 
   return (
     <div className="p-8 space-y-6">
@@ -160,7 +228,7 @@ export function SourcesPage() {
         </div>
         {canManage && (
           <Button onClick={() => {
-              setForm({ name: '', description: '', website_url: '', schema_id: '', project_id: projectId ?? '', assigned_extractor_id: '', assigned_reviewer_id: '', no_schema: false })
+              setForm({ name: '', description: '', website_url: '', category: '', schema_id: '', project_id: projectId ?? '', assigned_extractor_id: '', assigned_reviewer_id: '', no_schema: false })
               loadSchemasAndMembers(projectId ?? form.project_id ?? '')
               setShowCreate(true)
             }}>
@@ -302,47 +370,31 @@ export function SourcesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filtered.map(s => (
-                <tr key={s.id} className="hover:bg-gray-50/60 transition">
-                  <td className="px-5 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-brand-50 rounded-lg flex items-center justify-center shrink-0">
-                        <Database className="w-4 h-4 text-brand-600" />
-                      </div>
-                      <div className="min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{s.name}</p>
-                        <p className="text-xs text-gray-400 truncate">{s.schema_name}</p>
-                      </div>
-                    </div>
-                  </td>
-                  {isGlobal && <td className="px-4 py-3 text-xs text-gray-500 hidden md:table-cell">{projectMap[s.project_id]}</td>}
-                  <td className="px-4 py-3 hidden sm:table-cell">
-                    <Badge variant={STATUS_META[s.status].color}>{STATUS_META[s.status].label}</Badge>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-600 hidden md:table-cell">{s.assigned_extractor_name ?? '—'}</td>
-                  <td className="px-4 py-3 text-xs text-gray-600 hidden md:table-cell">{s.assigned_reviewer_name ?? '—'}</td>
-                  <td className="px-4 py-3 text-right text-xs hidden sm:table-cell">
-                    <span className="text-emerald-700 font-medium">{s.valid_records}</span>
-                    <span className="text-gray-400"> / </span>
-                    <span className="text-gray-700">{s.total_records}</span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-gray-400 hidden lg:table-cell">
-                    {safeFromNow(s.updated_at)}
-                  </td>
-                  <td className="px-4 py-3 text-right">
-                    <div className="flex items-center gap-2 justify-end">
-                      <Link to={`/projects/${s.project_id}/sources/${s.id}`} className="text-brand-600 hover:text-brand-700 text-xs font-medium">
-                        Open →
-                      </Link>
-                      {canManage && (
-                        <button onClick={() => setDeleteSource(s)} className="p-1 text-gray-300 hover:text-red-500 transition">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {hasCategories ? (
+                sortedCategoryNames.map(cat => {
+                  const items = categoryGroups[cat]
+                  const isCollapsed = collapsedCategories.has(cat)
+                  const colSpan = isGlobal ? 8 : 7
+                  return (
+                    <Fragment key={cat}>
+                      <tr onClick={() => toggleCategory(cat)}
+                        style={{ cursor: 'pointer', background: '#f8fafc' }}
+                        className="hover:bg-gray-100 transition">
+                        <td colSpan={colSpan} className="px-5 py-2.5">
+                          <div className="flex items-center gap-2">
+                            <ChevronRight className={cn('w-3.5 h-3.5 text-gray-400 transition-transform', !isCollapsed && 'rotate-90')} />
+                            <span className="text-xs font-bold text-gray-600 uppercase tracking-wide">{cat}</span>
+                            <span className="text-xs text-gray-400">({items.length})</span>
+                          </div>
+                        </td>
+                      </tr>
+                      {!isCollapsed && items.map((s: any) => <SourceTableRow key={s.id} s={s} indent />)}
+                    </Fragment>
+                  )
+                })
+              ) : (
+                filtered.map(s => <SourceTableRow key={s.id} s={s} />)
+              )}
             </tbody>
           </table>
         </Card>
@@ -359,6 +411,8 @@ export function SourcesPage() {
           )}
           <Input label="Source name" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
             placeholder="e.g. BGS Directory of Mines 2020" required autoFocus />
+          <Input label="Category (optional)" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+            placeholder="e.g. Government Agency, Materials Database — groups sources into folders" />
           <Textarea label="Description" rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
             placeholder="What is this dataset?" />
           <Input label="Source website" value={form.website_url} onChange={e => setForm(f => ({ ...f, website_url: e.target.value }))}
