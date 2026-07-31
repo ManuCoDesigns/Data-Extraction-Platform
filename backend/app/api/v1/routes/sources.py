@@ -938,7 +938,36 @@ async def upload_multi_to_source(
     ai_used = False
     total_size = 0
 
-    for f in files:
+    def _is_junk_file(fname: str) -> bool:
+        """
+        Folder pickers silently include OS/editor metadata files the user
+        never sees in their file explorer as "real" files — .DS_Store
+        (macOS Finder), Thumbs.db/desktop.ini (Windows), and Office lock
+        files like ~$report.xlsx (created while a file is open, and — this
+        is the dangerous part — has a VALID .xlsx extension, so it would
+        otherwise sail straight past the extension check and get parsed as
+        real data). None of these represent files the person actually
+        selected; skip them entirely, silently, before anything else runs.
+        """
+        junk_exact = {".ds_store", "thumbs.db", "desktop.ini", ".gitkeep", ".gitignore"}
+        if fname.lower() in junk_exact:
+            return True
+        if fname.startswith("~$"):       # Office lock file, e.g. ~$report.xlsx
+            return True
+        if fname.startswith("."):        # any other dotfile (._*, .swp, etc.)
+            return True
+        return False
+
+    real_files = [f for f in files if not _is_junk_file((f.filename or "").split("/")[-1])]
+
+    if not real_files:
+        raise HTTPException(
+            status_code=422,
+            detail="This folder only contains system/hidden files (like .DS_Store or "
+                   "Thumbs.db) — no actual data files to upload.",
+        )
+
+    for f in real_files:
         raw = await f.read()
         total_size += len(raw)
         # Folder pickers send relative paths like "TopFolder/sub/file.json" in f.filename
@@ -977,7 +1006,7 @@ async def upload_multi_to_source(
 
     if not all_rows:
         skipped = [f for f in file_breakdown if f.get("error")]
-        detail = f"No records found across {len(files)} file(s)."
+        detail = f"No records found across {len(real_files)} file(s)."
         if skipped:
             detail += f" Errors: {'; '.join(x['filename'] + ': ' + x['error'] for x in skipped[:3])}"
         raise HTTPException(status_code=422, detail=detail)
@@ -989,7 +1018,7 @@ async def upload_multi_to_source(
         source=source, source_id=source_id, rows=all_rows, ext=".zip",
         extraction_method=extraction_method, file_breakdown=file_breakdown,
         files_processed=files_processed,
-        display_filename=f"{len(files)} files (folder upload)",
+        display_filename=f"{len(real_files)} file{'s' if len(real_files) != 1 else ''} (folder upload)",
         content_len=total_size, schema_ver=schema_ver, schema_fields=schema_fields,
         current_user=current_user, db=db,
     )
@@ -1168,7 +1197,7 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
     all_rows: list[dict] = []
     breakdown: list[dict] = []
     SUPPORTED = {".json", ".csv", ".xlsx", ".xls"}
-    SKIP_PREFIXES = ("__MACOSX", ".", "_")
+    SKIP_PREFIXES = ("__MACOSX", ".", "_", "~$")
 
     def is_skippable(name: str) -> bool:
         parts = name.split("/")
