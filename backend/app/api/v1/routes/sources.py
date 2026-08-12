@@ -81,17 +81,36 @@ REVIEW_LOG_REQUIRED_KEYS = {"entity", "issue_type", "detail", "status", "escalat
 
 def _classify_batch_file(full_path: str) -> str:
     """
-    Classifies one uploaded file by its ROLE in the SOP batch structure,
-    based on its folder path — not just its extension. This is the fix for
-    the "only one file should be SOP-compliant, others shouldn't be flagged"
-    bug: previously every CSV/JSON in a folder upload got validated against
-    the entity schema regardless of what it actually was.
+    Classifies one uploaded file by its ROLE in the SOP batch structure.
+
+    Two conventions are supported, checked in order:
+
+      1. Nested folder structure (SOP-DS-003 Appendix H full batch):
+         materials/{name}.json, qa_ready_batch/qa_checklists/{slug}_qa_checklist.md, etc.
+         — role is determined by which named folder the file sits in.
+
+      2. Flat per-source folder (common for a single-source delivery — no
+         subfolders at all, just a handful of files named by role):
+         eu-battery-regulation-2023-1542.json, row161_qa_checklist.txt,
+         row161_review_log.txt, row161_sources.csv
+         — role is determined by keywords in the FILENAME itself, and any
+         file extension is accepted (a review log or checklist saved as
+         .txt is still recognised, not just .json/.md).
+
+    Falls back to "primary_data" for any file with a real data extension
+    that doesn't match a special-role pattern — this is the safe default
+    for a flat folder with no named subfolders, so a source's actual data
+    file is never mistakenly skipped as "unknown".
 
     Returns one of: "primary_data" | "manifest" | "qa_checklist" | "review_log" | "unknown"
     """
     parts = [p for p in full_path.replace("\\", "/").split("/") if p]
     parts_lower = [p.lower() for p in parts]
+    fname_lower = parts[-1].lower() if parts else full_path.lower()
+    stem = fname_lower.rsplit(".", 1)[0] if "." in fname_lower else fname_lower
+    ext = ("." + fname_lower.rsplit(".", 1)[1]) if "." in fname_lower else ""
 
+    # 1. Nested folder structure
     if any(p in PRIMARY_DATA_FOLDERS for p in parts_lower):
         return "primary_data"
     if MANIFEST_FOLDER in parts_lower:
@@ -100,6 +119,21 @@ def _classify_batch_file(full_path: str) -> str:
         return "qa_checklist"
     if REVIEW_LOG_FOLDER in parts_lower:
         return "review_log"
+
+    # 2. Flat folder — classify by filename keywords, any extension
+    if "qa_checklist" in stem or "qa-checklist" in stem or "qachecklist" in stem:
+        return "qa_checklist"
+    if "review_log" in stem or "review-log" in stem or "escalation" in stem:
+        return "review_log"
+    if (stem.endswith("_sources") or stem.endswith("-sources")
+            or "source_list" in stem or "sourcelist" in stem or "source-list" in stem
+            or "manifest" in stem):
+        return "manifest"
+
+    # 3. Default — a real data file with no special-role naming
+    if ext in {".json", ".csv", ".xlsx", ".xls"}:
+        return "primary_data"
+
     return "unknown"
 
 
