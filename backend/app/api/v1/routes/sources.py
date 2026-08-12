@@ -38,7 +38,7 @@ from app.services.schema_validator import validate_record, map_row_to_fields
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
-ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
+ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip", ".md"}
 
 # The backend currently reads the whole upload into memory before parsing
 # it (pandas/json need the full content anyway). A 126MB file was enough to
@@ -49,6 +49,58 @@ ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", "
 MAX_UPLOAD_SIZE_BYTES = 60 * 1024 * 1024  # 60MB per file
 # Extensions that go through AI extraction (not mechanical row mapping)
 AI_EXTRACTION_EXTENSIONS = {".pdf", ".txt"}
+
+# ─── SOP batch folder-role classification ─────────────────────────────────
+# Per the Xtrium SOP house standard (SOP-DS-003 Appendix H + SOP-00X §13):
+#
+#   batch_YYYYMMDD_{source-slug}/
+#   |-- materials/ | suppliers/ | compliance_records/ | research/   <- PRIMARY DATA
+#   |     {canonical-name}.json
+#   |-- escalation_notes/
+#   |     {source-slug}_review_log.json                            <- REVIEW LOG
+#   `-- qa_ready_batch/
+#         |-- qa_checklists/
+#         |     {source-slug}_qa_checklist.md                      <- QA CHECKLIST
+#         `-- source_lists/
+#               {source-slug}_sources.csv                          <- MANIFEST
+#
+# Only files under a PRIMARY_DATA_FOLDERS folder are the actual SOP-compliant
+# entity data — the thing that should be schema-validated and turned into
+# ExtractedRecords. Everything else (manifest CSV, QA checklist, review log)
+# is metadata ABOUT the batch, not data IN it, and must never be validated
+# against the entity schema or counted as a duplicate/invalid record.
+PRIMARY_DATA_FOLDERS = {"materials", "suppliers", "compliance_records", "research"}
+MANIFEST_FOLDER = "source_lists"          # qa_ready_batch/source_lists/*.csv
+QA_CHECKLIST_FOLDER = "qa_checklists"     # qa_ready_batch/qa_checklists/*.md
+REVIEW_LOG_FOLDER = "escalation_notes"    # escalation_notes/*_review_log.json
+MANIFEST_REQUIRED_COLUMNS = {
+    "record_filename", "entity_type", "entity_name", "source_url", "source_tier", "date_accessed", "notes",
+}
+REVIEW_LOG_REQUIRED_KEYS = {"entity", "issue_type", "detail", "status", "escalated"}
+
+
+def _classify_batch_file(full_path: str) -> str:
+    """
+    Classifies one uploaded file by its ROLE in the SOP batch structure,
+    based on its folder path — not just its extension. This is the fix for
+    the "only one file should be SOP-compliant, others shouldn't be flagged"
+    bug: previously every CSV/JSON in a folder upload got validated against
+    the entity schema regardless of what it actually was.
+
+    Returns one of: "primary_data" | "manifest" | "qa_checklist" | "review_log" | "unknown"
+    """
+    parts = [p for p in full_path.replace("\\", "/").split("/") if p]
+    parts_lower = [p.lower() for p in parts]
+
+    if any(p in PRIMARY_DATA_FOLDERS for p in parts_lower):
+        return "primary_data"
+    if MANIFEST_FOLDER in parts_lower:
+        return "manifest"
+    if QA_CHECKLIST_FOLDER in parts_lower:
+        return "qa_checklist"
+    if REVIEW_LOG_FOLDER in parts_lower:
+        return "review_log"
+    return "unknown"
 
 
 # ─── Permission helpers ──────────────────────────────────────────────────────
@@ -85,7 +137,6 @@ def _can_manage_source(user: User, source: Source) -> bool:
     """Admin always wins. For non-admins, check project membership via project_id (no lazy-load)."""
     if _is_org_admin(user):
         return True
-    # Check project role via project_id — avoids lazy-loading source.project
     roles = _user_roles(user)
     if "project_admin" in roles:
         return True
@@ -253,7 +304,6 @@ def list_sources(
             raise HTTPException(status_code=403, detail="Access denied")
         q = db.query(Source).filter(Source.project_id == project_id)
     else:
-        # No project specified — return sources across every project the user can access
         if is_admin:
             q = db.query(Source)
         else:
@@ -298,7 +348,6 @@ def create_source(
             raise HTTPException(status_code=404, detail="Schema not found in this project")
         if not db.query(SchemaVersion).filter(SchemaVersion.schema_id == schema.id).first():
             raise HTTPException(status_code=422, detail="Schema has no versions — add fields first")
-    # else: no schema assigned — source uses flexible/no-schema extraction, always considered valid
 
     source = Source(
         project_id=project_id, schema_id=payload.schema_id, name=payload.name,
@@ -389,9 +438,6 @@ def team_workload(
 
         llm_started = getattr(s, "llm_verification_started_at", None)
 
-        # For READY_FOR_REVIEW sources, a reviewer may not have opened it yet
-        # (review_started_at is still null) — show how long it's been WAITING
-        # in the queue instead of leaving the time column blank.
         is_waiting_for_review = s.status == SourceStatus.READY_FOR_REVIEW and not s.review_started_at
         waiting_since = getattr(s, "llm_verification_completed_at", None) or s.extraction_completed_at
 
@@ -419,7 +465,6 @@ def team_workload(
             "unclaimed": not s.assigned_extractor_id,
         })
 
-    # Per-person summary
     by_person: dict[str, dict] = {}
     for r in rows:
         for role_key, name_key, elapsed_key in [
@@ -480,7 +525,6 @@ def list_escalations(
     if mine_only and not is_admin:
         q = q.filter(Source.assigned_extractor_id == current_user.id)
     elif mine_only:
-        # Admins asking for "mine" still means sources assigned to them specifically
         q = q.filter(Source.assigned_extractor_id == current_user.id)
 
     records = q.order_by(ExtractedRecord.updated_at.desc()).all()
@@ -499,7 +543,6 @@ def list_escalations(
         if not source:
             continue
 
-        # Pull the most recent correction-type comment for the headline message
         latest_message = ""
         latest_by = ""
         latest_role = ""
@@ -553,9 +596,6 @@ def get_source(source_id: str, db: Session = Depends(get_db), current_user: User
     source = _get_source_or_404(source_id, db)
     if not _can_access(current_user, source.project):
         raise HTTPException(status_code=403, detail="Access denied")
-    # Self-heal: if an older bug ever left stale counts (e.g. from an old job
-    # that failed to clean up on re-upload), correct them the moment anyone
-    # opens the source — cheap, and keeps the number always trustworthy.
     _recompute_counts(source, db)
     db.commit()
     return _serialize_source(source)
@@ -636,8 +676,6 @@ async def upload_to_source(
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
 
-    # Reject oversized uploads before reading anything into memory —
-    # Content-Length is available immediately from the request headers.
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > MAX_UPLOAD_SIZE_BYTES:
         size_mb = int(content_length) / (1024 * 1024)
@@ -651,7 +689,6 @@ async def upload_to_source(
     import os as _os
     filename = file.filename or ""
     ext = _os.path.splitext(filename)[1].lower()
-    # Fallback: if no extension from filename, check content-type
     if not ext:
         ct = (file.content_type or "").lower()
         if "pdf" in ct:
@@ -672,14 +709,11 @@ async def upload_to_source(
         SchemaVersion.schema_id == source.schema_id
     ).order_by(SchemaVersion.version.desc()).first()
 
-    # Allow uploads even if schema has no field definitions.
-    # Records will be stored as-is with no schema validation.
     schema_fields = []
     if schema_ver and schema_ver.definition:
         schema_fields = schema_ver.definition.get("fields", [])
     content = await file.read()
 
-    # ── Route: AI extraction (PDF / TXT) ──────────────────────────────────────
     if ext in AI_EXTRACTION_EXTENSIONS:
         try:
             _schema_def = schema_ver.definition if schema_ver else {"flexible_validation": True, "fields": []}
@@ -692,9 +726,8 @@ async def upload_to_source(
         file_breakdown: list[dict] = []
         files_processed = 1
 
-    # ── Route: ZIP archive with multiple JSON/CSV/Excel files ────────────────
     elif ext == ".zip":
-        rows, file_breakdown = _parse_zip(content)
+        rows, file_breakdown, batch_meta = _parse_zip(content)
         if not rows:
             skipped = [f for f in file_breakdown if f.get("error")]
             detail = f"No records found in ZIP. {len(file_breakdown)} file(s) checked."
@@ -705,7 +738,6 @@ async def upload_to_source(
         files_processed = len([f for f in file_breakdown if not f.get("error")])
 
     else:
-        # ── Route: mechanical row mapping (CSV / Excel / JSON) ─────────────────
         rows = _parse_rows(content, ext, file.filename or "")
         if not rows:
             raise HTTPException(status_code=422, detail="No rows found in the uploaded file.")
@@ -728,13 +760,13 @@ def _finalize_upload(
     display_filename: str, content_len: int,
     schema_ver, schema_fields: list[dict],
     current_user: "User", db: Session,
+    batch_warnings: list[str] | None = None,
 ) -> "SourceUploadSummary":
     """
     Shared logic for turning parsed rows into an ExtractionJob + ExtractedRecords.
     Used by both single-file upload and multi-file/folder upload — keeps the
     schema-mapping, field-inference, and validation logic in exactly one place.
     """
-    # Clear any previous records for this source (re-upload replaces everything)
     _safe_clear_old_jobs(source_id, db)
 
     file_ext_type = {
@@ -758,25 +790,18 @@ def _finalize_upload(
     valid_count = 0
     for row in rows:
         if extraction_method == "llm":
-            # LLM already returns schema-shaped dicts — just validate
             mapped = {k: v for k, v in row.items() if k != "_raw_text"}
             raw_text = row.get("_raw_text", json.dumps(row, ensure_ascii=False, default=str))
         elif ext in (".json", ".zip"):
-            # JSON files are already structured — use fields as-is, don't remap.
-            # Only apply fixed_value fields from the schema on top.
             mapped = {k: v for k, v in row.items()}
             for field_def in schema_fields:
                 if "fixed_value" in field_def:
                     mapped[field_def["name"]] = field_def["fixed_value"]
             raw_text = json.dumps(row, ensure_ascii=False, default=str)
         else:
-            # CSV / Excel — column headers may differ from schema field names,
-            # so use map_row_to_fields to normalise them.
             mapped = map_row_to_fields(row, schema_fields)
             raw_text = json.dumps(row, ensure_ascii=False, default=str)
 
-            # ── Post-mapping inference for computed fields ────────────────
-            # Infer canonical_name from company_name if missing
             if not mapped.get("canonical_name") and mapped.get("company_name"):
                 import unicodedata as _ud
                 n = str(mapped["company_name"]).lower().strip()
@@ -788,7 +813,6 @@ def _finalize_upload(
                 n = __import__("re").sub(r"-{2,}", "-", n)
                 mapped["canonical_name"] = n
 
-            # Infer supply_chain_tier from type_description if missing
             if not mapped.get("supply_chain_tier") and mapped.get("type_description"):
                 t = str(mapped["type_description"]).lower()
                 tier = 1
@@ -798,7 +822,6 @@ def _finalize_upload(
                     tier = 3
                 mapped["supply_chain_tier"] = tier
 
-            # Infer industry_sector from products_raw if missing
             if not mapped.get("industry_sector"):
                 src_text = " ".join(filter(None, [
                     str(mapped.get("products_raw") or ""),
@@ -819,18 +842,16 @@ def _finalize_upload(
                     ("potash", "industrial minerals"), ("salt", "industrial minerals"),
                     ("coal", "coal"), ("oil", "oil and gas"), ("gas", "oil and gas"),
                 ]
-                sector = "metals mining"  # default for this dataset
+                sector = "metals mining"
                 for kw, sec in SECTOR_KW:
                     if kw in src_text:
                         sector = sec
                         break
                 mapped["industry_sector"] = sector
 
-            # Set fixed values from schema
             for field_def in schema_fields:
                 if "fixed_value" in field_def and field_def["name"] not in mapped:
                     mapped[field_def["name"]] = field_def["fixed_value"]
-            # Always enforce is_verified=false
             mapped["is_verified"] = False
 
         is_valid, errors = validate_record(mapped, schema_fields)
@@ -859,7 +880,11 @@ def _finalize_upload(
         db.add(AuditLog(
             user_id=current_user.id, project_id=source.project_id,
             action=AuditAction.SOURCE_DATA_UPLOADED,
-            after_value={"file": display_filename, "method": extraction_method, "rows": len(rows), "valid": valid_count, "invalid": invalid_count},
+            after_value={
+                "file": display_filename, "method": extraction_method, "rows": len(rows),
+                "valid": valid_count, "invalid": invalid_count,
+                "batch_warnings": batch_warnings or [],
+            },
         ))
         db.commit()
     except Exception as db_err:
@@ -878,6 +903,7 @@ def _finalize_upload(
         extraction_method=extraction_method,
         files_processed=files_processed,
         file_breakdown=file_breakdown,
+        batch_warnings=batch_warnings or [],
     )
 
 
@@ -891,16 +917,25 @@ async def upload_multi_to_source(
 ):
     """
     Folder / multi-file upload — for SOPs where source data ships as a folder
-    of files rather than one archive. Select an entire folder in the browser
-    (folder picker sends every file inside it in one request) and each file
-    is parsed with the same logic as a single upload:
+    of files rather than one archive.
 
-      - JSON / CSV / Excel  -> parsed directly as structured rows
-      - PDF / TXT           -> AI extraction (same as single-file AI upload)
-      - .zip inside folder  -> unzipped and its contents parsed too (one level)
+    SOP batch structure (SOP-DS-003 Appendix H + SOP-00X §13):
 
-    All rows across every file are combined into a single ExtractionJob,
-    same as if they'd been uploaded as one ZIP.
+      batch_YYYYMMDD_{source-slug}/
+        materials/ | suppliers/ | compliance_records/ | research/   <- primary data
+          {canonical-name}.json                                     -> becomes records
+        escalation_notes/
+          {source-slug}_review_log.json                             -> logged, not validated
+        qa_ready_batch/
+          qa_checklists/{source-slug}_qa_checklist.md                -> presence tracked
+          source_lists/{source-slug}_sources.csv                     -> manifest, cross-checked
+
+    ONLY files under a primary-data folder become ExtractedRecords and get
+    validated against the schema. The manifest CSV, QA checklist, and review
+    log are recognised by their folder role and handled separately — this is
+    what stops QA/manifest content from being wrongly flagged as invalid
+    entity data, and stops the manifest row + its corresponding JSON file
+    from both becoming separate (duplicate) records for the same entity.
     """
     source = _get_source_or_404(source_id, db)
     if not _is_assigned_extractor(current_user, source):
@@ -909,9 +944,6 @@ async def upload_multi_to_source(
     if not files:
         raise HTTPException(status_code=422, detail="No files provided.")
 
-    # Reject an oversized TOTAL request before reading anything into memory.
-    # Folder uploads accumulate every file's bytes at once, so this matters
-    # even more here than for a single-file upload.
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > MAX_UPLOAD_SIZE_BYTES:
         size_mb = int(content_length) / (1024 * 1024)
@@ -939,22 +971,12 @@ async def upload_multi_to_source(
     total_size = 0
 
     def _is_junk_file(fname: str) -> bool:
-        """
-        Folder pickers silently include OS/editor metadata files the user
-        never sees in their file explorer as "real" files — .DS_Store
-        (macOS Finder), Thumbs.db/desktop.ini (Windows), and Office lock
-        files like ~$report.xlsx (created while a file is open, and — this
-        is the dangerous part — has a VALID .xlsx extension, so it would
-        otherwise sail straight past the extension check and get parsed as
-        real data). None of these represent files the person actually
-        selected; skip them entirely, silently, before anything else runs.
-        """
         junk_exact = {".ds_store", "thumbs.db", "desktop.ini", ".gitkeep", ".gitignore"}
         if fname.lower() in junk_exact:
             return True
-        if fname.startswith("~$"):       # Office lock file, e.g. ~$report.xlsx
+        if fname.startswith("~$"):
             return True
-        if fname.startswith("."):        # any other dotfile (._*, .swp, etc.)
+        if fname.startswith("."):
             return True
         return False
 
@@ -967,12 +989,31 @@ async def upload_multi_to_source(
                    "Thumbs.db) — no actual data files to upload.",
         )
 
+    # ── Pass 1: classify every file by SOP folder role before parsing anything ──
+    primary_files, manifest_files, checklist_files, review_log_files, other_files = [], [], [], [], []
     for f in real_files:
+        full_path = (f.filename or "upload").replace("\\", "/")
+        role = _classify_batch_file(full_path)
+        if role == "primary_data":
+            primary_files.append(f)
+        elif role == "manifest":
+            manifest_files.append(f)
+        elif role == "qa_checklist":
+            checklist_files.append(f)
+        elif role == "review_log":
+            review_log_files.append(f)
+        else:
+            other_files.append(f)
+
+    batch_warnings: list[str] = []
+    manifest_entries: list[dict] = []   # rows from source_lists/*.csv — used to cross-check, not to create records
+    review_log_entries: list[dict] = [] # entries from escalation_notes/*.json
+    escalated_entries: list[dict] = []
+
+    # ── Parse PRIMARY DATA files only — these become ExtractedRecords ──────────
+    for f in primary_files:
         raw = await f.read()
         total_size += len(raw)
-        # Folder pickers send relative paths like "TopFolder/sub/file.json" in f.filename
-        # (frontend sets this via webkitRelativePath). Keep the FULL path for grouping
-        # in the UI, and just the basename for type-detection / breakdown display.
         full_path = (f.filename or "upload").replace("\\", "/")
         fname = full_path.split("/")[-1]
         ext = _os.path.splitext(fname)[1].lower()
@@ -987,7 +1028,7 @@ async def upload_multi_to_source(
                 rows = await _extract_with_llm(raw, ext, _schema_def, source)
                 ai_used = True
             elif ext == ".zip":
-                rows, inner_breakdown = _parse_zip(raw)
+                rows, inner_breakdown, _ = _parse_zip(raw)
                 file_breakdown.extend(inner_breakdown)
             else:
                 rows = _parse_rows(raw, ext, fname)
@@ -995,33 +1036,138 @@ async def upload_multi_to_source(
             file_breakdown.append({"filename": fname, "rows": 0, "error": str(e)[:150]})
             continue
 
-        # Tag each row with its original folder path (unless _parse_zip already tagged it)
+        # SOP hard requirement: every primary-data object must carry source_url
+        # (or a sources[] array) — flag it inline rather than silently accepting.
         for row in rows:
             if isinstance(row, dict) and "_source_file" not in row:
                 row["_source_file"] = full_path
+            if isinstance(row, dict) and not row.get("source_url") and not row.get("sources"):
+                row.setdefault("_batch_issues", []).append("missing required source_url (or sources[])")
 
-        if ext != ".zip":  # zip breakdown already appended above (per inner file)
+        if ext != ".zip":
             file_breakdown.append({"filename": fname, "rows": len(rows)})
         all_rows.extend(rows)
 
+    # ── Parse MANIFEST — cross-check only, never becomes a record ──────────────
+    manifest_entity_names: set[str] = set()
+    for f in manifest_files:
+        raw = await f.read()
+        total_size += len(raw)
+        full_path = (f.filename or "upload").replace("\\", "/")
+        fname = full_path.split("/")[-1]
+        try:
+            manifest_rows = _parse_rows(raw, ".csv", fname)
+            header_cols = set(manifest_rows[0].keys()) if manifest_rows else set()
+            missing_cols = MANIFEST_REQUIRED_COLUMNS - {c.strip() for c in header_cols}
+            if missing_cols:
+                batch_warnings.append(
+                    f"Manifest '{fname}' is missing expected column(s): {', '.join(sorted(missing_cols))}"
+                )
+            manifest_entries.extend(manifest_rows)
+            for m in manifest_rows:
+                if m.get("entity_name"):
+                    manifest_entity_names.add(str(m["entity_name"]).strip().lower())
+            file_breakdown.append({"filename": fname, "rows": len(manifest_rows), "role": "manifest (cross-check only, not extracted as data)"})
+        except Exception as e:
+            file_breakdown.append({"filename": fname, "rows": 0, "error": f"could not read manifest: {str(e)[:120]}"})
+
+    # ── Parse REVIEW LOG — logged + tied into Escalations, never a record ──────
+    for f in review_log_files:
+        raw = await f.read()
+        total_size += len(raw)
+        full_path = (f.filename or "upload").replace("\\", "/")
+        fname = full_path.split("/")[-1]
+        try:
+            log_data = json.loads(raw.decode("utf-8"))
+            entries = log_data if isinstance(log_data, list) else [log_data]
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                missing_keys = REVIEW_LOG_REQUIRED_KEYS - set(entry.keys())
+                if missing_keys:
+                    batch_warnings.append(
+                        f"Review log entry in '{fname}' missing required key(s): {', '.join(sorted(missing_keys))}"
+                    )
+                review_log_entries.append(entry)
+                if entry.get("escalated"):
+                    escalated_entries.append(entry)
+            file_breakdown.append({"filename": fname, "rows": len(entries), "role": "review log (logged, not extracted as data)"})
+        except Exception as e:
+            file_breakdown.append({"filename": fname, "rows": 0, "error": f"could not read review log: {str(e)[:120]}"})
+
+    # ── QA checklist — presence tracked, content not parsed as data ────────────
+    for f in checklist_files:
+        raw = await f.read()
+        total_size += len(raw)
+        full_path = (f.filename or "upload").replace("\\", "/")
+        fname = full_path.split("/")[-1]
+        file_breakdown.append({"filename": fname, "rows": 0, "role": "QA checklist (presence confirmed, not extracted as data)"})
+
+    # ── Anything that didn't match a known SOP folder role ──────────────────────
+    for f in other_files:
+        fname = (f.filename or "upload").split("/")[-1]
+        file_breakdown.append({"filename": fname, "rows": 0, "error": "not under a recognised SOP folder (materials/suppliers/compliance_records/research/escalation_notes/qa_ready_batch) — skipped"})
+
+    # ── SOP non-negotiable checks — surfaced as batch_warnings, not silent ──────
+    if not manifest_files:
+        batch_warnings.append("No source_lists manifest CSV found in this batch.")
+    if not checklist_files:
+        batch_warnings.append("QA checklist missing — contractor self-check is required even before QA reviewer sign-off.")
+    if not review_log_files:
+        batch_warnings.append("No review log found — submit an empty-but-present review log even when there were zero issues.")
+
+    # Cross-check: every manifest entity should have a matching primary-data record
+    if manifest_entity_names:
+        extracted_names = {
+            str(r.get("canonical_name") or r.get("entity_name") or r.get("name") or "").strip().lower()
+            for r in all_rows if isinstance(r, dict)
+        }
+        missing_from_batch = manifest_entity_names - extracted_names
+        if missing_from_batch:
+            batch_warnings.append(
+                f"{len(missing_from_batch)} entit{'y is' if len(missing_from_batch) == 1 else 'ies are'} "
+                f"listed in the manifest but have no matching data file: {', '.join(sorted(missing_from_batch))[:200]}"
+            )
+
     if not all_rows:
         skipped = [f for f in file_breakdown if f.get("error")]
-        detail = f"No records found across {len(real_files)} file(s)."
+        detail = f"No primary data records found across {len(real_files)} file(s)."
         if skipped:
             detail += f" Errors: {'; '.join(x['filename'] + ': ' + x['error'] for x in skipped[:3])}"
+        if batch_warnings:
+            detail += f" Batch notes: {'; '.join(batch_warnings[:3])}"
         raise HTTPException(status_code=422, detail=detail)
 
     extraction_method = "llm" if ai_used else "structured"
     files_processed = len([f for f in file_breakdown if not f.get("error")])
 
-    return _finalize_upload(
+    summary = _finalize_upload(
         source=source, source_id=source_id, rows=all_rows, ext=".zip",
         extraction_method=extraction_method, file_breakdown=file_breakdown,
         files_processed=files_processed,
         display_filename=f"{len(real_files)} file{'s' if len(real_files) != 1 else ''} (folder upload)",
         content_len=total_size, schema_ver=schema_ver, schema_fields=schema_fields,
         current_user=current_user, db=db,
+        batch_warnings=batch_warnings,
     )
+
+    # Wire genuinely escalated review-log entries straight into the existing
+    # Escalations feature so they surface with everything else sent back —
+    # this is a natural fit since review_log entries already carry the same
+    # shape (entity, issue_type, detail, status, escalated).
+    if escalated_entries:
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id, source_id=source.id,
+            action=AuditAction.SOURCE_STATUS_CHANGED,
+            after_value={
+                "stage": "review_log_escalations",
+                "count": len(escalated_entries),
+                "entries": escalated_entries[:20],
+            },
+        ))
+        db.commit()
+
+    return summary
 
 
 async def _extract_with_llm(content: bytes, ext: str, schema_definition: dict, source: Source) -> list[dict]:
@@ -1034,7 +1180,6 @@ async def _extract_with_llm(content: bytes, ext: str, schema_definition: dict, s
     import re
     from app.core.config import settings
 
-    # Extract readable text from the document
     if ext == ".pdf":
         import pdfplumber, io as _io
         text_parts = []
@@ -1050,12 +1195,10 @@ async def _extract_with_llm(content: bytes, ext: str, schema_definition: dict, s
     if not doc_text.strip():
         raise ValueError("Could not extract any readable text from the document.")
 
-    # Trim to ~60k chars to stay within context — for very large docs we take a representative sample
     MAX_CHARS = 60000
     if len(doc_text) > MAX_CHARS:
         doc_text = doc_text[:MAX_CHARS] + "\n\n[Document truncated — extract from the above portion only]"
 
-    # Build a clean field spec for the prompt
     fields = schema_definition.get("fields", [])
     required_fields = [f for f in fields if f.get("required") and "fixed_value" not in f]
     optional_fields = [f for f in fields if not f.get("required") and "fixed_value" not in f]
@@ -1142,7 +1285,6 @@ Return a JSON array of all records found."""
     )
     raw_text = _response.text if _response.text else ""
 
-    # Strip markdown fences if model added them despite instructions
     clean = raw_text.strip()
     if clean.startswith("```"):
         clean = re.sub(r"^```(?:json)?\s*", "", clean)
@@ -1152,12 +1294,11 @@ Return a JSON array of all records found."""
     if not isinstance(records, list):
         raise ValueError(f"Expected a JSON array, got {type(records).__name__}")
 
-    # Add fixed field values and a raw_text pointer on every record
     for rec in records:
         for k, v in fixed_fields.items():
             rec[k] = v
         if "_raw_text" not in rec:
-            rec["_raw_text"] = ""  # will be populated from the row itself
+            rec["_raw_text"] = ""
 
     return records
 
@@ -1181,11 +1322,14 @@ def _parse_rows(content: bytes, ext: str, filename: str) -> list[dict]:
     return []
 
 
-def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
+def _parse_zip(content: bytes) -> tuple[list[dict], list[dict], dict]:
     """
     Parse a ZIP archive containing JSON files (or CSV/Excel files).
-    Returns (rows, file_breakdown) where file_breakdown is a list of
-    {filename, rows, skipped_reason} dicts for the UI summary.
+    Returns (rows, file_breakdown, batch_meta) where file_breakdown is a
+    list of {filename, rows, skipped_reason} dicts for the UI summary, and
+    batch_meta reports any manifest/qa_checklist/review_log files found
+    inside the zip (path-classified the same way as folder uploads, so a
+    zipped SOP batch gets the same primary-data-only treatment).
 
     Each returned row is tagged with "_source_file" = its full path inside
     the archive (e.g. "NETL_METALLIC/subfolder/id_72.json"), so the UI can
@@ -1196,6 +1340,7 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
 
     all_rows: list[dict] = []
     breakdown: list[dict] = []
+    batch_meta = {"manifest_files": 0, "qa_checklists": 0, "review_logs": 0}
     SUPPORTED = {".json", ".csv", ".xlsx", ".xls"}
     SKIP_PREFIXES = ("__MACOSX", ".", "_", "~$")
 
@@ -1222,10 +1367,24 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
     with zf_mod.ZipFile(io.BytesIO(content)) as zf:
         names = [n for n in zf.namelist() if not is_skippable(n) and not n.endswith("/")]
         for name in names:
-            fname = name.split("/")[-1]  # just the filename, for type detection
+            fname = name.split("/")[-1]
             ext = _os.path.splitext(fname)[1].lower()
+            role = _classify_batch_file(name)
+
+            if role == "manifest":
+                batch_meta["manifest_files"] += 1
+                breakdown.append({"filename": fname, "rows": 0, "role": "manifest (cross-check only, not extracted as data)"})
+                continue
+            if role == "qa_checklist":
+                batch_meta["qa_checklists"] += 1
+                breakdown.append({"filename": fname, "rows": 0, "role": "QA checklist (presence confirmed, not extracted as data)"})
+                continue
+            if role == "review_log":
+                batch_meta["review_logs"] += 1
+                breakdown.append({"filename": fname, "rows": 0, "role": "review log (logged, not extracted as data)"})
+                continue
+
             if ext == ".zip":
-                # One level of nesting — unzip inner ZIP and process its members
                 inner_content = zf.read(name)
                 try:
                     with zf_mod.ZipFile(io.BytesIO(inner_content)) as inner_zf:
@@ -1242,12 +1401,11 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
                     breakdown.append({"filename": fname, "rows": 0, "error": f"inner ZIP error: {str(e)[:80]}"})
             elif ext in SUPPORTED:
                 rows, err = parse_member(fname, zf.read(name))
-                rows = _tag(rows, name)  # full internal path, preserves subfolders
+                rows = _tag(rows, name)
                 breakdown.append({"filename": fname, "rows": len(rows), "error": err})
                 all_rows.extend(rows)
-            # else: skip silently (images, READMEs, etc.)
 
-    return all_rows, breakdown
+    return all_rows, breakdown, batch_meta
 
 
 # ─── Records (fix + review) ──────────────────────────────────────────────────
@@ -1262,7 +1420,6 @@ def list_source_records(
 ):
     source = _get_source_or_404(source_id, db)
 
-    # Role check without lazy-loading source.project
     user_roles = {r.role.value for r in current_user.roles}
     if "org_admin" not in user_roles:
         member = db.query(ProjectMember).filter(
@@ -1326,7 +1483,7 @@ def fix_record(
     record.validation_errors = errors
     record.extraction_confidence = ExtractionConfidence.HIGH if is_valid else ExtractionConfidence.FLAGGED
     if record.review_status == ReviewStatus.REJECTED and is_valid:
-        record.review_status = ReviewStatus.PENDING  # re-submit for review after a fix
+        record.review_status = ReviewStatus.PENDING
 
     db.flush()
     _recompute_counts(source, db)
@@ -1372,7 +1529,6 @@ def review_source_record(
         record.review_started_at = now
 
     if payload.action == "approve":
-        # Reviewer approval routes to admin for final sign-off (double-review workflow)
         record.review_status = ReviewStatus.PENDING_ADMIN_REVIEW
         record.revision_count = (record.revision_count or 0) + 1
         record.admin_review_started_at = now
@@ -1566,7 +1722,6 @@ def approve_source(
     user_roles = _user_roles(current_user)
     is_admin = "org_admin" in user_roles or "project_admin" in user_roles
 
-    # Count unapproved records
     pending_or_rejected = (
         db.query(ExtractedRecord)
         .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
@@ -1576,7 +1731,6 @@ def approve_source(
         ).count()
     )
 
-    # Admins can approve even with pending records — reviewers cannot
     if pending_or_rejected > 0 and not is_admin:
         raise HTTPException(
             status_code=422,
@@ -1587,7 +1741,6 @@ def approve_source(
     source.approved_at = datetime.now(timezone.utc)
     source.review_completed_at = source.review_completed_at or datetime.now(timezone.utc)
 
-    # Sync all ExtractionJobs for this source to VALIDATED + update counts
     approved_count = (
         db.query(ExtractedRecord)
         .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
@@ -1619,7 +1772,6 @@ def export_source(source_id: str, db: Session = Depends(get_db), current_user: U
     if source.status != SourceStatus.APPROVED:
         raise HTTPException(status_code=422, detail="Source must be approved before export")
 
-    # Fetch approved records through ExtractionJob
     records = (
         db.query(ExtractedRecord)
         .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
@@ -1675,7 +1827,6 @@ Generated by Xtrium DataOps on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H
         zf.writestr("data.json", json.dumps(data, indent=2, ensure_ascii=False, default=str))
         zf.writestr("COVER_SHEET.md", cover_sheet)
 
-        # Include the most recent raw uploaded file, if retrievable
         latest_job = db.query(ExtractionJob).filter(
             ExtractionJob.source_id == source_id
         ).order_by(ExtractionJob.created_at.desc()).first()
@@ -1686,10 +1837,9 @@ Generated by Xtrium DataOps on {datetime.now(timezone.utc).strftime('%Y-%m-%d %H
                 raw_name = latest_job.source_file_name or "raw_upload"
                 zf.writestr(f"raw_{raw_name}", raw_bytes)
             except Exception:
-                pass  # raw file not retrievable — JSON + cover sheet still included
+                pass
 
     buf.seek(0)
-    # Use canonical_name as the ZIP filename — SOP naming convention, never transform it
     cn = source.canonical_name or source.name
     cn = str(cn).strip().replace("/", "-").replace("\\", "-").replace(":", "-") or "source"
     return StreamingResponse(
@@ -1726,8 +1876,8 @@ def export_timesheet(
         raise HTTPException(status_code=404, detail="No sources found for this project")
 
     rows = []
-    correction_rows = []   # per-record correction/feedback history
-    activity_rows = []     # every workflow step, across all sources
+    correction_rows = []
+    activity_rows = []
 
     def _uname(uid: str | None) -> str:
         if not uid:
@@ -1743,7 +1893,6 @@ def export_timesheet(
             if job_ids else []
         )
 
-        # ── Per-record correction / feedback history ──────────────────────
         for r in records:
             record_label = None
             if isinstance(r.extracted_fields, dict):
@@ -1778,7 +1927,6 @@ def export_timesheet(
                         "By": "", "Role": "", "Type": "Correction", "When": "",
                     })
 
-        # ── Full workflow activity log (every step, every record + source-level events) ──
         from sqlalchemy import or_ as _or_
         record_ids = [r.id for r in records]
         audit_entries = (
@@ -1990,7 +2138,6 @@ def delete_source(
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
 
-    # Use current_user.roles directly — already loaded by the auth dependency
     user_roles = {r.role.value for r in current_user.roles}
     is_org_admin = "org_admin" in user_roles
 
@@ -2010,7 +2157,6 @@ def delete_source(
     source_status = source.status.value
     project_id = source.project_id
 
-    # Delete all records and jobs first
     job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
     if job_ids:
         db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
@@ -2076,9 +2222,7 @@ async def scrape_source_website(
         ).order_by(SchemaVersion.version.desc()).first()
         if not schema_ver:
             raise HTTPException(status_code=422, detail="This source's schema has no field definitions yet.")
-    # else: no schema assigned — proceed with flexible extraction (no field constraints)
 
-    # Fetch the website
     from app.services.web_scraper import fetch_url_text
     try:
         web_text, meta = await fetch_url_text(source.website_url)
@@ -2090,7 +2234,6 @@ async def scrape_source_website(
     if not web_text.strip():
         raise HTTPException(status_code=422, detail="The page returned no readable text. It may require JavaScript or a login.")
 
-    # Run AI extraction on the fetched text
     _schema_def = schema_ver.definition if schema_ver else {"flexible_validation": True, "fields": [],
         "extraction_instructions": "Extract all relevant data from the page matching the task description."}
     schema_fields = _schema_def.get("fields", [])
@@ -2102,7 +2245,6 @@ async def scrape_source_website(
     if not rows:
         raise HTTPException(status_code=422, detail="AI found no records on this page. The page structure may not match what was expected, or the content is behind a login.")
 
-    # Clear previous records and create new job
     _safe_clear_old_jobs(source_id, db)
 
     job = ExtractionJob(
@@ -2172,10 +2314,6 @@ async def llm_verify_source(
       3. Claude cross-checks each record's field values against the actual page content
       4. Stores per-record web_check_flags with specific field issues and suggested corrections
       5. Returns a summary of what passed, what was flagged, and what to fix
-
-    This is Raghu's 'LLM scrapes the source website and cross-checks' stage.
-    After this, the reviewer can see exactly which field values are contested
-    and what the website actually says.
     """
     source = _get_source_or_404(source_id, db)
     if not _is_assigned_reviewer(current_user, source):
@@ -2195,14 +2333,12 @@ async def llm_verify_source(
     if not records:
         raise HTTPException(status_code=422, detail="No records to verify.")
 
-    # Enter the LLM Verification pipeline stage — timed like every other stage
     previous_status = source.status
     if not source.llm_verification_started_at:
         source.llm_verification_started_at = datetime.now(timezone.utc)
     source.status = SourceStatus.LLM_VERIFICATION
     db.flush()
 
-    # Fetch the live website
     from app.services.web_scraper import fetch_url_text
     try:
         web_text, meta = await fetch_url_text(source.website_url)
@@ -2230,7 +2366,6 @@ async def llm_verify_source(
     ]
     extraction_instructions = schema_definition.get("extraction_instructions", "")
 
-    # Process in batches of 20 to stay within context window
     from app.core.config import settings
     from google import genai as _genai
     _client = _genai.Client(api_key=settings.GEMINI_API_KEY)
@@ -2297,7 +2432,6 @@ Required format:
             )
             raw = _response.text if _response.text else ""
 
-            # Strip markdown fences if present
             import re as _re
             clean = raw.strip()
             if clean.startswith("```"):
@@ -2308,7 +2442,6 @@ Required format:
             batch_results = {r["record_id"]: r for r in result.get("results", [])}
 
         except Exception as e:
-            # If a batch fails, mark those records as unverified
             for r in batch:
                 r.web_verified = None
                 r.web_check_summary = f"Verification error: {str(e)[:200]}"
@@ -2316,7 +2449,6 @@ Required format:
             db.flush()
             continue
 
-        # Store results on each record
         for record in batch:
             rec_result = batch_results.get(record.id, {})
             verdict = rec_result.get("verdict", "SKIP")
@@ -2334,7 +2466,6 @@ Required format:
             else:
                 error_count += 1
 
-            # Per-record trace so it shows up in that record's own timeline
             db.add(AuditLog(
                 user_id=current_user.id, project_id=source.project_id, record_id=record.id,
                 action=AuditAction.SOURCE_STATUS_CHANGED,
@@ -2343,7 +2474,6 @@ Required format:
 
         db.flush()
 
-    # LLM Verification stage complete — stamp end time, hand off to human review queue
     source.llm_verification_completed_at = datetime.now(timezone.utc)
     source.status = SourceStatus.READY_FOR_REVIEW
     db.add(AuditLog(
@@ -2407,7 +2537,6 @@ def get_source_schema(
         "grouping_key": defn.get("grouping_key", ""),
         "source_website": defn.get("source_website", ""),
         "base_schema": defn.get("base_schema", ""),
-        # Extras metadata for the UI
         "has_extras": len(extras_fields) > 0,
         "extras_fields": extras_fields,
         "extras_source": extras_source,
@@ -2438,7 +2567,6 @@ def reset_source(
     """
     source = _get_source_or_404(source_id, db)
 
-    # Check admin using current_user.roles (already loaded) — avoid lazy-load on source.project
     user_roles = {r.role.value for r in current_user.roles}
     if "org_admin" not in user_roles:
         from app.models.all_models import ProjectMember as PM
@@ -2457,8 +2585,6 @@ def reset_source(
     source.valid_records = 0
     source.invalid_records = 0
     source.approved_records = 0
-    # extraction_started_at / llm_verification_started_at / completed_at are
-    # deliberately preserved — see docstring above.
     source.review_started_at = None
     source.review_completed_at = None
     source.approved_at = None
@@ -2522,7 +2648,6 @@ def clear_source_records(
             ExtractionJob.id.in_(job_ids)
         ).delete(synchronize_session=False)
 
-    # Reset counts
     source.total_records = 0
     source.valid_records = 0
     source.invalid_records = 0
@@ -2573,12 +2698,10 @@ def unlock_source_records(
             r.submitted_at = None
             unlocked += 1
 
-        # Reset job submitted counts and status back to validated
         for job in db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).all():
             job.total_submitted = 0
             job.status = JobStatus.VALIDATED
 
-    # Move source back to in_review so it can be re-worked
     if unlocked > 0:
         source.status = SourceStatus.IN_REVIEW
 

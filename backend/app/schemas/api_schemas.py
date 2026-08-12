@@ -311,6 +311,9 @@ class SourceUploadSummary(BaseModel):
     extraction_method: str = "structured"  # "structured" | "llm"
     files_processed: int = 1              # how many files were found (> 1 for ZIP)
     file_breakdown: list = []             # [{filename, rows, valid, invalid}] for ZIP uploads
+    batch_warnings: list[str] = []        # SOP batch-level notes: missing manifest/checklist/
+                                           # review log, entities missing source_url, manifest
+                                           # entities with no matching data file, etc.
 
 
 class SourceRecordFix(BaseModel):
