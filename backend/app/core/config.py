@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     # CORS — accepts JSON array string or Python list
     CORS_ORIGINS: Union[list, str] = ["http://localhost:3000", "http://localhost:5173"]
 
+    # Xtrium Catalog IQ integration — Radnyi's system, the master queue of
+    # link batches to research. We poll it, extract, and push results back.
+    # Both blank by default; the integration endpoints (app/api/v1/routes/
+    # integrations.py) raise a clear error if called before these are set.
+    XTRIUM_CATALOG_BASE_URL: str = ""
+    XTRIUM_CATALOG_API_KEY: str = ""
+
     def model_post_init(self, __context):
         # Parse CORS_ORIGINS if it comes in as a JSON string from env var
         if isinstance(self.CORS_ORIGINS, str):

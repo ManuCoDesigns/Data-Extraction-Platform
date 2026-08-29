@@ -353,6 +353,17 @@ class Source(Base):
     approved_at = Column(DateTime(timezone=True), nullable=True)
     reset_count = Column(Integer, default=0, server_default="0", nullable=False)
 
+    # External integration linkage — lets a Source be traced back to the
+    # item it was pulled from in an external system (Xtrium Catalog IQ is
+    # the first). external_system + external_ref_id together identify the
+    # source item uniquely there; external_synced_at tracks the last time
+    # we successfully talked to that system about this source (pull,
+    # submit, fail-report, or status check). All nullable — sources created
+    # any other way are completely unaffected.
+    external_system = Column(String(100), nullable=True)
+    external_ref_id = Column(String(255), nullable=True, index=True)
+    external_synced_at = Column(DateTime(timezone=True), nullable=True)
+
     created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
 
     project = relationship("Project", foreign_keys=[project_id])
