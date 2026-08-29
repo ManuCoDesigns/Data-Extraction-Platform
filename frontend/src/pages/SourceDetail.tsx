@@ -6,9 +6,9 @@ import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
   Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
-  Folder, AlertTriangle
+  Folder, AlertTriangle, Zap, Link2
 } from 'lucide-react'
-import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi } from '@/api/client'
+import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi, xtriumApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
 import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
@@ -177,6 +177,66 @@ export function SourceDetailPage() {
   const [showVerifyResult, setShowVerifyResult] = useState(false)
   // JSON Record Viewer
   const [activeRecordIndex, setActiveRecordIndex] = useState<number | null>(null)
+
+  // ── Xtrium Catalog IQ integration ──────────────────────────────────────────
+  const [showReportFailure, setShowReportFailure] = useState(false)
+  const [failureReason, setFailureReason] = useState('')
+  const [failureNotes, setFailureNotes] = useState('')
+  const [reportingFailure, setReportingFailure] = useState(false)
+  const [submittingToXtrium, setSubmittingToXtrium] = useState(false)
+  const [checkingXtriumStatus, setCheckingXtriumStatus] = useState(false)
+
+  const handleSubmitToXtrium = async () => {
+    if (!sourceId) return
+    setSubmittingToXtrium(true)
+    try {
+      const result = await xtriumApi.submit(sourceId)
+      toast.success(`Submitted to Xtrium Catalog IQ — item #${result.item_id} now "${result.item_status}"`)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Submit to Xtrium failed')
+    } finally {
+      setSubmittingToXtrium(false)
+    }
+  }
+
+  const handleReportFailure = async () => {
+    if (!sourceId || !failureReason.trim()) return
+    setReportingFailure(true)
+    try {
+      await xtriumApi.reportFailure(sourceId, failureReason, failureNotes)
+      toast.success('Failure reported to Xtrium Catalog IQ')
+      setShowReportFailure(false)
+      setFailureReason('')
+      setFailureNotes('')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Report failure failed')
+    } finally {
+      setReportingFailure(false)
+    }
+  }
+
+  const handleCheckXtriumStatus = async () => {
+    if (!sourceId) return
+    setCheckingXtriumStatus(true)
+    try {
+      const result = await xtriumApi.checkStatus(sourceId)
+      if (result.rework_applied_to_source) {
+        toast.success(`Xtrium sent this back for rework — feedback applied and now visible in Escalations`)
+        load()
+      } else if (result.status === 'Ingested') {
+        toast.success('Xtrium has approved and ingested this submission — complete!')
+      } else if (result.status === 'Rejected') {
+        toast.error(`Xtrium rejected this submission${result.failure_reason ? ': ' + result.failure_reason : ''}`)
+      } else {
+        toast.success(`Xtrium status: ${result.status}`)
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Status check failed')
+    } finally {
+      setCheckingXtriumStatus(false)
+    }
+  }
 
   const load = () => {
     if (!projectId || !sourceId) return
@@ -606,6 +666,8 @@ export function SourceDetailPage() {
   const allRecordsApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
   const pendingCount = records.filter(r => r.review_status === 'pending').length
   const approvedCount = records.filter(r => r.review_status === 'approved').length
+  const xtriumRefId = (source as any).external_ref_id as string | null | undefined
+  const isFromXtrium = !!xtriumRefId
 
   const toggleFolder = (path: string) => {
     setCollapsedFolders(prev => {
@@ -635,6 +697,14 @@ export function SourceDetailPage() {
                   background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa',
                   display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <RotateCcw style={{ width: 11, height: 11 }} /> Reset ×{(source as any).reset_count}
+              </span>
+            )}
+            {isFromXtrium && (
+              <span title="This source was pulled from Xtrium Catalog IQ"
+                style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20,
+                  background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe',
+                  display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <Link2 style={{ width: 11, height: 11 }} /> Xtrium Catalog IQ #{xtriumRefId}
               </span>
             )}
           </div>
@@ -706,6 +776,24 @@ export function SourceDetailPage() {
             <Button size="sm" loading={submitting} onClick={handleSubmitSource}
               className="!bg-green-600 hover:!bg-green-700">
               <Send className="w-3.5 h-3.5" /> Submit Records
+            </Button>
+          )}
+          {isFromXtrium && isAdmin && source.status === 'approved' && (
+            <Button size="sm" loading={submittingToXtrium} onClick={handleSubmitToXtrium}
+              style={{ background: '#2563eb', border: 'none', color: '#fff' }}>
+              <Zap className="w-3.5 h-3.5" /> Submit to Xtrium
+            </Button>
+          )}
+          {isFromXtrium && isAdmin && (
+            <Button variant="secondary" size="sm" loading={checkingXtriumStatus} onClick={handleCheckXtriumStatus}>
+              <Link2 className="w-3.5 h-3.5" /> Check Xtrium Status
+            </Button>
+          )}
+          {isFromXtrium && isAdmin && source.status !== 'approved' && (
+            <Button variant="secondary" size="sm"
+              className="!text-red-600 !border-red-200 hover:!bg-red-50"
+              onClick={() => setShowReportFailure(true)}>
+              <AlertTriangle className="w-3.5 h-3.5" /> Report Failure
             </Button>
           )}
           {source.status === 'approved' && isAdmin && (
@@ -1257,6 +1345,8 @@ export function SourceDetailPage() {
               { label: 'Approved / Delivered', value: source.approved_at ? format(new Date(source.approved_at), 'MMM d, HH:mm') : '—' },
               { label: 'Total time (claim → delivery)', value: formatDuration(source.extraction_started_at, source.approved_at) ?? '—' },
               { label: 'Times reset', value: (source as any).reset_count > 0 ? `${(source as any).reset_count}×` : 'Never' },
+              { label: 'Xtrium Catalog IQ item', value: xtriumRefId ? `#${xtriumRefId}` : '(not from Xtrium)' },
+              { label: 'Last synced with Xtrium', value: (source as any).external_synced_at ? format(new Date((source as any).external_synced_at), 'MMM d, HH:mm') : '—' },
             ].map(({ label, value }) => (
               <div key={label} className="flex justify-between text-sm border-b border-gray-50 pb-2 last:border-0">
                 <span className="text-gray-500">{label}</span>
@@ -1575,6 +1665,28 @@ export function SourceDetailPage() {
             <Button variant="secondary" onClick={() => setShowReset(false)} disabled={resetting}>Cancel</Button>
             <Button onClick={handleReset} loading={resetting} className="!bg-orange-500 hover:!bg-orange-600">
               <RotateCcw className="w-4 h-4" /> Reset{resetClearRecords ? ' & Clear Records' : ' Status Only'}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Report Failure to Xtrium modal */}
+      <Modal open={showReportFailure} onClose={() => !reportingFailure && setShowReportFailure(false)} title="Report Failure to Xtrium Catalog IQ"
+        description="Reports that this link could not be scraped — e.g. 404, aggressive anti-bot, paywall.">
+        <div className="space-y-4">
+          <Input label="Failure reason" value={failureReason} onChange={e => setFailureReason(e.target.value)}
+            placeholder="e.g. 404 Not Found - Datasheet link expired on source site" required autoFocus />
+          <div>
+            <label className="block text-xs font-semibold text-gray-600 mb-1.5">Notes (optional)</label>
+            <textarea value={failureNotes} rows={2} onChange={e => setFailureNotes(e.target.value)}
+              className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-brand-500"
+              placeholder="e.g. Tried 3 retries over 5 minutes" />
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setShowReportFailure(false)} disabled={reportingFailure}>Cancel</Button>
+            <Button onClick={handleReportFailure} loading={reportingFailure} disabled={!failureReason.trim()}
+              className="!bg-red-600 hover:!bg-red-700">
+              <AlertTriangle className="w-4 h-4" /> Report Failure
             </Button>
           </div>
         </div>

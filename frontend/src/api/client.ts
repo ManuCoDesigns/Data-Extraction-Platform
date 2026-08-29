@@ -344,6 +344,22 @@ export const sourcesApi = {
     api.get('/sources/stats/performance', { params: { project_id: projectId } }).then(r => r.data),
 }
 
+// ─── Xtrium Catalog IQ integration ────────────────────────────────────────────
+// Radnyi's system — the master queue of link batches to research. We pull
+// assigned work, extract through our own pipeline, then push results back
+// and check for rework. See backend/app/api/v1/routes/integrations.py.
+export const xtriumApi = {
+  pull: (projectId: string, batchSize = 50) =>
+    api.post('/integrations/xtrium/pull', { project_id: projectId, batch_size: batchSize }).then(r => r.data),
+  submit: (sourceId: string, notes = '') =>
+    api.post(`/integrations/xtrium/sources/${sourceId}/submit`, { notes }).then(r => r.data),
+  reportFailure: (sourceId: string, failureReason: string, notes = '') =>
+    api.post(`/integrations/xtrium/sources/${sourceId}/fail`, { failure_reason: failureReason, notes }).then(r => r.data),
+  checkStatus: (sourceId: string) =>
+    api.get(`/integrations/xtrium/sources/${sourceId}/status`).then(r => r.data),
+  stats: () => api.get('/integrations/xtrium/stats').then(r => r.data),
+}
+
 function triggerBrowserDownload(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
