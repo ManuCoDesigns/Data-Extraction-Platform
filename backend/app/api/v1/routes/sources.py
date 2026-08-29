@@ -15,7 +15,7 @@ Re-uploading replaces the source's current record set (simple, predictable —
 no row-level merge/dedup in this version). Individual records can also be
 fixed inline via PATCH without a full re-upload.
 """
-import io, json, math
+import io, json, math, re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
@@ -28,7 +28,7 @@ from app.models.all_models import (
     Source, SourceStatus, Project, ProjectMember, User, Schema, SchemaVersion,
     ExtractionJob, ExtractedRecord, JobStatus, SourceType as FileSourceType,
     ExtractionConfidence, ReviewStatus, AuditLog, AuditAction, Notification,
-    LLMCallLog, SubmissionBatch,
+    LLMCallLog, SubmissionBatch, UploadedFileEntry,
 )
 from app.schemas.api_schemas import (
     SourceCreate, SourceUpdate, SourceOut, SourceUploadSummary,
@@ -38,7 +38,7 @@ from app.services.schema_validator import validate_record, map_row_to_fields
 
 router = APIRouter(prefix="/sources", tags=["sources"])
 
-ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip", ".md"}
+ALLOWED_UPLOAD_EXTENSIONS = {".csv", ".xlsx", ".xls", ".json", ".pdf", ".txt", ".zip"}
 
 # The backend currently reads the whole upload into memory before parsing
 # it (pandas/json need the full content anyway). A 126MB file was enough to
@@ -50,59 +50,69 @@ MAX_UPLOAD_SIZE_BYTES = 60 * 1024 * 1024  # 60MB per file
 # Extensions that go through AI extraction (not mechanical row mapping)
 AI_EXTRACTION_EXTENSIONS = {".pdf", ".txt"}
 
-# ─── SOP batch folder-role classification ─────────────────────────────────
-# Per the Xtrium SOP house standard (SOP-DS-003 Appendix H + SOP-00X §13):
+# ─── Folder-upload file classification ─────────────────────────────────────
+# Real SOP batch deliveries have used at least three different folder/naming
+# conventions in practice (the full "materials/suppliers/.../qa_ready_batch"
+# structure, an abbreviated "compliance/qa/sources" structure, and a
+# "suppliers/evidence" structure) — so classification can't rely on a fixed
+# folder-name list alone. This uses three signals, most reliable first:
 #
-#   batch_YYYYMMDD_{source-slug}/
-#   |-- materials/ | suppliers/ | compliance_records/ | research/   <- PRIMARY DATA
-#   |     {canonical-name}.json
-#   |-- escalation_notes/
-#   |     {source-slug}_review_log.json                            <- REVIEW LOG
-#   `-- qa_ready_batch/
-#         |-- qa_checklists/
-#         |     {source-slug}_qa_checklist.md                      <- QA CHECKLIST
-#         `-- source_lists/
-#               {source-slug}_sources.csv                          <- MANIFEST
+#   1. Unambiguous primary-data folder names — never used for anything else.
+#   2. Filename keywords (qa_checklist, review_log, source list/index/manifest)
+#      — checked BEFORE generic folder names, since a filename like
+#      "row161_review_log.txt" is reliable even inside a shared/ambiguous
+#      folder such as "qa/" that holds more than one file role.
+#   3. Unambiguous full folder names, as a fallback if the filename alone
+#      didn't indicate a role.
 #
-# Only files under a PRIMARY_DATA_FOLDERS folder are the actual SOP-compliant
-# entity data — the thing that should be schema-validated and turned into
-# ExtractedRecords. Everything else (manifest CSV, QA checklist, review log)
-# is metadata ABOUT the batch, not data IN it, and must never be validated
-# against the entity schema or counted as a duplicate/invalid record.
+# Anything that still doesn't match is only treated as primary data if it's
+# unambiguous: either it sits at the flat root of the upload (a single-file
+# delivery with no folder at all), or its name matches the batch's own slug
+# (e.g. "45-8-energy.json" inside "batch_20260819_45-8-energy/..."). A file
+# that matches NONE of this — a stray note, an old backup, anything not
+# actually part of the delivery — is skipped entirely rather than guessed
+# into becoming fake data. This is the fix for folder uploads silently
+# ingesting unrelated files as bogus records.
 PRIMARY_DATA_FOLDERS = {"materials", "suppliers", "compliance_records", "research"}
-MANIFEST_FOLDER = "source_lists"          # qa_ready_batch/source_lists/*.csv
-QA_CHECKLIST_FOLDER = "qa_checklists"     # qa_ready_batch/qa_checklists/*.md
-REVIEW_LOG_FOLDER = "escalation_notes"    # escalation_notes/*_review_log.json
-MANIFEST_REQUIRED_COLUMNS = {
-    "record_filename", "entity_type", "entity_name", "source_url", "source_tier", "date_accessed", "notes",
-}
-REVIEW_LOG_REQUIRED_KEYS = {"entity", "issue_type", "detail", "status", "escalated"}
+MANIFEST_FOLDER_NAMES = {"source_lists"}
+QA_CHECKLIST_FOLDER_NAMES = {"qa_checklists"}
+REVIEW_LOG_FOLDER_NAMES = {"escalation_notes"}
 
 
-def _classify_batch_file(full_path: str) -> str:
+def _derive_batch_slugs(paths: list[str]) -> set[str]:
     """
-    Classifies one uploaded file by its ROLE in the SOP batch structure.
+    Extracts likely 'source slug' candidates from the batch's root folder
+    name(s) present across the uploaded paths — e.g. both the full root
+    "batch_20260819_45-8-energy" and, with the date prefix stripped,
+    "45-8-energy". Used only as the last-resort signal for classifying an
+    otherwise-unrecognised file.
+    """
+    roots = set()
+    for p in paths:
+        parts = [x for x in p.replace("\\", "/").split("/") if x]
+        if len(parts) > 1:
+            roots.add(parts[0].lower())
+    slugs = set()
+    for root in roots:
+        slugs.add(root)
+        m = re.match(r"^batch_\d{8}_(.+)$", root)
+        if m:
+            slugs.add(m.group(1))
+    return slugs
 
-    Two conventions are supported, checked in order:
 
-      1. Nested folder structure (SOP-DS-003 Appendix H full batch):
-         materials/{name}.json, qa_ready_batch/qa_checklists/{slug}_qa_checklist.md, etc.
-         — role is determined by which named folder the file sits in.
+def _normalize_slug(s: str) -> str:
+    return re.sub(r"[-_]+", "-", s.strip().lower()).strip("-")
 
-      2. Flat per-source folder (common for a single-source delivery — no
-         subfolders at all, just a handful of files named by role):
-         eu-battery-regulation-2023-1542.json, row161_qa_checklist.txt,
-         row161_review_log.txt, row161_sources.csv
-         — role is determined by keywords in the FILENAME itself, and any
-         file extension is accepted (a review log or checklist saved as
-         .txt is still recognised, not just .json/.md).
 
-    Falls back to "primary_data" for any file with a real data extension
-    that doesn't match a special-role pattern — this is the safe default
-    for a flat folder with no named subfolders, so a source's actual data
-    file is never mistakenly skipped as "unknown".
-
+def _classify_batch_file(full_path: str, batch_slugs: set[str] | None = None) -> str:
+    """
+    Classifies one uploaded file by its ROLE in a folder/ZIP upload.
     Returns one of: "primary_data" | "manifest" | "qa_checklist" | "review_log" | "unknown"
+
+    Only "primary_data" files are parsed into ExtractedRecords. Everything
+    else is either recognised-but-not-data (manifest/checklist/review log)
+    or "unknown" — and "unknown" files are skipped entirely, never ingested.
     """
     parts = [p for p in full_path.replace("\\", "/").split("/") if p]
     parts_lower = [p.lower() for p in parts]
@@ -110,29 +120,38 @@ def _classify_batch_file(full_path: str) -> str:
     stem = fname_lower.rsplit(".", 1)[0] if "." in fname_lower else fname_lower
     ext = ("." + fname_lower.rsplit(".", 1)[1]) if "." in fname_lower else ""
 
-    # 1. Nested folder structure
+    # 1. Unambiguous primary-data folders
     if any(p in PRIMARY_DATA_FOLDERS for p in parts_lower):
         return "primary_data"
-    if MANIFEST_FOLDER in parts_lower:
-        return "manifest"
-    if QA_CHECKLIST_FOLDER in parts_lower:
-        return "qa_checklist"
-    if REVIEW_LOG_FOLDER in parts_lower:
-        return "review_log"
 
-    # 2. Flat folder — classify by filename keywords, any extension
+    # 2. Filename keywords — checked before generic folder names
     if "qa_checklist" in stem or "qa-checklist" in stem or "qachecklist" in stem:
         return "qa_checklist"
     if "review_log" in stem or "review-log" in stem or "escalation" in stem:
         return "review_log"
     if (stem.endswith("_sources") or stem.endswith("-sources")
             or "source_list" in stem or "sourcelist" in stem or "source-list" in stem
-            or "manifest" in stem):
+            or "source_index" in stem or "sourceindex" in stem or "manifest" in stem):
         return "manifest"
 
-    # 3. Default — a real data file with no special-role naming
+    # 3. Unambiguous full folder names, as a fallback
+    if any(p in MANIFEST_FOLDER_NAMES for p in parts_lower):
+        return "manifest"
+    if any(p in QA_CHECKLIST_FOLDER_NAMES for p in parts_lower):
+        return "qa_checklist"
+    if any(p in REVIEW_LOG_FOLDER_NAMES for p in parts_lower):
+        return "review_log"
+
+    # 4. Default to primary_data ONLY when unambiguous
     if ext in {".json", ".csv", ".xlsx", ".xls"}:
-        return "primary_data"
+        is_at_root = len(parts) == 1
+        if is_at_root:
+            return "primary_data"
+        if batch_slugs:
+            stem_norm = _normalize_slug(stem)
+            for slug in batch_slugs:
+                if stem_norm == _normalize_slug(slug):
+                    return "primary_data"
 
     return "unknown"
 
@@ -759,9 +778,10 @@ async def upload_to_source(
         extraction_method = "llm"
         file_breakdown: list[dict] = []
         files_processed = 1
+        raw_entries = [{"relative_path": file.filename or "upload", "is_directory": False, "content": content}]
 
     elif ext == ".zip":
-        rows, file_breakdown, batch_meta = _parse_zip(content)
+        rows, file_breakdown = _parse_zip(content)
         if not rows:
             skipped = [f for f in file_breakdown if f.get("error")]
             detail = f"No records found in ZIP. {len(file_breakdown)} file(s) checked."
@@ -770,6 +790,7 @@ async def upload_to_source(
             raise HTTPException(status_code=422, detail=detail)
         extraction_method = "structured"
         files_processed = len([f for f in file_breakdown if not f.get("error")])
+        raw_entries = _read_raw_zip_entries(content)
 
     else:
         rows = _parse_rows(content, ext, file.filename or "")
@@ -778,13 +799,14 @@ async def upload_to_source(
         extraction_method = "structured"
         file_breakdown = []
         files_processed = 1
+        raw_entries = [{"relative_path": file.filename or "upload", "is_directory": False, "content": content}]
 
     return _finalize_upload(
         source=source, source_id=source_id, rows=rows, ext=ext,
         extraction_method=extraction_method, file_breakdown=file_breakdown,
         files_processed=files_processed, display_filename=file.filename or "upload",
         content_len=len(content), schema_ver=schema_ver, schema_fields=schema_fields,
-        current_user=current_user, db=db,
+        current_user=current_user, db=db, raw_entries=raw_entries,
     )
 
 
@@ -794,12 +816,19 @@ def _finalize_upload(
     display_filename: str, content_len: int,
     schema_ver, schema_fields: list[dict],
     current_user: "User", db: Session,
-    batch_warnings: list[str] | None = None,
+    raw_entries: list[dict] | None = None,
 ) -> "SourceUploadSummary":
     """
     Shared logic for turning parsed rows into an ExtractionJob + ExtractedRecords.
     Used by both single-file upload and multi-file/folder upload — keeps the
     schema-mapping, field-inference, and validation logic in exactly one place.
+
+    raw_entries, if given, is a flat list of {relative_path, is_directory,
+    content} dicts capturing EVERY file (and, for ZIP uploads, every empty
+    directory) from the original upload verbatim — independent of whatever
+    got parsed into rows. These are persisted once the job exists, so the
+    exact original structure can always be browsed/re-downloaded later via
+    GET /sources/{id}/files, regardless of what was classified as data.
     """
     _safe_clear_old_jobs(source_id, db)
 
@@ -820,6 +849,16 @@ def _finalize_upload(
     )
     db.add(job)
     db.flush()
+
+    if raw_entries:
+        for entry in raw_entries:
+            db.add(UploadedFileEntry(
+                job_id=job.id,
+                relative_path=entry["relative_path"],
+                is_directory=entry["is_directory"],
+                content=entry["content"],
+                size_bytes=len(entry["content"]) if entry.get("content") else 0,
+            ))
 
     valid_count = 0
     for row in rows:
@@ -914,11 +953,7 @@ def _finalize_upload(
         db.add(AuditLog(
             user_id=current_user.id, project_id=source.project_id,
             action=AuditAction.SOURCE_DATA_UPLOADED,
-            after_value={
-                "file": display_filename, "method": extraction_method, "rows": len(rows),
-                "valid": valid_count, "invalid": invalid_count,
-                "batch_warnings": batch_warnings or [],
-            },
+            after_value={"file": display_filename, "method": extraction_method, "rows": len(rows), "valid": valid_count, "invalid": invalid_count},
         ))
         db.commit()
     except Exception as db_err:
@@ -937,7 +972,6 @@ def _finalize_upload(
         extraction_method=extraction_method,
         files_processed=files_processed,
         file_breakdown=file_breakdown,
-        batch_warnings=batch_warnings or [],
     )
 
 
@@ -953,23 +987,12 @@ async def upload_multi_to_source(
     Folder / multi-file upload — for SOPs where source data ships as a folder
     of files rather than one archive.
 
-    SOP batch structure (SOP-DS-003 Appendix H + SOP-00X §13):
-
-      batch_YYYYMMDD_{source-slug}/
-        materials/ | suppliers/ | compliance_records/ | research/   <- primary data
-          {canonical-name}.json                                     -> becomes records
-        escalation_notes/
-          {source-slug}_review_log.json                             -> logged, not validated
-        qa_ready_batch/
-          qa_checklists/{source-slug}_qa_checklist.md                -> presence tracked
-          source_lists/{source-slug}_sources.csv                     -> manifest, cross-checked
-
-    ONLY files under a primary-data folder become ExtractedRecords and get
-    validated against the schema. The manifest CSV, QA checklist, and review
-    log are recognised by their folder role and handled separately — this is
-    what stops QA/manifest content from being wrongly flagged as invalid
-    entity data, and stops the manifest row + its corresponding JSON file
-    from both becoming separate (duplicate) records for the same entity.
+    Only files classified as "primary_data" by _classify_batch_file become
+    ExtractedRecords. Recognised non-data files (manifest/checklist/review
+    log) and genuinely unrecognised files are both skipped — never parsed
+    into records — with the reason surfaced in each file's breakdown entry.
+    This is what stops a folder upload from silently ingesting an unrelated
+    file (an index, a stray note, an old backup) as bogus data.
     """
     source = _get_source_or_404(source_id, db)
     if not _is_assigned_extractor(current_user, source):
@@ -1023,34 +1046,43 @@ async def upload_multi_to_source(
                    "Thumbs.db) — no actual data files to upload.",
         )
 
-    # ── Pass 1: classify every file by SOP folder role before parsing anything ──
-    primary_files, manifest_files, checklist_files, review_log_files, other_files = [], [], [], [], []
-    for f in real_files:
-        full_path = (f.filename or "upload").replace("\\", "/")
-        role = _classify_batch_file(full_path)
-        if role == "primary_data":
-            primary_files.append(f)
-        elif role == "manifest":
-            manifest_files.append(f)
-        elif role == "qa_checklist":
-            checklist_files.append(f)
-        elif role == "review_log":
-            review_log_files.append(f)
-        else:
-            other_files.append(f)
+    all_paths = [(f.filename or "upload").replace("\\", "/") for f in real_files]
+    batch_slugs = _derive_batch_slugs(all_paths)
 
-    batch_warnings: list[str] = []
-    manifest_entries: list[dict] = []   # rows from source_lists/*.csv — used to cross-check, not to create records
-    review_log_entries: list[dict] = [] # entries from escalation_notes/*.json
-    escalated_entries: list[dict] = []
+    skipped_unknown: list[str] = []
+    recognized_nondata: list[str] = []
+    # Every file gets captured here verbatim, regardless of role or whether
+    # it parsed successfully — this is the raw preservation layer, entirely
+    # independent of the parsing pipeline above it.
+    raw_entries: list[dict] = []
 
-    # ── Parse PRIMARY DATA files only — these become ExtractedRecords ──────────
-    for f in primary_files:
-        raw = await f.read()
-        total_size += len(raw)
-        full_path = (f.filename or "upload").replace("\\", "/")
+    for f, full_path in zip(real_files, all_paths):
         fname = full_path.split("/")[-1]
         ext = _os.path.splitext(fname)[1].lower()
+
+        role = _classify_batch_file(full_path, batch_slugs)
+
+        if role != "primary_data":
+            raw = await f.read()
+            total_size += len(raw)
+            raw_entries.append({"relative_path": full_path, "is_directory": False, "content": raw})
+            if role == "unknown":
+                skipped_unknown.append(fname)
+                file_breakdown.append({
+                    "filename": fname, "rows": 0,
+                    "error": "not recognised as part of this batch — skipped, not ingested",
+                })
+            else:
+                recognized_nondata.append(fname)
+                file_breakdown.append({
+                    "filename": fname, "rows": 0,
+                    "role": f"{role} (recognised, not extracted as data)",
+                })
+            continue
+
+        raw = await f.read()
+        total_size += len(raw)
+        raw_entries.append({"relative_path": full_path, "is_directory": False, "content": raw})
 
         if not ext or ext not in ALLOWED_UPLOAD_EXTENSIONS:
             file_breakdown.append({"filename": fname, "rows": 0, "error": f"unsupported type '{ext or 'unknown'}'"})
@@ -1062,7 +1094,7 @@ async def upload_multi_to_source(
                 rows = await _extract_with_llm(raw, ext, _schema_def, source)
                 ai_used = True
             elif ext == ".zip":
-                rows, inner_breakdown, _ = _parse_zip(raw)
+                rows, inner_breakdown = _parse_zip(raw)
                 file_breakdown.extend(inner_breakdown)
             else:
                 rows = _parse_rows(raw, ext, fname)
@@ -1070,138 +1102,34 @@ async def upload_multi_to_source(
             file_breakdown.append({"filename": fname, "rows": 0, "error": str(e)[:150]})
             continue
 
-        # SOP hard requirement: every primary-data object must carry source_url
-        # (or a sources[] array) — flag it inline rather than silently accepting.
         for row in rows:
             if isinstance(row, dict) and "_source_file" not in row:
                 row["_source_file"] = full_path
-            if isinstance(row, dict) and not row.get("source_url") and not row.get("sources"):
-                row.setdefault("_batch_issues", []).append("missing required source_url (or sources[])")
 
         if ext != ".zip":
             file_breakdown.append({"filename": fname, "rows": len(rows)})
         all_rows.extend(rows)
 
-    # ── Parse MANIFEST — cross-check only, never becomes a record ──────────────
-    manifest_entity_names: set[str] = set()
-    for f in manifest_files:
-        raw = await f.read()
-        total_size += len(raw)
-        full_path = (f.filename or "upload").replace("\\", "/")
-        fname = full_path.split("/")[-1]
-        try:
-            manifest_rows = _parse_rows(raw, ".csv", fname)
-            header_cols = set(manifest_rows[0].keys()) if manifest_rows else set()
-            missing_cols = MANIFEST_REQUIRED_COLUMNS - {c.strip() for c in header_cols}
-            if missing_cols:
-                batch_warnings.append(
-                    f"Manifest '{fname}' is missing expected column(s): {', '.join(sorted(missing_cols))}"
-                )
-            manifest_entries.extend(manifest_rows)
-            for m in manifest_rows:
-                if m.get("entity_name"):
-                    manifest_entity_names.add(str(m["entity_name"]).strip().lower())
-            file_breakdown.append({"filename": fname, "rows": len(manifest_rows), "role": "manifest (cross-check only, not extracted as data)"})
-        except Exception as e:
-            file_breakdown.append({"filename": fname, "rows": 0, "error": f"could not read manifest: {str(e)[:120]}"})
-
-    # ── Parse REVIEW LOG — logged + tied into Escalations, never a record ──────
-    for f in review_log_files:
-        raw = await f.read()
-        total_size += len(raw)
-        full_path = (f.filename or "upload").replace("\\", "/")
-        fname = full_path.split("/")[-1]
-        try:
-            log_data = json.loads(raw.decode("utf-8"))
-            entries = log_data if isinstance(log_data, list) else [log_data]
-            for entry in entries:
-                if not isinstance(entry, dict):
-                    continue
-                missing_keys = REVIEW_LOG_REQUIRED_KEYS - set(entry.keys())
-                if missing_keys:
-                    batch_warnings.append(
-                        f"Review log entry in '{fname}' missing required key(s): {', '.join(sorted(missing_keys))}"
-                    )
-                review_log_entries.append(entry)
-                if entry.get("escalated"):
-                    escalated_entries.append(entry)
-            file_breakdown.append({"filename": fname, "rows": len(entries), "role": "review log (logged, not extracted as data)"})
-        except Exception as e:
-            file_breakdown.append({"filename": fname, "rows": 0, "error": f"could not read review log: {str(e)[:120]}"})
-
-    # ── QA checklist — presence tracked, content not parsed as data ────────────
-    for f in checklist_files:
-        raw = await f.read()
-        total_size += len(raw)
-        full_path = (f.filename or "upload").replace("\\", "/")
-        fname = full_path.split("/")[-1]
-        file_breakdown.append({"filename": fname, "rows": 0, "role": "QA checklist (presence confirmed, not extracted as data)"})
-
-    # ── Anything that didn't match a known SOP folder role ──────────────────────
-    for f in other_files:
-        fname = (f.filename or "upload").split("/")[-1]
-        file_breakdown.append({"filename": fname, "rows": 0, "error": "not under a recognised SOP folder (materials/suppliers/compliance_records/research/escalation_notes/qa_ready_batch) — skipped"})
-
-    # ── SOP non-negotiable checks — surfaced as batch_warnings, not silent ──────
-    if not manifest_files:
-        batch_warnings.append("No source_lists manifest CSV found in this batch.")
-    if not checklist_files:
-        batch_warnings.append("QA checklist missing — contractor self-check is required even before QA reviewer sign-off.")
-    if not review_log_files:
-        batch_warnings.append("No review log found — submit an empty-but-present review log even when there were zero issues.")
-
-    # Cross-check: every manifest entity should have a matching primary-data record
-    if manifest_entity_names:
-        extracted_names = {
-            str(r.get("canonical_name") or r.get("entity_name") or r.get("name") or "").strip().lower()
-            for r in all_rows if isinstance(r, dict)
-        }
-        missing_from_batch = manifest_entity_names - extracted_names
-        if missing_from_batch:
-            batch_warnings.append(
-                f"{len(missing_from_batch)} entit{'y is' if len(missing_from_batch) == 1 else 'ies are'} "
-                f"listed in the manifest but have no matching data file: {', '.join(sorted(missing_from_batch))[:200]}"
-            )
-
     if not all_rows:
         skipped = [f for f in file_breakdown if f.get("error")]
-        detail = f"No primary data records found across {len(real_files)} file(s)."
-        if skipped:
-            detail += f" Errors: {'; '.join(x['filename'] + ': ' + x['error'] for x in skipped[:3])}"
-        if batch_warnings:
-            detail += f" Batch notes: {'; '.join(batch_warnings[:3])}"
+        detail = f"No primary-data records found across {len(real_files)} file(s)."
+        if recognized_nondata:
+            detail += f" {len(recognized_nondata)} recognised as non-data (manifest/checklist/review log)."
+        if skipped_unknown:
+            detail += f" {len(skipped_unknown)} file(s) not recognised and skipped: {', '.join(skipped_unknown[:5])}."
         raise HTTPException(status_code=422, detail=detail)
 
     extraction_method = "llm" if ai_used else "structured"
     files_processed = len([f for f in file_breakdown if not f.get("error")])
 
-    summary = _finalize_upload(
+    return _finalize_upload(
         source=source, source_id=source_id, rows=all_rows, ext=".zip",
         extraction_method=extraction_method, file_breakdown=file_breakdown,
         files_processed=files_processed,
         display_filename=f"{len(real_files)} file{'s' if len(real_files) != 1 else ''} (folder upload)",
         content_len=total_size, schema_ver=schema_ver, schema_fields=schema_fields,
-        current_user=current_user, db=db,
-        batch_warnings=batch_warnings,
+        current_user=current_user, db=db, raw_entries=raw_entries,
     )
-
-    # Wire genuinely escalated review-log entries straight into the existing
-    # Escalations feature so they surface with everything else sent back —
-    # this is a natural fit since review_log entries already carry the same
-    # shape (entity, issue_type, detail, status, escalated).
-    if escalated_entries:
-        db.add(AuditLog(
-            user_id=current_user.id, project_id=source.project_id, source_id=source.id,
-            action=AuditAction.SOURCE_STATUS_CHANGED,
-            after_value={
-                "stage": "review_log_escalations",
-                "count": len(escalated_entries),
-                "entries": escalated_entries[:20],
-            },
-        ))
-        db.commit()
-
-    return summary
 
 
 async def _extract_with_llm(content: bytes, ext: str, schema_definition: dict, source: Source) -> list[dict]:
@@ -1356,14 +1284,38 @@ def _parse_rows(content: bytes, ext: str, filename: str) -> list[dict]:
     return []
 
 
-def _parse_zip(content: bytes) -> tuple[list[dict], list[dict], dict]:
+def _read_raw_zip_entries(content: bytes) -> list[dict]:
+    """
+    Reads every entry in a ZIP archive verbatim — every file's bytes, and
+    every empty-directory entry — with zero filtering, classification, or
+    interpretation. Used to persist the exact original upload structure,
+    independent of what gets parsed into records. A directory entry (a
+    name ending in "/") is captured with content=None; this is the only
+    way an empty folder can survive an upload at all, since a browser's
+    folder-picker input never reports empty folders to the server.
+    """
+    import zipfile as zf_mod
+    entries: list[dict] = []
+    with zf_mod.ZipFile(io.BytesIO(content)) as zf:
+        for name in zf.namelist():
+            if name.endswith("/"):
+                entries.append({"relative_path": name, "is_directory": True, "content": None})
+            else:
+                raw = zf.read(name)
+                entries.append({"relative_path": name, "is_directory": False, "content": raw})
+    return entries
+
+
+def _parse_zip(content: bytes) -> tuple[list[dict], list[dict]]:
     """
     Parse a ZIP archive containing JSON files (or CSV/Excel files).
-    Returns (rows, file_breakdown, batch_meta) where file_breakdown is a
-    list of {filename, rows, skipped_reason} dicts for the UI summary, and
-    batch_meta reports any manifest/qa_checklist/review_log files found
-    inside the zip (path-classified the same way as folder uploads, so a
-    zipped SOP batch gets the same primary-data-only treatment).
+    Returns (rows, file_breakdown) where file_breakdown is a list of
+    {filename, rows, skipped_reason} dicts for the UI summary.
+
+    Applies the same _classify_batch_file role classification as folder
+    uploads, so a zipped SOP batch gets identical primary-data-only
+    treatment — a manifest/checklist/review-log file inside a ZIP never
+    becomes bogus records either, and neither does an unrecognised file.
 
     Each returned row is tagged with "_source_file" = its full path inside
     the archive (e.g. "NETL_METALLIC/subfolder/id_72.json"), so the UI can
@@ -1374,7 +1326,6 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict], dict]:
 
     all_rows: list[dict] = []
     breakdown: list[dict] = []
-    batch_meta = {"manifest_files": 0, "qa_checklists": 0, "review_logs": 0}
     SUPPORTED = {".json", ".csv", ".xlsx", ".xls"}
     SKIP_PREFIXES = ("__MACOSX", ".", "_", "~$")
 
@@ -1400,22 +1351,20 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict], dict]:
 
     with zf_mod.ZipFile(io.BytesIO(content)) as zf:
         names = [n for n in zf.namelist() if not is_skippable(n) and not n.endswith("/")]
+        batch_slugs = _derive_batch_slugs(names)
+
         for name in names:
             fname = name.split("/")[-1]
             ext = _os.path.splitext(fname)[1].lower()
-            role = _classify_batch_file(name)
+            role = _classify_batch_file(name, batch_slugs)
 
-            if role == "manifest":
-                batch_meta["manifest_files"] += 1
-                breakdown.append({"filename": fname, "rows": 0, "role": "manifest (cross-check only, not extracted as data)"})
-                continue
-            if role == "qa_checklist":
-                batch_meta["qa_checklists"] += 1
-                breakdown.append({"filename": fname, "rows": 0, "role": "QA checklist (presence confirmed, not extracted as data)"})
-                continue
-            if role == "review_log":
-                batch_meta["review_logs"] += 1
-                breakdown.append({"filename": fname, "rows": 0, "role": "review log (logged, not extracted as data)"})
+            if role != "primary_data":
+                if role == "unknown":
+                    breakdown.append({"filename": fname, "rows": 0,
+                        "error": "not recognised as part of this batch — skipped, not ingested"})
+                else:
+                    breakdown.append({"filename": fname, "rows": 0,
+                        "role": f"{role} (recognised, not extracted as data)"})
                 continue
 
             if ext == ".zip":
@@ -1439,7 +1388,7 @@ def _parse_zip(content: bytes) -> tuple[list[dict], list[dict], dict]:
                 breakdown.append({"filename": fname, "rows": len(rows), "error": err})
                 all_rows.extend(rows)
 
-    return all_rows, breakdown, batch_meta
+    return all_rows, breakdown
 
 
 # ─── Records (fix + review) ──────────────────────────────────────────────────
@@ -1797,6 +1746,110 @@ def approve_source(
 
 
 # ─── Export package ──────────────────────────────────────────────────────────
+
+@router.get("/{source_id}/files")
+def list_uploaded_files(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the exact raw structure of the most recent upload for this
+    source — every file and (for ZIP uploads) every empty directory, with
+    its path and size, independent of what was parsed into records. This
+    is the literal folder/ZIP contents as uploaded, not the extracted data.
+    """
+    source = _get_source_or_404(source_id, db)
+    if not _can_access(current_user, source.project):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    latest_job = (
+        db.query(ExtractionJob)
+        .filter(ExtractionJob.source_id == source_id)
+        .order_by(ExtractionJob.created_at.desc())
+        .first()
+    )
+    if not latest_job:
+        return {"job_id": None, "entries": [], "total_files": 0, "total_directories": 0}
+
+    entries = (
+        db.query(UploadedFileEntry)
+        .filter(UploadedFileEntry.job_id == latest_job.id)
+        .order_by(UploadedFileEntry.relative_path)
+        .all()
+    )
+
+    return {
+        "job_id": latest_job.id,
+        "entries": [
+            {
+                "relative_path": e.relative_path,
+                "is_directory": e.is_directory,
+                "size_bytes": e.size_bytes or 0,
+            }
+            for e in entries
+        ],
+        "total_files": sum(1 for e in entries if not e.is_directory),
+        "total_directories": sum(1 for e in entries if e.is_directory),
+    }
+
+
+@router.get("/{source_id}/files/download")
+def download_uploaded_files(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Reconstructs and returns a ZIP built exactly from the stored raw
+    entries — every file's original bytes, and every empty directory
+    entry — so downloading this gives back precisely what was uploaded,
+    the same way downloading a ZIP from Google Drive returns exactly what
+    was put in it.
+    """
+    source = _get_source_or_404(source_id, db)
+    if not _can_access(current_user, source.project):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    latest_job = (
+        db.query(ExtractionJob)
+        .filter(ExtractionJob.source_id == source_id)
+        .order_by(ExtractionJob.created_at.desc())
+        .first()
+    )
+    if not latest_job:
+        raise HTTPException(status_code=404, detail="No upload found for this source.")
+
+    entries = (
+        db.query(UploadedFileEntry)
+        .filter(UploadedFileEntry.job_id == latest_job.id)
+        .order_by(UploadedFileEntry.relative_path)
+        .all()
+    )
+    if not entries:
+        raise HTTPException(status_code=404, detail="No raw files stored for this source's latest upload.")
+
+    import zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for e in entries:
+            if e.is_directory:
+                # A directory entry in a ZIP is just a name ending in "/"
+                # with no data — this is what lets an empty folder survive
+                # a round trip through the archive at all.
+                path = e.relative_path if e.relative_path.endswith("/") else e.relative_path + "/"
+                zf.writestr(path, b"")
+            else:
+                zf.writestr(e.relative_path, e.content or b"")
+
+    buf.seek(0)
+    cn = source.canonical_name if hasattr(source, "canonical_name") and source.canonical_name else source.name
+    cn = str(cn).strip().replace("/", "-").replace("\\", "-").replace(":", "-") or "source"
+    return StreamingResponse(
+        buf, media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{cn}_original_upload.zip"'},
+    )
+
 
 @router.get("/{source_id}/export")
 def export_source(source_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

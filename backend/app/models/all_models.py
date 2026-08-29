@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from sqlalchemy import (
     Column, String, Boolean, Integer, Float, DateTime, Text,
-    ForeignKey, Enum as SAEnum, JSON, UniqueConstraint, Index
+    ForeignKey, Enum as SAEnum, JSON, UniqueConstraint, Index, LargeBinary
 )
 from sqlalchemy.dialects.postgresql import INET
 from sqlalchemy.orm import relationship
@@ -230,9 +230,6 @@ class ProjectResource(Base):
     type = Column(SAEnum(ResourceType), nullable=False)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
-    # For type=file: storage_key points into the storage backend (local disk or S3/R2).
-    # For type=link: url holds the external link.
-    # For type=instruction/sop: body holds the written text.
     storage_key = Column(String(1024), nullable=True)
     file_name = Column(String(512), nullable=True)
     file_size_bytes = Column(Integer, nullable=True)
@@ -295,9 +292,9 @@ class SchemaVersion(Base):
     __tablename__ = "schema_versions"
 
     id = Column(String(36), primary_key=True, default=new_uuid)
-    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)  # nullable: some sources have no fixed schema
+    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)
     version = Column(Integer, nullable=False)
-    definition = Column(JSON, nullable=False)  # Full JSON schema definition
+    definition = Column(JSON, nullable=False)
     is_locked = Column(Boolean, default=False)
     locked_at = Column(DateTime(timezone=True), nullable=True)
     created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
@@ -321,13 +318,10 @@ class Source(Base):
 
     id = Column(String(36), primary_key=True, default=new_uuid)
     project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
-    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)  # nullable: some sources have no fixed schema
+    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     website_url = Column(String(1024), nullable=True)
-    # Groups sources into collapsible sub-folders within a project (e.g.
-    # "Government Agency", "Materials Database") — same folder-tree UI
-    # pattern already used for uploaded records, applied one level up here.
     category = Column(String(255), nullable=True, index=True)
     status = Column(SAEnum(SourceStatus), default=SourceStatus.NOT_STARTED, nullable=False, index=True)
 
@@ -339,9 +333,8 @@ class Source(Base):
     invalid_records = Column(Integer, default=0)
     approved_records = Column(Integer, default=0)
 
-    notes = Column(Text, nullable=True)  # assumptions / free-text notes for the cover sheet
+    notes = Column(Text, nullable=True)
 
-    # Timestamps for performance analytics
     created_at = Column(DateTime(timezone=True), default=now_utc)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
     extraction_started_at = Column(DateTime(timezone=True), nullable=True)
@@ -352,17 +345,6 @@ class Source(Base):
     review_completed_at = Column(DateTime(timezone=True), nullable=True)
     approved_at = Column(DateTime(timezone=True), nullable=True)
     reset_count = Column(Integer, default=0, server_default="0", nullable=False)
-
-    # External integration linkage — lets a Source be traced back to the
-    # item it was pulled from in an external system (Xtrium Catalog IQ is
-    # the first). external_system + external_ref_id together identify the
-    # source item uniquely there; external_synced_at tracks the last time
-    # we successfully talked to that system about this source (pull,
-    # submit, fail-report, or status check). All nullable — sources created
-    # any other way are completely unaffected.
-    external_system = Column(String(100), nullable=True)
-    external_ref_id = Column(String(255), nullable=True, index=True)
-    external_synced_at = Column(DateTime(timezone=True), nullable=True)
 
     created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
 
@@ -380,8 +362,8 @@ class ExtractionJob(Base):
     id = Column(String(36), primary_key=True, default=new_uuid)
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
     source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=True, index=True)
-    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)  # nullable: some sources have no fixed schema
-    schema_version = Column(Integer, nullable=True)  # nullable: no schema means no version
+    schema_id = Column(String(36), ForeignKey("schemas.id"), nullable=True)
+    schema_version = Column(Integer, nullable=True)
     name = Column(String(255), nullable=False)
     source_file_url = Column(String(1024), nullable=True)
     source_file_name = Column(String(512), nullable=True)
@@ -446,10 +428,9 @@ class ExtractedRecord(Base):
 
     id = Column(String(36), primary_key=True, default=new_uuid)
     job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
-    schema_version = Column(Integer, nullable=True)  # nullable: no schema means no version
+    schema_version = Column(Integer, nullable=True)
     extraction_confidence = Column(SAEnum(ExtractionConfidence), nullable=False)
     pipeline_warnings = Column(JSON, default=list)
-    # Schema validation — structural conformance, separate from LLM content checks
     is_schema_valid = Column(Boolean, server_default='true', default=True, nullable=False)
     validation_errors = Column(JSON, server_default='[]', default=list)
     review_status = Column(SAEnum(ReviewStatus), default=ReviewStatus.PENDING, nullable=False)
@@ -461,7 +442,6 @@ class ExtractedRecord(Base):
     llm_field_flags = Column(JSON, default=list)
     llm_reason = Column(Text, nullable=True)
     llm_skipped = Column(Boolean, default=False)
-    # Web verification — cross-check against live source website (Phase 3 LLM stage)
     web_verified = Column(Boolean, nullable=True)
     web_check_flags = Column(JSON, server_default='[]', default=list)
     web_check_summary = Column(Text, nullable=True)
@@ -473,18 +453,14 @@ class ExtractedRecord(Base):
     created_at = Column(DateTime(timezone=True), default=now_utc)
     updated_at = Column(DateTime(timezone=True), default=now_utc, onupdate=now_utc)
 
-    # Admin final review (double-review workflow: reviewer approve -> admin approve)
     admin_review_note       = Column(Text, nullable=True)
     admin_reviewed_by       = Column(String(36), ForeignKey("users.id"), nullable=True)
     admin_reviewed_at       = Column(DateTime(timezone=True), nullable=True)
-    # Revision / correction cycle tracking
     revision_count          = Column(Integer, default=0, server_default="0", nullable=False)
     correction_count        = Column(Integer, default=0, server_default="0", nullable=False)
-    # Time tracking per stage
     extraction_started_at   = Column(DateTime(timezone=True), nullable=True)
     review_started_at       = Column(DateTime(timezone=True), nullable=True)
     admin_review_started_at = Column(DateTime(timezone=True), nullable=True)
-    # Per-field reviewer/admin comments: {field_name: [{comment,user,role,ts,type}]}
     reviewer_field_comments = Column(JSON, default=dict, server_default="{}")
 
     job = relationship("ExtractionJob", back_populates="records")
@@ -529,7 +505,7 @@ class ValidationResult(Base):
     record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="CASCADE"), nullable=False)
     is_valid = Column(Boolean, nullable=False)
     violations = Column(JSON, default=list)
-    validated_by = Column(String(100), nullable=False)  # "system" or user_id
+    validated_by = Column(String(100), nullable=False)
     validated_at = Column(DateTime(timezone=True), default=now_utc)
 
     record = relationship("ExtractedRecord", back_populates="validation_results")
@@ -545,7 +521,7 @@ class SubmissionBatch(Base):
     submitted_by = Column(String(36), ForeignKey("users.id"), nullable=False)
     destination = Column(String(100), nullable=False)
     record_count = Column(Integer, nullable=False)
-    schema_version = Column(Integer, nullable=True)  # nullable: no schema means no version
+    schema_version = Column(Integer, nullable=True)
     payload_sha256 = Column(String(64), nullable=True)
     file_url = Column(String(1024), nullable=True)
     status = Column(String(50), default="completed")
@@ -581,12 +557,6 @@ class AuditLog(Base):
     timestamp = Column(DateTime(timezone=True), default=now_utc, nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=True)
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=True)
-    # NOT enforced as DB-level foreign keys on purpose — audit_log is a
-    # logging table and does not need referential integrity enforced by
-    # Postgres. An in-place ALTER of these constraints (migration 014) left
-    # a corrupted internal RI trigger that broke every subsequent delete
-    # touching extracted_records/extraction_jobs; migration 015 drops them
-    # for good. The columns are still meaningfully typed and indexed.
     source_id = Column(String(36), nullable=True, index=True)
     job_id = Column(String(36), nullable=True)
     record_id = Column(String(36), nullable=True)
@@ -597,3 +567,34 @@ class AuditLog(Base):
     user_agent = Column(Text, nullable=True)
 
     user = relationship("User", back_populates="audit_entries")
+
+
+# ─── Uploaded File Entry (raw preservation) ──────────────────────────────────
+
+class UploadedFileEntry(Base):
+    """
+    Byte-for-byte preservation of every file — and, for ZIP uploads, every
+    empty directory entry — from a folder/ZIP upload. Captured unconditionally
+    at upload time, independent of parsing/classification: an entry exists
+    here regardless of whether it became a record, was recognised as
+    non-data, or was skipped as unrecognised, so nothing from the original
+    upload is ever lost. This is what powers "download exactly what was
+    uploaded" — the raw structure, not the parsed records.
+
+    Empty directories can only be captured from ZIP uploads — a browser's
+    folder-picker input has no way to report an empty folder to the server
+    in the first place, so a folder-picker upload can only ever preserve
+    the files it was actually given, not empty folders alongside them.
+    """
+    __tablename__ = "uploaded_file_entries"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    job_id = Column(String(36), ForeignKey("extraction_jobs.id", ondelete="CASCADE"), nullable=False, index=True)
+    relative_path = Column(String(2048), nullable=False)
+    is_directory = Column(Boolean, default=False, nullable=False)
+    content = Column(LargeBinary, nullable=True)
+    size_bytes = Column(Integer, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+
+    job = relationship("ExtractionJob")
+
