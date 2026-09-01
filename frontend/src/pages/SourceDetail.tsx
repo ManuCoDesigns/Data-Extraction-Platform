@@ -363,9 +363,14 @@ export function SourceDetailPage() {
   }
   useEffect(() => { load(); setRawFilesLoaded(false) }, [projectId, sourceId, validityFilter])
 
+  // Depends on rawFilesLoaded too, not just tab — otherwise resetting the
+  // flag (e.g. after a fresh upload) while already sitting on the Files
+  // tab would never trigger a refetch, since the tab value itself hasn't
+  // changed. This is what let a re-upload silently keep showing whatever
+  // was there before it, until the person navigated away and back.
   useEffect(() => {
     if (tab === 'files' && !rawFilesLoaded) loadRawFiles()
-  }, [tab])
+  }, [tab, rawFilesLoaded])
 
   const userRoles = user?.roles ?? []
   const isAdmin = userRoles.includes('org_admin') || userRoles.includes('project_admin')
@@ -476,6 +481,7 @@ export function SourceDetailPage() {
               setShowUpload(false)
               setFile(null)
               load()
+              setRawFilesLoaded(false)
             } catch (err: any) {
               toast.error(describeUploadError(err))
             } finally {
@@ -506,6 +512,7 @@ export function SourceDetailPage() {
       setShowUpload(false)
       setFile(null)
       load()
+      setRawFilesLoaded(false)
     } catch (err: any) {
       toast.error(describeUploadError(err))
     } finally {
@@ -524,6 +531,7 @@ export function SourceDetailPage() {
       setShowUpload(false)
       setFolderFiles(null)
       load()
+      setRawFilesLoaded(false)
     } catch (err: any) {
       toast.error(describeUploadError(err))
     } finally {
