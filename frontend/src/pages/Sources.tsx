@@ -296,24 +296,24 @@ export function SourcesPage() {
           })}
         </div>
       ) : view === 'kanban' ? (
-        <div className="flex gap-4 overflow-x-auto pb-4">
+        <div className="flex gap-4 overflow-x-auto scrollbar-thin pb-4 -mx-1 px-1">
           {KANBAN_COLUMNS.map(status => {
             const items = filtered.filter(s => s.status === status)
             const meta = STATUS_META[status]
+            const dotColor =
+              meta.color === 'green' ? 'bg-emerald-500' : meta.color === 'amber' ? 'bg-amber-500' :
+              meta.color === 'red' ? 'bg-red-500' : meta.color === 'blue' ? 'bg-blue-500' :
+              meta.color === 'purple' ? 'bg-purple-500' : meta.color === 'indigo' ? 'bg-indigo-500' : 'bg-gray-400'
             return (
-              <div key={status} className="flex-shrink-0 w-72">
+              <div key={status} className="flex-shrink-0 w-72 bg-gray-50/70 rounded-2xl border border-gray-100 p-3">
                 <div className="flex items-center justify-between mb-3 px-1">
-                  <div className="flex items-center gap-2">
-                    <span className={cn('w-2 h-2 rounded-full',
-                      meta.color === 'green' ? 'bg-emerald-500' : meta.color === 'amber' ? 'bg-amber-500' :
-                      meta.color === 'red' ? 'bg-red-500' : meta.color === 'blue' ? 'bg-blue-500' :
-                      meta.color === 'purple' ? 'bg-purple-500' : meta.color === 'indigo' ? 'bg-indigo-500' : 'bg-gray-400'
-                    )} />
-                    <h3 className="text-sm font-semibold text-gray-700">{meta.label}</h3>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={cn('w-2 h-2 rounded-full shrink-0', dotColor)} />
+                    <h3 className="text-sm font-semibold text-gray-700 truncate">{meta.label}</h3>
                   </div>
-                  <span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded-full">{items.length}</span>
+                  <span className="text-xs font-bold text-gray-500 bg-white shadow-sm px-2 py-0.5 rounded-full shrink-0">{items.length}</span>
                 </div>
-                <div className="space-y-2.5 min-h-[60px]">
+                <div className="space-y-2.5 min-h-[60px] max-h-[calc(100vh-320px)] overflow-y-auto scrollbar-thin pr-0.5">
                   {items.map(s => <SourceCard key={s.id} source={s} projectId={s.project_id} projectName={isGlobal ? projectMap[s.project_id] : undefined} />)}
                 </div>
               </div>
@@ -322,7 +322,8 @@ export function SourcesPage() {
         </div>
       ) : (
         <Card className="overflow-hidden">
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto scrollbar-thin">
+            <table className="w-full text-sm">
             <thead>
               <tr className="border-b-2 border-gray-100 bg-gray-50/60 text-[10px] text-gray-400 uppercase tracking-wider">
                 <th className="text-left px-5 py-3 font-bold">Source</th>
@@ -404,6 +405,7 @@ export function SourcesPage() {
               )})}
             </tbody>
           </table>
+          </div>
         </Card>
       )}
 
