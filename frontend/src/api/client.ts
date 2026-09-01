@@ -342,12 +342,18 @@ export const sourcesApi = {
   },
   performanceStats: (projectId?: string) =>
     api.get('/sources/stats/performance', { params: { project_id: projectId } }).then(r => r.data),
+  listFiles: (id: string) =>
+    api.get(`/sources/${id}/files`).then(r => r.data),
+  downloadFiles: async (id: string, filename: string) => {
+    const res = await api.get(`/sources/${id}/files/download`, { responseType: 'blob' })
+    triggerBrowserDownload(res.data, filename)
+  },
 }
 
 // ─── Xtrium Catalog IQ integration ────────────────────────────────────────────
-// Radnyi's system — the master queue of link batches to research. We pull
-// assigned work, extract through our own pipeline, then push results back
-// and check for rework. See backend/app/api/v1/routes/integrations.py.
+// Radnyi/Chetan's system — the master queue of link batches to research. We
+// pull assigned work, extract through our own pipeline, then push results
+// back and check for rework. See backend/app/api/v1/routes/integrations.py.
 export const xtriumApi = {
   pull: (projectId: string, batchSize = 50) =>
     api.post('/integrations/xtrium/pull', { project_id: projectId, batch_size: batchSize }).then(r => r.data),

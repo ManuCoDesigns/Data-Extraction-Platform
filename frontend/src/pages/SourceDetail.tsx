@@ -6,7 +6,7 @@ import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
   Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
-  Folder, AlertTriangle, Zap, Link2
+  Folder, AlertTriangle, File as FileIcon, Zap, Link2
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi, xtriumApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -25,7 +25,7 @@ const STATUS_META: Record<SourceStatus, { label: string; color: 'gray'|'amber'|'
   approved:          { label: 'Approved',          color: 'green' },
 }
 
-type Tab = 'records' | 'details'
+type Tab = 'records' | 'files' | 'details'
 
 export function SourceDetailPage() {
   const { projectId, sourceId } = useParams<{ projectId: string; sourceId: string }>()
@@ -38,7 +38,6 @@ export function SourceDetailPage() {
   const [loading, setLoading] = useState(true)
   const [tab, setTab] = useState<Tab>('records')
 
-  // ── Stage duration formatting — used by the always-visible timing bar ──────
   const formatDuration = (start: string | null | undefined, end: string | null | undefined) => {
     if (!start) return null
     const startD = new Date(start)
@@ -64,119 +63,106 @@ export function SourceDetailPage() {
   const [uploadMode, setUploadMode] = useState<'file' | 'folder'>('file')
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
 
-  // ── Admin review + Timeline ──────────────────────────────────────────────
-  const [adminReviewing, setAdminReviewing] = useState(false)
-  const [showTimeline, setShowTimeline] = useState<string | null>(null)
-  const [timeline, setTimeline] = useState<any>(null)
-  const [timelineLoading, setTimelineLoading] = useState(false)
-  const [fieldComments, setFieldComments] = useState<Record<string, string>>({})
-  const [adminNote, setAdminNote] = useState('')
+  // ── Raw uploaded files (exact original structure, independent of records) ──
+  const [rawFiles, setRawFiles] = useState<{ relative_path: string; is_directory: boolean; size_bytes: number }[]>([])
+  const [rawFilesLoading, setRawFilesLoading] = useState(false)
+  const [rawFilesLoaded, setRawFilesLoaded] = useState(false)
+  const [downloadingFiles, setDownloadingFiles] = useState(false)
+  const [collapsedRawFolders, setCollapsedRawFolders] = useState<Set<string>>(new Set())
 
-  const loadTimeline = async (recordId: string) => {
+  const loadRawFiles = async () => {
     if (!sourceId) return
-    setShowTimeline(recordId)
-    setTimelineLoading(true)
+    setRawFilesLoading(true)
     try {
-      const t = await sourcesApi.getTimeline(sourceId, recordId)
-      setTimeline(t)
+      const r = await sourcesApi.listFiles(sourceId)
+      setRawFiles(r?.entries ?? [])
     } catch {
-      setTimeline(null)
+      setRawFiles([])
     } finally {
-      setTimelineLoading(false)
+      setRawFilesLoading(false)
+      setRawFilesLoaded(true)
     }
   }
 
-  const handleAdminReview = async (recordId: string, action: 'approve' | 'return') => {
-    if (!sourceId) return
-    setAdminReviewing(true)
+  const handleDownloadOriginal = async () => {
+    if (!sourceId || !source) return
+    setDownloadingFiles(true)
     try {
-      await sourcesApi.adminReview(sourceId, recordId, { action, note: adminNote, field_comments: fieldComments })
-      toast.success(action === 'approve' ? 'Record fully approved' : 'Record returned for correction')
-      setAdminNote('')
-      setFieldComments({})
-      setShowTimeline(null)
-      load()
+      await sourcesApi.downloadFiles(sourceId, `${source.name.replace(/[^a-z0-9]/gi, '_')}_original_upload.zip`)
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Admin review failed')
+      toast.error(err?.response?.data?.detail || 'Download failed')
     } finally {
-      setAdminReviewing(false)
+      setDownloadingFiles(false)
     }
   }
 
-  // ── Folder / subfolder grouping ──────────────────────────────────────────
-  // Records uploaded via folder-picker or ZIP carry `_source_file` (full
-  // relative path e.g. "NETL_METALLIC/subfolder/id_72.json") in extracted_fields.
-  // Build a tree of folders + records so the UI mirrors the uploaded structure.
-  type DisplayItem =
+  // Groups the flat raw-file list into a folder tree for display, the same
+  // pattern already used for the records folder tree below.
+  type RawDisplayItem =
     | { kind: 'folder'; path: string; depth: number; count: number }
-    | { kind: 'record'; record: any; depth: number }
+    | { kind: 'file'; entry: { relative_path: string; is_directory: boolean; size_bytes: number }; depth: number }
 
-  const displayItems = useMemo<DisplayItem[]>(() => {
-    const hasFolders = records.some(r => typeof r.extracted_fields?._source_file === 'string' && r.extracted_fields._source_file.includes('/'))
-    if (!hasFolders) {
-      return records.map(r => ({ kind: 'record', record: r, depth: 0 } as DisplayItem))
-    }
+  const rawDisplayItems = useMemo<RawDisplayItem[]>(() => {
+    type Node = { files: typeof rawFiles; children: Map<string, Node> }
+    const root: Node = { files: [], children: new Map() }
 
-    type Node = { records: any[]; children: Map<string, Node> }
-    const root: Node = { records: [], children: new Map() }
-
-    for (const r of records) {
-      const sf = r.extracted_fields?._source_file as string | undefined
-      if (!sf || !sf.includes('/')) { root.records.push(r); continue }
-      const parts = sf.split('/')
+    for (const e of rawFiles) {
+      const cleanPath = e.relative_path.endsWith('/') ? e.relative_path.slice(0, -1) : e.relative_path
+      const parts = cleanPath.split('/').filter(Boolean)
+      if (e.is_directory) {
+        let node = root
+        for (const part of parts) {
+          if (!node.children.has(part)) node.children.set(part, { files: [], children: new Map() })
+          node = node.children.get(part)!
+        }
+        continue
+      }
       const folderParts = parts.slice(0, -1)
       let node = root
       for (const part of folderParts) {
-        if (!node.children.has(part)) node.children.set(part, { records: [], children: new Map() })
+        if (!node.children.has(part)) node.children.set(part, { files: [], children: new Map() })
         node = node.children.get(part)!
       }
-      node.records.push(r)
+      node.files.push(e)
     }
 
     const countAll = (node: Node): number => {
-      let n = node.records.length
+      let n = node.files.length
       for (const child of node.children.values()) n += countAll(child)
       return n
     }
 
-    const items: DisplayItem[] = []
-    for (const r of root.records) items.push({ kind: 'record', record: r, depth: 0 })
+    const items: RawDisplayItem[] = []
+    for (const e of root.files) items.push({ kind: 'file', entry: e, depth: 0 })
 
     const walk = (node: Node, pathPrefix: string, depth: number) => {
       const sorted = Array.from(node.children.entries()).sort((a, b) => a[0].localeCompare(b[0]))
       for (const [name, child] of sorted) {
         const fullPath = pathPrefix ? `${pathPrefix}/${name}` : name
         items.push({ kind: 'folder', path: fullPath, depth, count: countAll(child) })
-        if (!collapsedFolders.has(fullPath)) {
-          for (const r of child.records) items.push({ kind: 'record', record: r, depth: depth + 1 })
+        if (!collapsedRawFolders.has(fullPath)) {
+          for (const e of child.files) items.push({ kind: 'file', entry: e, depth: depth + 1 })
           walk(child, fullPath, depth + 1)
         }
       }
     }
     walk(root, '', 0)
     return items
-  }, [records, collapsedFolders])
+  }, [rawFiles, collapsedRawFolders])
 
-  const [showAssign, setShowAssign] = useState(false)
-  const [editRecord, setEditRecord] = useState<any | null>(null)
-  const [editFields, setEditFields] = useState<Record<string, string>>({})
-  const [savingEdit, setSavingEdit] = useState(false)
-  const [deleteSourceConfirm, setDeleteSourceConfirm] = useState(false)
-  const [showReset, setShowReset] = useState(false)
-  const [resetting, setResetting] = useState(false)
-  const [resetClearRecords, setResetClearRecords] = useState(true)
-  const [resetReason, setResetReason] = useState('')
-  const [deleteRecord, setDeleteRecord] = useState<any | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  // New capabilities
-  const [schemaDefinition, setSchemaDefinition] = useState<any>(null)
-  const [showSchemaPanel, setShowSchemaPanel] = useState(false)
-  const [scraping, setScraping] = useState(false)
-  const [verifying, setVerifying] = useState(false)
-  const [verifyResult, setVerifyResult] = useState<any>(null)
-  const [showVerifyResult, setShowVerifyResult] = useState(false)
-  // JSON Record Viewer
-  const [activeRecordIndex, setActiveRecordIndex] = useState<number | null>(null)
+  const toggleRawFolder = (path: string) => {
+    setCollapsedRawFolders(prev => {
+      const next = new Set(prev)
+      if (next.has(path)) next.delete(path); else next.add(path)
+      return next
+    })
+  }
+
+  const formatBytes = (n: number) => {
+    if (n < 1024) return `${n} B`
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+    return `${(n / 1024 / 1024).toFixed(1)} MB`
+  }
 
   // ── Xtrium Catalog IQ integration ──────────────────────────────────────────
   const [showReportFailure, setShowReportFailure] = useState(false)
@@ -238,9 +224,115 @@ export function SourceDetailPage() {
     }
   }
 
+  const [adminReviewing, setAdminReviewing] = useState(false)
+  const [showTimeline, setShowTimeline] = useState<string | null>(null)
+  const [timeline, setTimeline] = useState<any>(null)
+  const [timelineLoading, setTimelineLoading] = useState(false)
+  const [fieldComments, setFieldComments] = useState<Record<string, string>>({})
+  const [adminNote, setAdminNote] = useState('')
+
+  const loadTimeline = async (recordId: string) => {
+    if (!sourceId) return
+    setShowTimeline(recordId)
+    setTimelineLoading(true)
+    try {
+      const t = await sourcesApi.getTimeline(sourceId, recordId)
+      setTimeline(t)
+    } catch {
+      setTimeline(null)
+    } finally {
+      setTimelineLoading(false)
+    }
+  }
+
+  const handleAdminReview = async (recordId: string, action: 'approve' | 'return') => {
+    if (!sourceId) return
+    setAdminReviewing(true)
+    try {
+      await sourcesApi.adminReview(sourceId, recordId, { action, note: adminNote, field_comments: fieldComments })
+      toast.success(action === 'approve' ? 'Record fully approved' : 'Record returned for correction')
+      setAdminNote('')
+      setFieldComments({})
+      setShowTimeline(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Admin review failed')
+    } finally {
+      setAdminReviewing(false)
+    }
+  }
+
+  type DisplayItem =
+    | { kind: 'folder'; path: string; depth: number; count: number }
+    | { kind: 'record'; record: any; depth: number }
+
+  const displayItems = useMemo<DisplayItem[]>(() => {
+    const hasFolders = records.some(r => typeof r.extracted_fields?._source_file === 'string' && r.extracted_fields._source_file.includes('/'))
+    if (!hasFolders) {
+      return records.map(r => ({ kind: 'record', record: r, depth: 0 } as DisplayItem))
+    }
+
+    type Node = { records: any[]; children: Map<string, Node> }
+    const root: Node = { records: [], children: new Map() }
+
+    for (const r of records) {
+      const sf = r.extracted_fields?._source_file as string | undefined
+      if (!sf || !sf.includes('/')) { root.records.push(r); continue }
+      const parts = sf.split('/')
+      const folderParts = parts.slice(0, -1)
+      let node = root
+      for (const part of folderParts) {
+        if (!node.children.has(part)) node.children.set(part, { records: [], children: new Map() })
+        node = node.children.get(part)!
+      }
+      node.records.push(r)
+    }
+
+    const countAll = (node: Node): number => {
+      let n = node.records.length
+      for (const child of node.children.values()) n += countAll(child)
+      return n
+    }
+
+    const items: DisplayItem[] = []
+    for (const r of root.records) items.push({ kind: 'record', record: r, depth: 0 })
+
+    const walk = (node: Node, pathPrefix: string, depth: number) => {
+      const sorted = Array.from(node.children.entries()).sort((a, b) => a[0].localeCompare(b[0]))
+      for (const [name, child] of sorted) {
+        const fullPath = pathPrefix ? `${pathPrefix}/${name}` : name
+        items.push({ kind: 'folder', path: fullPath, depth, count: countAll(child) })
+        if (!collapsedFolders.has(fullPath)) {
+          for (const r of child.records) items.push({ kind: 'record', record: r, depth: depth + 1 })
+          walk(child, fullPath, depth + 1)
+        }
+      }
+    }
+    walk(root, '', 0)
+    return items
+  }, [records, collapsedFolders])
+
+  const [showAssign, setShowAssign] = useState(false)
+  const [editRecord, setEditRecord] = useState<any | null>(null)
+  const [editFields, setEditFields] = useState<Record<string, string>>({})
+  const [savingEdit, setSavingEdit] = useState(false)
+  const [deleteSourceConfirm, setDeleteSourceConfirm] = useState(false)
+  const [showReset, setShowReset] = useState(false)
+  const [resetting, setResetting] = useState(false)
+  const [resetClearRecords, setResetClearRecords] = useState(true)
+  const [resetReason, setResetReason] = useState('')
+  const [deleteRecord, setDeleteRecord] = useState<any | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [schemaDefinition, setSchemaDefinition] = useState<any>(null)
+  const [showSchemaPanel, setShowSchemaPanel] = useState(false)
+  const [scraping, setScraping] = useState(false)
+  const [verifying, setVerifying] = useState(false)
+  const [verifyResult, setVerifyResult] = useState<any>(null)
+  const [showVerifyResult, setShowVerifyResult] = useState(false)
+  const [activeRecordIndex, setActiveRecordIndex] = useState<number | null>(null)
+
   const load = () => {
     if (!projectId || !sourceId) return
-    // Load each piece independently so one failure doesn't wipe all data
     projectsApi.get(projectId).then(setProject).catch(() => {})
     sourcesApi.get(sourceId).then(setSource).catch(() => {})
     sourcesApi.records(sourceId, { validity: validityFilter || undefined, page_size: 200 })
@@ -252,7 +344,11 @@ export function SourceDetailPage() {
     sourcesApi.schema(sourceId).then(setSchemaDefinition).catch(() => {})
     setLoading(false)
   }
-  useEffect(() => { load() }, [projectId, sourceId, validityFilter])
+  useEffect(() => { load(); setRawFilesLoaded(false) }, [projectId, sourceId, validityFilter])
+
+  useEffect(() => {
+    if (tab === 'files' && !rawFilesLoaded) loadRawFiles()
+  }, [tab])
 
   const userRoles = user?.roles ?? []
   const isAdmin = userRoles.includes('org_admin') || userRoles.includes('project_admin')
@@ -262,17 +358,9 @@ export function SourceDetailPage() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [splitStatus, setSplitStatus] = useState<string | null>(null)
 
-  // Files above this size get automatically split client-side before
-  // upload, so the server never has to hold a huge file fully in memory —
-  // this is the same idea as the manual split_large_json.py script, just
-  // built into the upload flow so nobody has to run it by hand.
-  const AUTO_SPLIT_THRESHOLD_BYTES = 40 * 1024 * 1024   // 40MB
-  const SPLIT_CHUNK_TARGET_BYTES   = 20 * 1024 * 1024   // ~20MB per chunk
+  const AUTO_SPLIT_THRESHOLD_BYTES = 40 * 1024 * 1024
+  const SPLIT_CHUNK_TARGET_BYTES   = 20 * 1024 * 1024
 
-  // Splits a JSON-array file into several smaller JSON files in memory.
-  // Returns null if the file isn't a splittable JSON array (caller falls
-  // back to a normal single-file upload, or an explanatory error for
-  // types that can't be safely auto-split).
   const splitJsonFile = async (f: File): Promise<File[] | null> => {
     const text = await f.text()
     let data: any
@@ -302,7 +390,6 @@ export function SourceDetailPage() {
     return chunks
   }
 
-  // Splits a CSV file by rows, keeping the header row in every chunk.
   const splitCsvFile = (f: File, text: string): File[] => {
     const lines = text.split(/\r?\n/)
     const header = lines[0]
@@ -331,8 +418,6 @@ export function SourceDetailPage() {
     return chunks
   }
 
-  // Turns any axios error into a specific, actionable toast message instead
-  // of a generic "Upload failed" — pins down exactly what went wrong.
   const describeUploadError = (err: any): string => {
     if (!err?.response) {
       if (err?.code === 'ECONNABORTED' || /timeout/i.test(err?.message || '')) {
@@ -355,8 +440,6 @@ export function SourceDetailPage() {
     if (folderFiles && folderFiles.length > 0) return handleFolderUpload()
     if (!file) return
 
-    // Auto-split large JSON/CSV files transparently, then route through
-    // the same folder-upload path — the person never has to think about it.
     if (file.size > AUTO_SPLIT_THRESHOLD_BYTES) {
       const ext = file.name.toLowerCase().split('.').pop()
       if (ext === 'json' || ext === 'csv') {
@@ -386,7 +469,6 @@ export function SourceDetailPage() {
           }
         } catch {
           setSplitStatus(null)
-          // fall through to normal upload attempt below if splitting failed
         }
       } else {
         toast.error(`This ${ext?.toUpperCase()} file is ${(file.size / 1024 / 1024).toFixed(0)}MB — automatic splitting only works for JSON/CSV. Use Folder Upload with pre-split files instead.`)
@@ -529,16 +611,13 @@ export function SourceDetailPage() {
     if (!sourceId) return
     setSubmitting(true)
     try {
-      // Find the job for this source then submit it
       const jobs = await jobsApi.list({ source_id: sourceId, page_size: 10 })
       const sourceJobs = (jobs.items || jobs || []).filter((j: any) => j.source_id === sourceId || j.project_id)
 
-      // Try submitting each job that has approved records
       let submitted = false
       for (const job of sourceJobs) {
         try {
           const resp = await submissionApi.submit(job.id)
-          // Download the file
           const blob = new Blob([resp.data], { type: 'application/json' })
           const url = URL.createObjectURL(blob)
           const a = document.createElement('a')
@@ -564,7 +643,8 @@ export function SourceDetailPage() {
     }
   }
 
-  const handleUpdateSource = async () => {    if (!sourceId) return
+  const handleUpdateSource = async () => {
+    if (!sourceId) return
     try {
       await sourcesApi.update(sourceId, {
         name: editSourceForm.name,
@@ -593,7 +673,8 @@ export function SourceDetailPage() {
     } finally { setResetting(false) }
   }
 
-  const handleDeleteRecord = async () => {    if (!deleteRecord || !sourceId) return
+  const handleDeleteRecord = async () => {
+    if (!deleteRecord || !sourceId) return
     setDeleting(true)
     try {
       await sourcesApi.deleteRecord(sourceId, deleteRecord.id)
@@ -635,7 +716,6 @@ export function SourceDetailPage() {
   if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
   if (!source) return <EmptyState title="Source not found" />
 
-  // ── If a record is open, portal the viewer to <body> so app shell can't clip it ──
   if (activeRecordIndex !== null && records[activeRecordIndex]) {
     return (
       <div style={{ position: 'fixed', inset: 0, zIndex: 9999, overflow: 'hidden' }}>
@@ -660,8 +740,6 @@ export function SourceDetailPage() {
   }
 
   const meta = STATUS_META[source.status]
-  // Show Approve button for any reviewer/admin whenever source is not yet approved
-  // Don't gatekeep on source.total_records (counter can lag) — backend validates
   const canApproveSource = (isReviewer || isAdmin) && source.status !== 'approved'
   const allRecordsApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
   const pendingCount = records.filter(r => r.review_status === 'pending').length
@@ -827,7 +905,6 @@ export function SourceDetailPage() {
         </div>
       </div>
 
-      {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
           { label: 'Total Records', value: source.total_records, icon: '📋', top: '#6366f1', bg: '#eef2ff', val: '#4338ca' },
@@ -850,7 +927,6 @@ export function SourceDetailPage() {
         ))}
       </div>
 
-      {/* Team assignment row */}
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
         {[
           { role: 'Extractor', emoji: '⛏️', field: 'assigned_extractor_id' as const, name: source.assigned_extractor_name, id: source.assigned_extractor_id },
@@ -877,9 +953,8 @@ export function SourceDetailPage() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={{ display: 'flex', gap: 4, padding: '4px', background: '#f1f5f9', borderRadius: 12, alignSelf: 'flex-start' }}>
-        {(['records', 'details'] as Tab[]).map(t => (
+        {(['records', 'files', 'details'] as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '7px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
             fontSize: 13, fontWeight: 600, transition: 'all 0.15s',
@@ -887,7 +962,7 @@ export function SourceDetailPage() {
             color: tab === t ? '#1d4ed8' : '#64748b',
             boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
           }}>
-            {t === 'records' ? `Records (${records.length})` : 'Details & Notes'}
+            {t === 'records' ? `Records (${records.length})` : t === 'files' ? 'Files' : 'Details & Notes'}
           </button>
         ))}
       </div>
@@ -895,7 +970,6 @@ export function SourceDetailPage() {
       {tab === 'records' && (
         <div className="space-y-4">
 
-          {/* ── Timing bar — always visible, survives resets and delivery ── */}
           {(source.extraction_started_at || (source as any).llm_verification_started_at || source.review_started_at) && (
             <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12,
               padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center',
@@ -935,7 +1009,6 @@ export function SourceDetailPage() {
             </div>
           )}
 
-          {/* ── Escalation banner — sent-back records with feedback, shown prominently ── */}
           {(() => {
             const escalated = records.filter((r: any) =>
               (r.correction_count ?? 0) > 0 &&
@@ -996,7 +1069,6 @@ export function SourceDetailPage() {
             )
           })()}
 
-          {/* ── Workflow next-step banner ── */}
           {source.status === 'approved' ? (
             <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 12, padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
               <CheckCircle size={16} color="#059669" />
@@ -1078,7 +1150,6 @@ export function SourceDetailPage() {
           </div>
 
           <div className={cn('flex gap-4', showSchemaPanel ? 'items-start' : '')}>
-            {/* Schema reference panel */}
             {showSchemaPanel && schemaDefinition && (
               <div className="w-72 shrink-0">
                 <Card className="p-4 sticky top-4">
@@ -1128,7 +1199,6 @@ export function SourceDetailPage() {
               </div>
             )}
 
-            {/* Records table */}
             <div className="flex-1 min-w-0">
 
           {records.length === 0 ? (
@@ -1322,8 +1392,85 @@ export function SourceDetailPage() {
               </div>
             </Card>
           )}
-            </div>{/* end flex-1 records table */}
-          </div>{/* end schema panel + records flex row */}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {tab === 'files' && (
+        <div className="space-y-4">
+          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <FileIcon style={{ width: 18, height: 18, color: '#2563eb', flexShrink: 0 }} />
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: '#1e3a8a', margin: 0 }}>
+                Exact original upload — {rawFiles.filter(f => !f.is_directory).length} file{rawFiles.filter(f => !f.is_directory).length !== 1 ? 's' : ''}
+                {rawFiles.some(f => f.is_directory) ? `, ${rawFiles.filter(f => f.is_directory).length} folder${rawFiles.filter(f => f.is_directory).length !== 1 ? 's' : ''}` : ''}
+              </p>
+              <p style={{ fontSize: 12, color: '#1d4ed8', margin: '2px 0 0' }}>
+                Every file exactly as uploaded, independent of what was turned into records — only some of these may be primary data.
+              </p>
+            </div>
+            <Button size="sm" onClick={handleDownloadOriginal} loading={downloadingFiles} disabled={rawFiles.length === 0}
+              style={{ background: '#2563eb', border: 'none', color: '#fff', flexShrink: 0 }}>
+              <Download className="w-3.5 h-3.5" /> Download Original
+            </Button>
+          </div>
+
+          {rawFilesLoading ? (
+            <div className="flex justify-center py-12"><Spinner className="w-6 h-6" /></div>
+          ) : rawFiles.length === 0 ? (
+            <EmptyState title="No raw files stored" description="This source's current upload predates raw-file preservation, or hasn't been uploaded yet." />
+          ) : (
+            <Card className="overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Name</th>
+                      <th style={{ textAlign: 'right', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Size</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {rawDisplayItems.map((item) => {
+                      if (item.kind === 'folder') {
+                        const isCollapsed = collapsedRawFolders.has(item.path)
+                        return (
+                          <tr key={'rawfolder-' + item.path}
+                            onClick={() => toggleRawFolder(item.path)}
+                            style={{ cursor: 'pointer', background: '#f8fafc' }}
+                            className="hover:bg-gray-100 transition">
+                            <td colSpan={2} style={{ padding: '7px 16px', paddingLeft: 16 + item.depth * 20 }}>
+                              <div className="flex items-center gap-2">
+                                {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
+                                <Folder className="w-3.5 h-3.5 text-amber-500" />
+                                <span className="text-xs font-semibold text-gray-600">{item.path.split('/').pop()}</span>
+                                <span className="text-xs text-gray-400">
+                                  {item.count === 0 ? '(empty folder)' : `(${item.count} item${item.count !== 1 ? 's' : ''})`}
+                                </span>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      }
+                      const e = item.entry
+                      const name = e.relative_path.split('/').filter(Boolean).pop() || e.relative_path
+                      return (
+                        <tr key={'rawfile-' + e.relative_path} className="hover:bg-slate-50 transition">
+                          <td className="px-5 py-2.5" style={{ paddingLeft: 20 + item.depth * 20 }}>
+                            <div className="flex items-center gap-2">
+                              <FileIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+                              <span className="text-sm text-gray-800 font-mono truncate max-w-[420px]" title={e.relative_path}>{name}</span>
+                            </div>
+                          </td>
+                          <td className="px-5 py-2.5 text-right text-xs text-gray-500">{formatBytes(e.size_bytes)}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          )}
         </div>
       )}
 
@@ -1363,11 +1510,9 @@ export function SourceDetailPage() {
         </div>
       )}
 
-      {/* Upload modal */}
       <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Add extracted data to this source.">
         <form onSubmit={handleUpload} className="flex flex-col" style={{ maxHeight: '72vh' }}>
 
-          {/* Scrollable body */}
           <div className="overflow-y-auto scrollbar-thin -mx-6 px-6 space-y-4" style={{ paddingBottom: 4 }}>
 
             {source.total_records > 0 && (
@@ -1376,7 +1521,6 @@ export function SourceDetailPage() {
               </div>
             )}
 
-            {/* Mode tabs */}
             <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
               {([
                 { key: 'file',   label: 'File',   icon: Upload },
@@ -1396,7 +1540,6 @@ export function SourceDetailPage() {
               ))}
             </div>
 
-            {/* FILE mode */}
             {uploadMode === 'file' && (
               <>
                 <div
@@ -1442,7 +1585,6 @@ export function SourceDetailPage() {
               </>
             )}
 
-            {/* FOLDER mode */}
             {uploadMode === 'folder' && (
               <div
                 onClick={() => !uploading && folderRef.current?.click()}
@@ -1479,7 +1621,6 @@ export function SourceDetailPage() {
               </div>
             )}
 
-            {/* Compact file-type legend */}
             <details className="group">
               <summary className="text-xs text-gray-400 cursor-pointer select-none flex items-center gap-1 hover:text-gray-600">
                 <ChevronDown className="w-3 h-3 transition group-open:rotate-180" /> What file types are supported?
@@ -1504,7 +1645,6 @@ export function SourceDetailPage() {
             </details>
           </div>
 
-          {/* Auto-split indicator — shown briefly while a large file is chunked client-side */}
           {splitStatus && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
               background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10 }}>
@@ -1515,10 +1655,10 @@ export function SourceDetailPage() {
             </div>
           )}
 
-          {/* Live progress bar — real bytes-sent percentage, not a spinner */}
           {uploading && (
             <div style={{ padding: '0 0 4px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
                   {uploadProgress < 100 ? 'Uploading…' : 'Processing on server…'}
                 </span>
                 <span style={{ fontSize: 11, color: '#64748b', fontWeight: 700 }}>
@@ -1535,7 +1675,6 @@ export function SourceDetailPage() {
             </div>
           )}
 
-          {/* Sticky footer */}
           <div className="flex justify-end gap-3 pt-4 mt-2 border-t border-gray-100">
             <Button variant="secondary" type="button" onClick={() => setShowUpload(false)} disabled={uploading}>Cancel</Button>
             <Button type="submit" loading={uploading} disabled={!file && !(folderFiles && folderFiles.length > 0)}>
@@ -1550,7 +1689,6 @@ export function SourceDetailPage() {
         </form>
       </Modal>
 
-      {/* Edit record modal */}
       <Modal open={!!editRecord} onClose={() => setEditRecord(null)} title="Fix Record" size="md">
         {editRecord && (
           <div className="space-y-4">
@@ -1595,7 +1733,6 @@ export function SourceDetailPage() {
         onCancel={() => setDeleteRecord(null)}
       />
 
-      {/* Edit Source modal */}
       <Modal open={showEditSource} onClose={() => setShowEditSource(false)} title="Edit Source" description="Update the source name, description, or website URL.">
         <div className="space-y-4">
           <Input label="Source Name" value={editSourceForm.name}
@@ -1618,7 +1755,6 @@ export function SourceDetailPage() {
         </div>
       </Modal>
 
-      {/* Schema full JSON view modal */}
       <Modal open={showSchemaJson} onClose={() => setShowSchemaJson(false)} title={schemaDefinition?.name || 'Schema Definition'} size="lg">
         <div style={{ height: 500, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
           <textarea readOnly value={JSON.stringify(schemaDefinition, null, 2)}
@@ -1632,7 +1768,6 @@ export function SourceDetailPage() {
         </div>
       </Modal>
 
-      {/* Reset Source modal */}
       <Modal open={showReset} onClose={() => !resetting && setShowReset(false)} title="Reset Source" description="This will undo all extraction progress and allow the source to be re-extracted from scratch.">
         <div className="space-y-4">
           <div className="bg-orange-50 border border-orange-200 rounded-xl p-4 text-sm text-orange-800">
@@ -1692,9 +1827,6 @@ export function SourceDetailPage() {
         </div>
       </Modal>
 
-      {/* Full-screen JSON Record Viewer */}
-
-      {/* Timeline + Admin Review Modal */}
       {showTimeline && createPortal(
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex',
           alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }}
@@ -1721,7 +1853,6 @@ export function SourceDetailPage() {
               <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>Could not load timeline</div>
             ) : (
               <div>
-                {/* Admin final review panel */}
                 {isAdmin && timeline.current_status === 'pending_admin_review' && (
                   <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12,
                     padding: '14px 16px', marginBottom: 18 }}>
@@ -1750,7 +1881,6 @@ export function SourceDetailPage() {
                   </div>
                 )}
 
-                {/* Status summary badges */}
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                   {[
                     { label: 'Current', value: timeline.current_status.replace(/_/g, ' '), color: '#2563eb' },
@@ -1765,7 +1895,6 @@ export function SourceDetailPage() {
                   ))}
                 </div>
 
-                {/* Timeline events */}
                 <div style={{ position: 'relative', marginBottom: 16 }}>
                   <div style={{ position: 'absolute', left: 15, top: 0, bottom: 0, width: 2, background: '#e2e8f0' }} />
                   {(timeline.events || []).map((ev: any, i: number) => (
@@ -1807,7 +1936,6 @@ export function SourceDetailPage() {
                   )}
                 </div>
 
-                {/* Field comments */}
                 {timeline.reviewer_field_comments && Object.keys(timeline.reviewer_field_comments).length > 0 && (
                   <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
                     <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 10 }}>Field Comments</p>
