@@ -36,6 +36,8 @@ export function SourceDetailPage() {
   const [records, setRecords] = useState<any[]>([])
   const [members, setMembers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
+  const [sourceNotFound, setSourceNotFound] = useState(false)
+  const [sourceLoadError, setSourceLoadError] = useState(false)
   const [tab, setTab] = useState<Tab>('records')
 
   const formatDuration = (start: string | null | undefined, end: string | null | undefined) => {
@@ -333,8 +335,24 @@ export function SourceDetailPage() {
 
   const load = () => {
     if (!projectId || !sourceId) return
+    setLoading(true)
+    setSourceNotFound(false)
+    setSourceLoadError(false)
     projectsApi.get(projectId).then(setProject).catch(() => {})
-    sourcesApi.get(sourceId).then(setSource).catch(() => {})
+    // This is the one fetch that gates the page: `loading` only clears once
+    // it actually settles, success or failure — never before, which is what
+    // previously caused a "Source not found" flash on every visit (loading
+    // was cleared immediately, before this had a chance to resolve). A real
+    // 404 shows "not found"; any other failure (network blip, server error,
+    // Railway cold start) shows a distinct retry message instead of
+    // wrongly claiming the source doesn't exist.
+    sourcesApi.get(sourceId)
+      .then(setSource)
+      .catch((err: any) => {
+        if (err?.response?.status === 404) setSourceNotFound(true)
+        else setSourceLoadError(true)
+      })
+      .finally(() => setLoading(false))
     sourcesApi.records(sourceId, { validity: validityFilter || undefined, page_size: 200 })
       .then((r: any) => setRecords(r?.items ?? []))
       .catch(() => toast.error('Could not load records — refresh to retry'))
@@ -342,7 +360,6 @@ export function SourceDetailPage() {
       .then((m: any) => setMembers(m.map((x: any) => ({ id: x.user_id, full_name: x.full_name, email: x.email }))))
       .catch(() => {})
     sourcesApi.schema(sourceId).then(setSchemaDefinition).catch(() => {})
-    setLoading(false)
   }
   useEffect(() => { load(); setRawFilesLoaded(false) }, [projectId, sourceId, validityFilter])
 
@@ -714,7 +731,15 @@ export function SourceDetailPage() {
   }
 
   if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
-  if (!source) return <EmptyState title="Source not found" />
+  if (sourceNotFound) return <EmptyState title="Source not found" description="It may have been deleted, or the link is incorrect." />
+  if (sourceLoadError) return (
+    <EmptyState
+      title="Couldn't load this source"
+      description="A connection or server issue got in the way — this usually resolves on retry."
+      action={<Button onClick={load}><RotateCcw className="w-4 h-4" /> Retry</Button>}
+    />
+  )
+  if (!source) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
 
   if (activeRecordIndex !== null && records[activeRecordIndex]) {
     return (
