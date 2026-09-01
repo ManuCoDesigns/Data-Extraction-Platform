@@ -39,6 +39,29 @@ const SITE_ICONS: Record<string, string> = {
 const TIER_COLORS = ['', '#3b82f6', '#f59e0b', '#64748b']
 const TIER_LABELS = ['', 'Tier 1 — Extraction', 'Tier 2 — Processing', 'Tier 3 — Trading']
 
+// Small helper for a consistent section header: gradient icon badge + label +
+// optional count pill. Used across every section card below so the visual
+// rhythm matches the rest of the app (Dashboard/SourceDetail/Files review).
+function SectionHeader({ icon, label, count, grad }: { icon: string; label: string; count?: number; grad: string }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+      <div style={{
+        width: 28, height: 28, borderRadius: 9, flexShrink: 0,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 14, background: grad, boxShadow: '0 2px 6px rgba(0,0,0,0.12)',
+      }}>{icon}</div>
+      <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, flex: 1 }}>
+        {label}
+      </p>
+      {count !== undefined && (
+        <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 9px', borderRadius: 20, background: grad, color: '#fff' }}>
+          {count}
+        </span>
+      )}
+    </div>
+  )
+}
+
 // ── Editable field ─────────────────────────────────────────────────────────────
 function EditField({ label, value, field, onSave, required, isExtra }: {
   label: string; value: unknown; field: string
@@ -68,7 +91,7 @@ function EditField({ label, value, field, onSave, required, isExtra }: {
               onKeyDown={e => { if (e.key === 'Enter') { onSave(field, draft); setEditing(false) } if (e.key === 'Escape') setEditing(false) }}
               style={{ flex: 1, padding: '4px 8px', fontSize: 13, border: '1.5px solid #3b82f6', borderRadius: 6, outline: 'none', fontFamily: 'var(--font-mono)' }} />
             <button onClick={() => { onSave(field, draft); setEditing(false) }}
-              style={{ padding: '4px 10px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>Save</button>
+              style={{ padding: '4px 10px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12,fontWeight: 600 }}>Save</button>
           </div>
         ) : (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 24, cursor: 'text' }}
@@ -156,20 +179,27 @@ export function JsonRecordViewer({
   const companyName = String(localFields.company_name || localFields.material_name || 'Record')
   const website = localFields.website as string | null
 
+  const progressPct = Math.round(((currentIndex + 1) / allRecords.length) * 100)
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#f8fafc', zIndex: 9999, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
+
+      {/* ── Progress rail — thin gradient bar showing position in the queue ── */}
+      <div style={{ height: 3, background: '#f1f5f9', flexShrink: 0 }}>
+        <div style={{ height: '100%', width: `${progressPct}%`, background: 'linear-gradient(90deg,#6366f1,#8b5cf6)', transition: 'width 0.3s ease' }} />
+      </div>
 
       {/* ── TOP BAR ─────────────────────────────────────────────────────── */}
       <div style={{ background: '#fff', borderBottom: '1px solid #e2e8f0', padding: '0 24px', display: 'flex', alignItems: 'center', gap: 16, height: 56, flexShrink: 0, boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
         {/* Nav */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
           <button onClick={() => onNavigate(currentIndex - 1)} disabled={currentIndex === 0}
-            style={{ padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff', cursor: currentIndex === 0 ? 'not-allowed' : 'pointer', opacity: currentIndex === 0 ? 0.4 : 1 }}>
+            style={{ padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff', cursor: currentIndex === 0 ? 'not-allowed' : 'pointer', opacity: currentIndex === 0 ? 0.4 : 1, transition: 'all 0.15s' }}>
             <ChevronLeft size={14} color="#64748b" />
           </button>
-          <span style={{ fontSize: 12, color: '#64748b', padding: '0 4px', minWidth: 60, textAlign: 'center' }}>{currentIndex + 1} / {allRecords.length}</span>
+          <span style={{ fontSize: 12, color: '#64748b', padding: '0 4px', minWidth: 60, textAlign: 'center', fontWeight: 600 }}>{currentIndex + 1} / {allRecords.length}</span>
           <button onClick={() => onNavigate(currentIndex + 1)} disabled={currentIndex === allRecords.length - 1}
-            style={{ padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff', cursor: currentIndex === allRecords.length - 1 ? 'not-allowed' : 'pointer', opacity: currentIndex === allRecords.length - 1 ? 0.4 : 1 }}>
+            style={{ padding: '6px 10px', border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff', cursor: currentIndex === allRecords.length - 1 ? 'not-allowed' : 'pointer', opacity: currentIndex === allRecords.length - 1 ? 0.4 : 1, transition: 'all 0.15s' }}>
             <ChevronRight size={14} color="#64748b" />
           </button>
         </div>
@@ -182,8 +212,12 @@ export function JsonRecordViewer({
               {TIER_LABELS[tier]}
             </span>
           )}
-          {isApproved && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 20, background: '#ecfdf5', color: '#059669', border: '1px solid #6ee7b7', flexShrink: 0 }}>✓ Approved</span>}
-          {isRejected && <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 20, background: '#fef2f2', color: '#dc2626', border: '1px solid #fca5a5', flexShrink: 0 }}>✗ Sent back</span>}
+          {isApproved && (
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 20, background: 'linear-gradient(135deg,#10b981,#059669)', color: '#fff', flexShrink: 0, boxShadow: '0 2px 6px rgba(16,185,129,0.3)' }}>✓ Approved</span>
+          )}
+          {isRejected && (
+            <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 10px', borderRadius: 20, background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', flexShrink: 0, boxShadow: '0 2px 6px rgba(239,68,68,0.3)' }}>✗ Sent back</span>
+          )}
           {errors.length > 0 && <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 20, background: '#fffbeb', color: '#b45309', border: '1px solid #fcd34d', flexShrink: 0 }}>⚠ {errors.length} schema error{errors.length > 1 ? 's' : ''}</span>}
           {webFlags.length > 0 && <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 20, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', flexShrink: 0 }}>🌐 {webFlags.length} web flag{webFlags.length > 1 ? 's' : ''}</span>}
           {website && <a href={website} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#3b82f6', textDecoration: 'none', flexShrink: 0 }}><Globe size={12} />{new URL(website).hostname}</a>}
@@ -197,6 +231,7 @@ export function JsonRecordViewer({
                 background: viewTab === t.id ? '#fff' : 'transparent',
                 color: viewTab === t.id ? '#1d4ed8' : '#64748b',
                 boxShadow: viewTab === t.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none',
+                transition: 'all 0.15s',
               }}>{t.label}</button>
             ))}
           </div>
@@ -204,23 +239,30 @@ export function JsonRecordViewer({
           {/* Actions */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
             {hasChanges && viewTab === 'review' && (
-            <button onClick={handleSaveAll} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: '#fff', border: '1.5px solid #3b82f6', borderRadius: 8, color: '#3b82f6', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+            <button onClick={handleSaveAll} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', background: '#fff', border: '1.5px solid #3b82f6', borderRadius: 8, color: '#3b82f6', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
               <Save size={13} /> Save changes
             </button>
           )}
           {isReviewer && !isApproved && (
             <>
               <button onClick={() => setShowReject(r => !r)}
-                style={{ padding: '7px 14px', background: showReject ? '#fef2f2' : '#fff', border: `1.5px solid ${showReject ? '#ef4444' : '#e2e8f0'}`, borderRadius: 8, color: showReject ? '#dc2626' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                style={{ padding: '7px 14px', background: showReject ? '#fef2f2' : '#fff', border: `1.5px solid ${showReject ? '#ef4444' : '#e2e8f0'}`, borderRadius: 8, color: showReject ? '#dc2626' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
                 {saving === 'reject' ? 'Sending…' : '✗ Send Back'}
               </button>
               <button onClick={handleApprove} disabled={saving === 'approve'}
-                style={{ padding: '7px 16px', background: saving === 'approve' ? '#d1fae5' : '#10b981', border: 'none', borderRadius: 8, color: '#fff', fontSize: 12, fontWeight: 700, cursor: 'pointer', opacity: saving === 'approve' ? 0.7 : 1 }}>
+                style={{
+                  padding: '7px 18px',
+                  background: saving === 'approve' ? '#d1fae5' : 'linear-gradient(135deg,#10b981,#059669)',
+                  border: 'none', borderRadius: 8, color: '#fff', fontSize: 12, fontWeight: 700,
+                  cursor: 'pointer', opacity: saving === 'approve' ? 0.7 : 1,
+                  boxShadow: saving === 'approve' ? 'none' : '0 3px 10px rgba(16,185,129,0.35)',
+                  transition: 'all 0.15s',
+                }}>
                 {saving === 'approve' ? 'Approving…' : '✓ Approve'}
               </button>
             </>
           )}
-          <button onClick={onClose} style={{ padding: '7px', background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+          <button onClick={onClose} style={{ padding: '7px', background: '#f1f5f9', border: 'none', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}>
             <X size={16} color="#64748b" />
           </button>
         </div>
@@ -228,12 +270,13 @@ export function JsonRecordViewer({
 
       {/* Reject note input */}
       {showReject && (
-        <div style={{ background: '#fef2f2', borderBottom: '1px solid #fca5a5', padding: '12px 24px', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0 }}>
+        <div style={{ position: 'relative', background: '#fff', borderBottom: '1px solid #fca5a5', padding: '12px 24px', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0, overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg,#ef4444,#dc2626)' }} />
           <input value={rejectNote} onChange={e => setRejectNote(e.target.value)}
             placeholder="What needs to be fixed? (required)"
             style={{ flex: 1, padding: '8px 12px', border: '1.5px solid #fca5a5', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fff' }}
             onKeyDown={e => e.key === 'Enter' && handleReject()} />
-          <button onClick={handleReject} style={{ padding: '8px 16px', background: '#ef4444', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer' }}>
+          <button onClick={handleReject} style={{ padding: '8px 16px', background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', boxShadow: '0 3px 10px rgba(239,68,68,0.3)' }}>
             {saving === 'reject' ? 'Sending…' : 'Send Back'}
           </button>
           <button onClick={() => setShowReject(false)} style={{ padding: '8px', background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} color="#ef4444" /></button>
@@ -253,15 +296,21 @@ export function JsonRecordViewer({
       )}
 
       {/* ── MAIN BODY ───────────────────────────────────────────────────── */}
-      {viewTab === 'review' && <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignContent: 'start' }}>
+      {viewTab === 'review' && <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignContent: 'start' }} className="scrollbar-thin">
 
         {/* ── LEFT COLUMN ────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
           {/* Validation errors */}
           {(errors.length > 0 || webFlags.length > 0) && (
-            <div style={{ background: '#fff', border: '1px solid #fee2e2', borderRadius: 14, padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <p style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', margin: '0 0 10px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Issues to fix</p>
+            <div style={{ position: 'relative', background: '#fff', border: '1px solid #fee2e2', borderRadius: 14, padding: '16px 20px 16px 22px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, background: 'linear-gradient(180deg,#ef4444,#dc2626)' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <div style={{ width: 22, height: 22, borderRadius: 7, background: 'linear-gradient(135deg,#ef4444,#dc2626)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <AlertTriangle size={12} color="#fff" />
+                </div>
+                <p style={{ fontSize: 12, fontWeight: 700, color: '#dc2626', margin: 0, textTransform: 'uppercase', letterSpacing: '0.05em' }}>Issues to fix</p>
+              </div>
               {errors.map((e: any, i: number) => (
                 <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
                   <AlertTriangle size={13} color="#ef4444" style={{ flexShrink: 0, marginTop: 2 }} />
@@ -284,7 +333,7 @@ export function JsonRecordViewer({
           <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
             onMouseEnter={e => e.currentTarget.querySelectorAll<HTMLElement>('.edit-icon').forEach(el => el.style.opacity = '1')}
             onMouseLeave={e => e.currentTarget.querySelectorAll<HTMLElement>('.edit-icon').forEach(el => el.style.opacity = '0')}>
-            <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>Core Information</p>
+            <SectionHeader icon="📋" label="Core Information" grad="linear-gradient(135deg,#6366f1,#4f46e5)" />
             {SCALAR_FIELDS.map(({ field, label, required }) => {
               const isExtra = extrasFields.includes(field)
               if (localFields[field] === undefined && !isExtra) return null
@@ -309,7 +358,7 @@ export function JsonRecordViewer({
               <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}
                 onMouseEnter={e => e.currentTarget.querySelectorAll<HTMLElement>('.edit-icon').forEach(el => el.style.opacity = '1')}
                 onMouseLeave={e => e.currentTarget.querySelectorAll<HTMLElement>('.edit-icon').forEach(el => el.style.opacity = '0')}>
-                <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 4px' }}>Additional Fields</p>
+                <SectionHeader icon="✏️" label="Additional Fields" grad="linear-gradient(135deg,#64748b,#475569)" />
                 {others.map(field => (
                   <EditField key={field} field={field} label={field.replace(/_/g,' ')}
                     value={localFields[field]} isExtra={extrasFields.includes(field)}
@@ -322,9 +371,7 @@ export function JsonRecordViewer({
           {/* Extras */}
           {extras.length > 0 && extras[0] && Object.keys(extras[0]).length > 0 && (
             <div style={{ background: '#faf5ff', border: '1px solid #e9d5ff', borderRadius: 14, padding: '16px 20px' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
-                Extras {extrasSource ? `· ${extrasSource}` : ''}
-              </p>
+              <SectionHeader icon="✨" label={`Extras${extrasSource ? ` · ${extrasSource}` : ''}`} grad="linear-gradient(135deg,#a855f7,#7c3aed)" />
               {Object.entries(extras[0]).map(([k, v]) => v != null && (
                 <div key={k} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid #ede9fe' }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: '#7c3aed', minWidth: 160, flexShrink: 0, fontFamily: 'var(--font-mono)', textTransform: 'none' }}>{k}</span>
@@ -341,9 +388,7 @@ export function JsonRecordViewer({
           {/* Manufacturing Sites */}
           {sites.length > 0 && (
             <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
-                🏭 Manufacturing Sites <span style={{ background: '#3b82f6', color: '#fff', borderRadius: 20, padding: '0 7px', fontSize: 10, fontWeight: 700, marginLeft: 4 }}>{sites.length}</span>
-              </p>
+              <SectionHeader icon="🏭" label="Manufacturing Sites" count={sites.length} grad="linear-gradient(135deg,#3b82f6,#2563eb)" />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                 {sites.map((s: any, i: number) => {
                   const color = SITE_COLORS[s.site_type] || '#94a3b8'
@@ -377,9 +422,7 @@ export function JsonRecordViewer({
           {/* Products */}
           {products.length > 0 && (
             <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>
-                📦 Products Offered <span style={{ background: '#10b981', color: '#fff', borderRadius: 20, padding: '0 7px', fontSize: 10, fontWeight: 700, marginLeft: 4 }}>{products.length}</span>
-              </p>
+              <SectionHeader icon="📦" label="Products Offered" count={products.length} grad="linear-gradient(135deg,#10b981,#059669)" />
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', gap: 8 }}>
                 {products.map((p: any, i: number) => {
                   const pd = typeof p === 'string' ? { product_name: p, grade: null, category: null, source_url: null } : p
@@ -407,10 +450,10 @@ export function JsonRecordViewer({
           {/* JV Stakes */}
           {jvStakes.length > 0 && (
             <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>🤝 JV Stakes</p>
+              <SectionHeader icon="🤝" label="JV Stakes" count={jvStakes.length} grad="linear-gradient(135deg,#a855f7,#7c3aed)" />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {jvStakes.map((j: any, i: number) => (
-                  <div key={i} style={{ display: 'flex', gap: 12, padding: '10px 14px', background: '#faf5ff', borderRadius: 10, border: '1px solid #e9d5ff', borderLeft: '4px solid #7c3aed' }}>
+                  <div key={i} style={{ display: 'flex', gap: 12, padding: '10px 14px', background: '#faf5ff', borderRadius: 10, border: '1px solid#e9d5ff', borderLeft: '4px solid #7c3aed' }}>
                     <div style={{ textAlign: 'center', flexShrink: 0 }}>
                       <p style={{ fontSize: 20, fontWeight: 800, color: '#6d28d9', margin: 0, lineHeight: 1 }}>{j.ownership_pct}%</p>
                       <p style={{ fontSize: 9, color: '#7c3aed', margin: 0 }}>ownership</p>
@@ -429,10 +472,12 @@ export function JsonRecordViewer({
           {/* Annual Production */}
           {annualProd.length > 0 && (
             <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: 0, padding: '14px 20px', background: '#fffbeb', borderBottom: '1px solid #fef3c7' }}>📊 Annual Production</p>
+              <div style={{ padding: '14px 20px', background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', borderBottom: '1px solid #fde68a' }}>
+                <SectionHeader icon="📊" label="Annual Production" grad="linear-gradient(135deg,#f59e0b,#d97706)" />
+              </div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                 <thead><tr style={{ background: '#fffbeb' }}>
-                  {['Commodity','Volume','Unit','Year','Notes'].map(h => <th key={h} style={{ textAlign: 'left', padding: '8px 16px', fontSize: 10, fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>)}
+                  {['Commodity','Volume','Unit','Year','Notes'].map(h => <th key={h} style={{ textAlign: 'left', padding: '8px 16px', fontSize: 10,fontWeight: 700, color: '#92400e', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</th>)}
                 </tr></thead>
                 <tbody>
                   {annualProd.map((r: any, i: number) => (
@@ -452,7 +497,7 @@ export function JsonRecordViewer({
           {/* Sources */}
           {sources.length > 0 && (
             <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 12px' }}>📚 Sources</p>
+              <SectionHeader icon="📚" label="Sources" grad="linear-gradient(135deg,#06b6d4,#0891b2)" />
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {sources.map((s: any, i: number) => {
                   if (typeof s === 'string') return (
