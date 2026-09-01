@@ -348,6 +348,10 @@ export const sourcesApi = {
     const res = await api.get(`/sources/${id}/files/download`, { responseType: 'blob' })
     triggerBrowserDownload(res.data, filename)
   },
+  getFileContent: (sourceId: string, fileId: string) =>
+    api.get(`/sources/${sourceId}/files/${fileId}/content`).then(r => r.data),
+  reviewFile: (sourceId: string, fileId: string, action: 'approve' | 'reject', note = '') =>
+    api.post(`/sources/${sourceId}/files/${fileId}/review`, { action, note }).then(r => r.data),
 }
 
 // ─── Xtrium Catalog IQ integration ────────────────────────────────────────────

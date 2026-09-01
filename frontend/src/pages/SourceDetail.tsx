@@ -66,7 +66,8 @@ export function SourceDetailPage() {
   const [collapsedFolders, setCollapsedFolders] = useState<Set<string>>(new Set())
 
   // ── Raw uploaded files (exact original structure, independent of records) ──
-  const [rawFiles, setRawFiles] = useState<{ relative_path: string; is_directory: boolean; size_bytes: number }[]>([])
+  const [rawFiles, setRawFiles] = useState<{ id: string; relative_path: string; is_directory: boolean; size_bytes: number; review_status?: string; review_note?: string | null; reviewed_at?: string | null }[]>([])
+  const [activeFileIndex, setActiveFileIndex] = useState<number | null>(null)
   const [rawFilesLoading, setRawFilesLoading] = useState(false)
   const [rawFilesLoaded, setRawFilesLoaded] = useState(false)
   const [downloadingFiles, setDownloadingFiles] = useState(false)
@@ -772,6 +773,23 @@ export function SourceDetailPage() {
     )
   }
 
+  const filesOnlyForViewer = rawFiles.filter(f => !f.is_directory)
+  if (activeFileIndex !== null && filesOnlyForViewer[activeFileIndex]) {
+    return (
+      <div style={{ position: 'fixed', inset: 0, zIndex: 9999, overflow: 'hidden' }}>
+        <FileViewer
+          files={filesOnlyForViewer}
+          currentIndex={activeFileIndex}
+          sourceId={sourceId!}
+          isReviewer={isReviewer}
+          onNavigate={setActiveFileIndex}
+          onClose={() => setActiveFileIndex(null)}
+          onReviewed={() => { setRawFilesLoaded(false); loadRawFiles() }}
+        />
+      </div>
+    )
+  }
+
   const meta = STATUS_META[source.status]
   const canApproveSource = (isReviewer || isAdmin) && source.status !== 'approved'
   const allRecordsApproved = records.length > 0 && records.every(r => r.review_status === 'approved')
@@ -1464,11 +1482,12 @@ export function SourceDetailPage() {
             <EmptyState title="No raw files stored" description="This source's current upload predates raw-file preservation, or hasn't been uploaded yet." />
           ) : (
             <Card className="overflow-hidden">
-              <div className="overflow-x-auto">
+              <div className="overflow-x-auto scrollbar-thin">
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
                       <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Name</th>
+                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Review</th>
                       <th style={{ textAlign: 'right', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Size</th>
                     </tr>
                   </thead>
@@ -1481,7 +1500,7 @@ export function SourceDetailPage() {
                             onClick={() => toggleRawFolder(item.path)}
                             style={{ cursor: 'pointer', background: '#f8fafc' }}
                             className="hover:bg-gray-100 transition">
-                            <td colSpan={2} style={{ padding: '7px 16px', paddingLeft: 16 + item.depth * 20 }}>
+                            <td colSpan={3} style={{ padding: '7px 16px', paddingLeft: 16 + item.depth * 20 }}>
                               <div className="flex items-center gap-2">
                                 {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
                                 <Folder className="w-3.5 h-3.5 text-amber-500" />
@@ -1496,13 +1515,20 @@ export function SourceDetailPage() {
                       }
                       const e = item.entry
                       const name = e.relative_path.split('/').filter(Boolean).pop() || e.relative_path
+                      const filesOnly = rawFiles.filter(f => !f.is_directory)
+                      const fileIdx = filesOnly.findIndex(f => f.id === e.id)
                       return (
-                        <tr key={'rawfile-' + e.relative_path} className="hover:bg-slate-50 transition">
+                        <tr key={'rawfile-' + e.relative_path}
+                          onClick={() => fileIdx >= 0 && setActiveFileIndex(fileIdx)}
+                          className="hover:bg-slate-50 transition cursor-pointer">
                           <td className="px-5 py-2.5" style={{ paddingLeft: 20 + item.depth * 20 }}>
                             <div className="flex items-center gap-2">
                               <FileIcon className="w-3.5 h-3.5 text-gray-400 shrink-0" />
-                              <span className="text-sm text-gray-800 font-mono truncate max-w-[420px]" title={e.relative_path}>{name}</span>
+                              <span className="text-sm text-gray-800 font-mono truncate max-w-[380px]" title={e.relative_path}>{name}</span>
                             </div>
+                          </td>
+                          <td className="px-5 py-2.5">
+                            <FileReviewBadge status={e.review_status} />
                           </td>
                           <td className="px-5 py-2.5 text-right text-xs text-gray-500">{formatBytes(e.size_bytes)}</td>
                         </tr>
@@ -2019,6 +2045,195 @@ export function SourceDetailPage() {
         document.body
       )}
 
+    </div>
+  )
+}
+
+// ─── Raw file review — a lightweight parallel to record review, for files ────
+// (manifests, QA checklists, review logs) that never become ExtractedRecords
+// and so previously had no review step of their own at all.
+
+function FileReviewBadge({ status }: { status?: string }) {
+  const map: Record<string, { bg: string; color: string; label: string }> = {
+    pending:  { bg: '#f1f5f9', color: '#64748b', label: 'Not Reviewed' },
+    approved: { bg: '#ecfdf5', color: '#059669', label: 'Approved' },
+    rejected: { bg: '#fef2f2', color: '#dc2626', label: 'Rejected' },
+  }
+  const m = map[status ?? 'pending'] ?? map.pending
+  return (
+    <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20, background: m.bg, color: m.color, display: 'inline-block', whiteSpace: 'nowrap' }}>
+      {m.label}
+    </span>
+  )
+}
+
+function CsvPreviewTable({ text }: { text: string }) {
+  const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0)
+  if (lines.length === 0) return <p style={{ color: '#94a3b8', fontSize: 13 }}>Empty file</p>
+  const rows = lines.slice(0, 200).map(l => l.split(','))
+  const [header, ...body] = rows
+  return (
+    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'auto' }} className="scrollbar-thin">
+      <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+        <thead>
+          <tr style={{ background: '#f8fafc' }}>
+            {header.map((h, i) => (
+              <th key={i} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 700, color: '#64748b', borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, ri) => (
+            <tr key={ri} style={{ borderBottom: '1px solid #f1f5f9' }}>
+              {row.map((cell, ci) => <td key={ci} style={{ padding: '8px 12px', color: '#1e293b', whiteSpace: 'nowrap' }}>{cell}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {lines.length > 200 && (
+        <p style={{ padding: '8px 12px', fontSize: 11, color: '#94a3b8', borderTop: '1px solid #f1f5f9', margin: 0 }}>
+          Showing first 200 rows of {lines.length}. Download Original for the full file.
+        </p>
+      )}
+    </div>
+  )
+}
+
+function FileViewer({ files, currentIndex, sourceId, isReviewer, onNavigate, onClose, onReviewed }: {
+  files: { id: string; relative_path: string; is_directory: boolean; size_bytes: number; review_status?: string; review_note?: string | null; reviewed_at?: string | null }[]
+  currentIndex: number
+  sourceId: string
+  isReviewer: boolean
+  onNavigate: (index: number) => void
+  onClose: () => void
+  onReviewed: () => void
+}) {
+  const file = files[currentIndex]
+  const [content, setContent] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [reviewNote, setReviewNote] = useState('')
+  const [reviewing, setReviewing] = useState(false)
+
+  useEffect(() => {
+    setLoading(true)
+    setContent(null)
+    sourcesApi.getFileContent(sourceId, file.id)
+      .then(d => { setContent(d); setReviewNote(d.review_note || '') })
+      .catch(() => setContent({ kind: 'unsupported', content: null }))
+      .finally(() => setLoading(false))
+  }, [file.id, sourceId])
+
+  const handleReview = async (action: 'approve' | 'reject') => {
+    setReviewing(true)
+    try {
+      await sourcesApi.reviewFile(sourceId, file.id, action, reviewNote)
+      toast.success(action === 'approve' ? 'File approved' : 'File rejected')
+      onReviewed()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Review failed')
+    } finally {
+      setReviewing(false)
+    }
+  }
+
+  const fileName = file.relative_path.split('/').filter(Boolean).pop() || file.relative_path
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: '#fff', display: 'flex', flexDirection: 'column' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', borderBottom: '1px solid #e2e8f0', flexShrink: 0 }}>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 4 }}>
+          <ArrowLeft className="w-5 h-5" />
+        </button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p className="truncate" style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>{fileName}</p>
+          <p className="truncate" style={{ fontSize: 11, color: '#94a3b8', margin: 0, fontFamily: 'monospace' }}>{file.relative_path}</p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <button onClick={() => onNavigate(Math.max(0, currentIndex - 1))} disabled={currentIndex === 0}
+            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#374151',
+              cursor: currentIndex === 0 ? 'not-allowed' : 'pointer', opacity: currentIndex === 0 ? 0.4 : 1 }}>
+            ← Prev
+          </button>
+          <span style={{ fontSize: 12, color: '#94a3b8', minWidth: 50, textAlign: 'center' }}>{currentIndex + 1} / {files.length}</span>
+          <button onClick={() => onNavigate(Math.min(files.length - 1, currentIndex + 1))} disabled={currentIndex === files.length - 1}
+            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#374151',
+              cursor: currentIndex === files.length - 1 ? 'not-allowed' : 'pointer', opacity: currentIndex === files.length - 1 ? 0.4 : 1 }}>
+            Next →
+          </button>
+        </div>
+      </div>
+
+      {/* Body */}
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
+        {/* Content preview */}
+        <div className="scrollbar-thin" style={{ flex: 1, overflow: 'auto', padding: 20, background: '#f8fafc' }}>
+          {loading ? (
+            <div className="flex justify-center py-16"><Spinner className="w-6 h-6" /></div>
+          ) : content?.kind === 'unsupported' ? (
+            <div style={{ textAlign: 'center', padding: 60 }}>
+              <FileIcon className="w-10 h-10 mx-auto text-gray-300 mb-3" />
+              <p style={{ fontSize: 14, color: '#64748b', fontWeight: 600, margin: 0 }}>Can't preview this file type</p>
+              <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Use "Download Original" from the Files tab to view it.</p>
+            </div>
+          ) : content?.kind === 'json' ? (
+            <pre className="scrollbar-thin" style={{ background: '#0f172a', color: '#e2e8f0', borderRadius: 12, padding: 20, fontSize: 12, lineHeight: 1.6, overflow: 'auto', margin: 0 }}>
+              {(() => { try { return JSON.stringify(JSON.parse(content.content), null, 2) } catch { return content.content } })()}
+            </pre>
+          ) : content?.kind === 'csv' ? (
+            <CsvPreviewTable text={content.content} />
+          ) : (
+            <pre className="scrollbar-thin" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20, fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', color: '#1e293b', margin: 0, overflow: 'auto' }}>
+              {content?.content}
+            </pre>
+          )}
+        </div>
+
+        {/* Review panel */}
+        <div className="scrollbar-thin" style={{ width: 320, borderLeft: '1px solid #e2e8f0', padding: 20, overflowY: 'auto', flexShrink: 0 }}>
+          <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>Review</p>
+
+          <div style={{ marginBottom: 16 }}>
+            <FileReviewBadge status={file.review_status} />
+          </div>
+
+          {file.reviewed_at && (
+            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, marginBottom: 16 }}>
+              <p style={{ fontSize: 11, color: '#94a3b8', margin: '0 0 4px' }}>
+                {file.review_status === 'approved' ? 'Approved' : 'Rejected'} {safeFromNow(file.reviewed_at)}
+              </p>
+              {file.review_note && <p style={{ fontSize: 13, color: '#1e293b', margin: 0 }}>"{file.review_note}"</p>}
+            </div>
+          )}
+
+          {isReviewer ? (
+            <>
+              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>Note (optional)</label>
+              <textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={4}
+                placeholder="Any notes about this file…"
+                style={{ width: '100%', fontSize: 13, padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', outline: 'none', resize: 'vertical', marginBottom: 12, boxSizing: 'border-box' }} />
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button onClick={() => handleReview('approve')} disabled={reviewing}
+                  style={{ flex: 1, padding: '9px 14px', background: '#059669', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700,
+                    cursor: reviewing ? 'not-allowed' : 'pointer', opacity: reviewing ? .6 : 1 }}>
+                  ✓ Approve
+                </button>
+                <button onClick={() => handleReview('reject')} disabled={reviewing}
+                  style={{ flex: 1, padding: '9px 14px', background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 8, fontSize: 13, fontWeight: 700,
+                    cursor: reviewing ? 'not-allowed' : 'pointer', opacity: reviewing ? .6 : 1 }}>
+                  ✗ Reject
+                </button>
+              </div>
+            </>
+          ) : (
+            <p style={{ fontSize: 12, color: '#94a3b8' }}>Only reviewers, QA leads, or admins can review files.</p>
+          )}
+
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #f1f5f9' }}>
+            <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>Size: {file.size_bytes ? `${(file.size_bytes / 1024).toFixed(1)} KB` : '—'}</p>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 import pandas as pd
 
 from app.db.session import get_db
@@ -1783,15 +1784,132 @@ def list_uploaded_files(
         "job_id": latest_job.id,
         "entries": [
             {
+                "id": e.id,
                 "relative_path": e.relative_path,
                 "is_directory": e.is_directory,
                 "size_bytes": e.size_bytes or 0,
+                "review_status": e.review_status,
+                "review_note": e.review_note,
+                "reviewed_at": e.reviewed_at.isoformat() if e.reviewed_at else None,
             }
             for e in entries
         ],
         "total_files": sum(1 for e in entries if not e.is_directory),
         "total_directories": sum(1 for e in entries if e.is_directory),
     }
+
+
+def _get_file_entry_for_source(source_id: str, file_id: str, db: Session) -> "UploadedFileEntry":
+    """
+    Looks up one raw file entry by its own id, and confirms it actually
+    belongs to this source (via its job's source_id) — so a file id from a
+    different source can never be previewed or reviewed through this one.
+    """
+    entry = db.query(UploadedFileEntry).filter(UploadedFileEntry.id == file_id).first()
+    if not entry:
+        raise HTTPException(status_code=404, detail="File not found")
+    job = db.query(ExtractionJob).filter(ExtractionJob.id == entry.job_id).first()
+    if not job or job.source_id != source_id:
+        raise HTTPException(status_code=404, detail="File not found for this source")
+    return entry
+
+
+@router.get("/{source_id}/files/{file_id}/content")
+def get_uploaded_file_content(
+    source_id: str,
+    file_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns the decoded text content of one raw uploaded file, for previewing
+    inline — JSON/CSV/plain-text files decode cleanly and are shown as-is
+    (JSON gets pretty-printed client-side). Binary or non-UTF-8 content
+    returns a clear "can't preview this" response instead of garbled bytes,
+    with Download Original as the fallback.
+    """
+    source = _get_source_or_404(source_id, db)
+    if not _can_access(current_user, source.project):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    entry = _get_file_entry_for_source(source_id, file_id, db)
+    if entry.is_directory:
+        raise HTTPException(status_code=422, detail="This entry is a folder, not a file.")
+
+    import os as _os
+    ext = _os.path.splitext(entry.relative_path)[1].lower()
+
+    raw = entry.content or b""
+    try:
+        text_content = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return {
+            "id": entry.id,
+            "relative_path": entry.relative_path,
+            "kind": "unsupported",
+            "content": None,
+            "review_status": entry.review_status,
+            "review_note": entry.review_note,
+            "reviewed_at": entry.reviewed_at.isoformat() if entry.reviewed_at else None,
+        }
+
+    kind = "json" if ext == ".json" else "csv" if ext == ".csv" else "text"
+
+    return {
+        "id": entry.id,
+        "relative_path": entry.relative_path,
+        "kind": kind,
+        "content": text_content,
+        "review_status": entry.review_status,
+        "review_note": entry.review_note,
+        "reviewed_at": entry.reviewed_at.isoformat() if entry.reviewed_at else None,
+    }
+
+
+class FileReviewRequest(BaseModel):
+    action: str  # "approve" | "reject"
+    note: str = ""
+
+
+@router.post("/{source_id}/files/{file_id}/review")
+def review_uploaded_file(
+    source_id: str,
+    file_id: str,
+    payload: FileReviewRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Approve or reject one raw uploaded file — a manifest, QA checklist,
+    review log, or any other supporting file. A lightweight parallel to
+    record review, for files that never become ExtractedRecords and so
+    previously had no review step of their own at all.
+    """
+    source = _get_source_or_404(source_id, db)
+    if not _is_assigned_reviewer(current_user, source):
+        raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can review files")
+
+    if payload.action not in ("approve", "reject"):
+        raise HTTPException(status_code=422, detail="action must be 'approve' or 'reject'")
+
+    entry = _get_file_entry_for_source(source_id, file_id, db)
+    if entry.is_directory:
+        raise HTTPException(status_code=422, detail="Folders can't be reviewed.")
+
+    entry.review_status = "approved" if payload.action == "approve" else "rejected"
+    entry.review_note = payload.note
+    entry.reviewed_by = current_user.id
+    entry.reviewed_at = datetime.now(timezone.utc)
+    db.commit()
+
+    return {
+        "id": entry.id,
+        "relative_path": entry.relative_path,
+        "review_status": entry.review_status,
+        "review_note": entry.review_note,
+        "reviewed_at": entry.reviewed_at.isoformat(),
+    }
+
 
 
 @router.get("/{source_id}/files/download")

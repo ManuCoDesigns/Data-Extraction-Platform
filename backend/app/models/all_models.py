@@ -596,5 +596,17 @@ class UploadedFileEntry(Base):
     size_bytes = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_utc)
 
+    # Review fields — a lightweight approve/reject/note flow for raw files
+    # (manifests, QA checklists, review logs) that never become
+    # ExtractedRecords and so were previously never reviewed by anyone at
+    # all, even though they're part of the SOP handoff. Plain string status
+    # (not a Postgres native enum) to match this codebase's established
+    # pattern for status-like columns — e.g. SubmissionBatch.status — and
+    # avoid the native-enum migration friction seen elsewhere in this project.
+    review_status = Column(String(20), nullable=False, default="pending", server_default="pending")
+    review_note = Column(Text, nullable=True)
+    reviewed_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+
     job = relationship("ExtractionJob")
 
