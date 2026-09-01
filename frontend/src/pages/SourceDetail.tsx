@@ -6,7 +6,7 @@ import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
   Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
-  Folder, AlertTriangle, File as FileIcon, Zap, Link2
+  Folder, AlertTriangle, File as FileIcon, Zap, Link2, Database
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi, xtriumApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -932,51 +932,55 @@ export function SourceDetailPage() {
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
-          { label: 'Total Records', value: source.total_records, icon: '📋', top: '#6366f1', bg: '#eef2ff', val: '#4338ca' },
-          { label: 'Schema Valid', value: source.valid_records, icon: '✅', top: '#10b981', bg: '#ecfdf5', val: '#065f46' },
-          { label: 'Needs Fixes', value: source.invalid_records, icon: '⚠️', top: '#f59e0b', bg: '#fffbeb', val: '#92400e' },
-          { label: 'Approved', value: source.approved_records, icon: '🎯', top: '#3b82f6', bg: '#eff6ff', val: '#1d4ed8' },
-        ].map(({ label, value, icon, top, bg, val }) => (
-          <div key={label} style={{ background: bg, borderRadius: 14, borderTop: `3px solid ${top}`, padding: '16px 20px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <span style={{ fontSize: 20 }}>{icon}</span>
-              <span style={{ fontSize: 28, fontWeight: 800, color: val, lineHeight: 1 }}>{value}</span>
+          { label: 'Total Records', value: source.total_records, icon: <Database className="w-[18px] h-[18px]" />, grad: 'from-brand-500 to-brand-700', ring: 'shadow-brand-500/25', accent: 'bg-brand-600', text: 'text-brand-700' },
+          { label: 'Schema Valid', value: source.valid_records, icon: <CheckCircle className="w-[18px] h-[18px]" />, grad: 'from-emerald-500 to-emerald-600', ring: 'shadow-emerald-500/25', accent: 'bg-emerald-500', text: 'text-emerald-700' },
+          { label: 'Needs Fixes', value: source.invalid_records, icon: <AlertTriangle className="w-[18px] h-[18px]" />, grad: 'from-amber-500 to-orange-600', ring: 'shadow-amber-500/25', accent: 'bg-amber-500', text: 'text-amber-700' },
+          { label: 'Approved', value: source.approved_records, icon: <Shield className="w-[18px] h-[18px]" />, grad: 'from-blue-500 to-blue-600', ring: 'shadow-blue-500/25', accent: 'bg-blue-500', text: 'text-blue-700' },
+        ].map(({ label, value, icon, grad, ring, accent, text }) => (
+          <div key={label} className="relative bg-white rounded-2xl border border-gray-100 p-4 overflow-hidden shadow-card hover:shadow-float hover:-translate-y-0.5 transition-all duration-200">
+            <div className={cn('absolute top-0 left-0 right-0 h-1', accent)} />
+            <div className="flex items-center justify-between mb-3">
+              <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center text-white bg-gradient-to-br shadow-lg', grad, ring)}>
+                {icon}
+              </div>
             </div>
-            <p style={{ fontSize: 11, fontWeight: 600, color: val, opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>{label}</p>
+            <p className="text-[28px] font-extrabold text-gray-900 leading-none tracking-tight tabular-nums">{value}</p>
+            <p className={cn('text-xs font-bold mt-1.5', text)}>{label}</p>
             {source.total_records > 0 && (
-              <div style={{ marginTop: 8, background: 'rgba(255,255,255,0.6)', borderRadius: 99, height: 4, overflow: 'hidden' }}>
-                <div style={{ background: top, height: '100%', borderRadius: 99, width: `${Math.min(100, Math.round((value / source.total_records) * 100))}%`, transition: 'width 0.6s ease' }} />
+              <div className="mt-2.5 bg-gray-100 rounded-full h-1.5 overflow-hidden">
+                <div className={cn('h-full rounded-full transition-all duration-500', accent)}
+                  style={{ width: `${Math.min(100, Math.round((value / source.total_records) * 100))}%` }} />
               </div>
             )}
           </div>
         ))}
       </div>
 
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
+      <Card className="p-4 flex items-center gap-6 flex-wrap">
         {[
-          { role: 'Extractor', emoji: '⛏️', field: 'assigned_extractor_id' as const, name: source.assigned_extractor_name, id: source.assigned_extractor_id },
-          { role: 'Reviewer', emoji: '🔍', field: 'assigned_reviewer_id' as const, name: source.assigned_reviewer_name, id: source.assigned_reviewer_id },
-        ].map(({ role, emoji, field, name, id }) => (
-          <div key={role} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, flexShrink: 0 }}>{emoji}</div>
+          { role: 'Extractor', icon: '⛏️', grad: 'from-violet-400 to-purple-600', field: 'assigned_extractor_id' as const, name: source.assigned_extractor_name, id: source.assigned_extractor_id },
+          { role: 'Reviewer', icon: '🔍', grad: 'from-cyan-400 to-blue-600', field: 'assigned_reviewer_id' as const, name: source.assigned_reviewer_name, id: source.assigned_reviewer_id },
+        ].map(({ role, icon, grad, field, name, id }) => (
+          <div key={role} className="flex items-center gap-2.5">
+            <div className={cn('w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0 bg-gradient-to-br shadow-sm', grad)}>{icon}</div>
             <div>
-              <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 2px' }}>{role}</p>
+              <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-0.5">{role}</p>
               {isAdmin ? (
                 <Select value={id ?? ''} onChange={e => handleAssign(field, e.target.value)} className="!py-0.5 !text-xs !h-7 w-36">
                   <option value="">Unassigned</option>
                   {members.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
                 </Select>
               ) : (
-                <p style={{ fontSize: 13, fontWeight: 600, color: name ? '#0f172a' : '#94a3b8', margin: 0 }}>{name ?? 'Unassigned'}</p>
+                <p className={cn('text-sm font-semibold', name ? 'text-gray-900' : 'text-gray-400')}>{name ?? 'Unassigned'}</p>
               )}
             </div>
           </div>
         ))}
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, color: '#94a3b8' }}>
+        <div className="ml-auto flex items-center gap-1.5 text-xs text-gray-400">
           <Clock className="w-3 h-3" />
           Updated {safeFromNow(source.updated_at)}
         </div>
-      </div>
+      </Card>
 
       <div style={{ display: 'flex', gap: 4, padding: '4px', background: '#f1f5f9', borderRadius: 12, alignSelf: 'flex-start' }}>
         {(['records', 'files', 'details'] as Tab[]).map(t => (
@@ -1041,11 +1045,13 @@ export function SourceDetailPage() {
             )
             if (escalated.length === 0) return null
             return (
-              <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 12,
-                padding: '14px 18px', marginBottom: 12 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                  <AlertTriangle style={{ width: 17, height: 17, color: '#dc2626', flexShrink: 0 }} />
-                  <p style={{ fontSize: 13, fontWeight: 700, color: '#991b1b', margin: 0 }}>
+              <div className="relative bg-white border border-red-100 rounded-2xl pl-5 pr-5 py-4 mb-3 shadow-card overflow-hidden">
+                <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-gradient-to-b from-red-500 to-rose-600" />
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-lg shadow-red-500/25 shrink-0">
+                    <AlertTriangle className="w-4 h-4 text-white" />
+                  </div>
+                  <p className="text-sm font-bold text-gray-900">
                     {escalated.length} record{escalated.length !== 1 ? 's' : ''} sent back for correction
                   </p>
                 </div>
@@ -1095,10 +1101,13 @@ export function SourceDetailPage() {
           })()}
 
           {source.status === 'approved' ? (
-            <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 12, padding: '12px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
-              <CheckCircle size={16} color="#059669" />
-              <p style={{ fontSize: 13, color: '#065f46', margin: 0, flex: 1 }}>
-                <strong>Source Approved</strong> — all records have been reviewed. Use <strong>Export Package</strong> to download.
+            <div className="relative bg-white border border-emerald-100 rounded-2xl pl-5 pr-5 py-4 flex items-center gap-3 shadow-card overflow-hidden">
+              <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-gradient-to-b from-emerald-500 to-teal-600" />
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 shrink-0">
+                <CheckCircle className="w-4 h-4 text-white" />
+              </div>
+              <p className="text-sm text-gray-700 flex-1">
+                <strong className="text-gray-900">Source Approved</strong> — all records have been reviewed. Use <strong className="text-gray-900">Export Package</strong> to download.
               </p>
               <Button size="sm" onClick={handleExport} style={{ background: '#059669', border: 'none', color: '#fff', flexShrink: 0 }}>
                 <Download className="w-3.5 h-3.5" /> Export Package
