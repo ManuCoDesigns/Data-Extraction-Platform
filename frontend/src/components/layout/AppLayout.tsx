@@ -54,11 +54,21 @@ export function AppLayout() {
   if (!user) return null
   const unread = notifications.filter(n => !n.is_read).length
 
+  // Sources and Projects share a URL prefix — a specific source lives at
+  // /projects/:projectId/sources/:sourceId, which starts with "/projects".
+  // React Router's default NavLink prefix-matching would light up
+  // "Projects" for that URL and never "Sources", even though the person
+  // is clearly viewing a source. These two checks resolve that overlap
+  // explicitly instead of relying on prefix matching for either of them.
+  const isSourcesPath = /^\/sources(\/|$)/.test(location.pathname)
+    || /^\/projects\/[^/]+\/sources(\/|$)/.test(location.pathname)
+  const isProjectsPath = location.pathname.startsWith('/projects') && !isSourcesPath
+
   const mainNav = [
     { to: '/',            icon: LayoutDashboard, label: 'Dashboard',    show: true },
-    { to: '/sources',     icon: Database,        label: 'Sources',      show: true },
+    { to: '/sources',     icon: Database,        label: 'Sources',      show: true, forceActive: isSourcesPath },
     { to: '/escalations', icon: AlertTriangle,   label: 'Escalations',  show: true, badge: escalationCount },
-    { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true },
+    { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true, forceActive: isProjectsPath },
     { to: '/workload',    icon: Activity,        label: 'Team Workload', show: true },
     { to: '/schemas',     icon: Layers,          label: 'Schemas',      show: isAdmin && canManageSchemas },
   ].filter(n => n.show)
@@ -69,15 +79,18 @@ export function AppLayout() {
     { to: '/help',        icon: BookOpen, label: 'Help',     show: true },
   ].filter(n => n.show)
 
-  const NavItem = ({ to, icon: Icon, label, exact = false, badge }: any) => (
+  const NavItem = ({ to, icon: Icon, label, exact = false, badge, forceActive }: any) => (
     <NavLink to={to} end={exact}
-      style={({ isActive }) => ({
-        display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
-        borderRadius: 10, textDecoration: 'none', fontSize: 13, fontWeight: 500,
-        transition: 'all 0.12s',
-        background: isActive ? '#eff6ff' : 'transparent',
-        color: isActive ? '#2563eb' : '#64748b',
-      })}
+      style={({ isActive }) => {
+        const active = forceActive !== undefined ? forceActive : isActive
+        return {
+          display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
+          borderRadius: 10, textDecoration: 'none', fontSize: 13, fontWeight: 500,
+          transition: 'all 0.12s',
+          background: active ? '#eff6ff' : 'transparent',
+          color: active ? '#2563eb' : '#64748b',
+        }
+      }}
       onMouseEnter={e => { const el = e.currentTarget as HTMLElement; if (!el.style.background.includes('eff6ff')) el.style.background = '#f8fafc' }}
       onMouseLeave={e => { const el = e.currentTarget as HTMLElement; if (!el.style.background.includes('eff6ff')) el.style.background = 'transparent' }}>
       <Icon style={{ width: 16, height: 16, flexShrink: 0 }} />
