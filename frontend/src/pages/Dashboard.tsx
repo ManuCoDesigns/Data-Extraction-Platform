@@ -2,11 +2,10 @@ import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import {
   Database, CheckCircle, AlertCircle, Upload, Eye, ArrowRight,
-  Activity, Clock, RefreshCw, ShieldCheck, TrendingUp, Zap,
-  Users, BarChart3, Target, Award,
+  Activity, Clock, RefreshCw, ShieldCheck, Zap,
 } from 'lucide-react'
 import { statsApi, projectsApi } from '@/api/client'
-import { safeFromNow } from '@/components/ui'
+import { Card, Badge, Avatar, Button, Skeleton as UiSkeleton, safeFromNow, cn } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
@@ -16,156 +15,143 @@ function greeting() {
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
 
-const STATUS_META: Record<string, { label: string; color: string; bg: string }> = {
-  not_started:         { label: 'Not Started',       color: '#64748b', bg: '#f1f5f9' },
-  extracting:          { label: 'Extracting',         color: '#3b82f6', bg: '#eff6ff' },
-  needs_fixes:         { label: 'Needs Fixes',        color: '#f59e0b', bg: '#fffbeb' },
-  ready_for_review:    { label: 'Ready for Review',   color: '#6366f1', bg: '#eef2ff' },
-  in_review:           { label: 'In Review',          color: '#a855f7', bg: '#faf5ff' },
-  changes_requested:   { label: 'Corrections Needed', color: '#ef4444', bg: '#fef2f2' },
-  llm_verification:    { label: 'LLM Check',          color: '#a855f7', bg: '#faf5ff' },
-  approved:            { label: 'Approved',           color: '#10b981', bg: '#ecfdf5' },
+// Matches the variant union Badge actually accepts (ui/index.tsx doesn't
+// export BadgeProps, so this is kept in sync manually — green/amber/red/
+// blue/gray/purple/indigo, the same seven Badge supports).
+type BadgeVariant = 'green' | 'amber' | 'red' | 'blue' | 'gray' | 'purple' | 'indigo'
+
+// Maps every source status onto the shared Badge's variant set (green /
+// amber / red / blue / gray / purple / indigo) plus the hex it should use
+// in the recharts bar chart, so the chart and the badges are always
+// perfectly in sync — one source of truth instead of two color tables.
+const STATUS_META: Record<string, { label: string; variant: BadgeVariant; chartColor: string }> = {
+  not_started:       { label: 'Not Started',       variant: 'gray',   chartColor: '#94a3b8' },
+  extracting:        { label: 'Extracting',        variant: 'blue',  chartColor: '#3b82f6' },
+  needs_fixes:       { label: 'Needs Fixes',        variant: 'amber',  chartColor: '#f59e0b' },
+  ready_for_review:  { label: 'Ready for Review',   variant: 'indigo', chartColor: '#6366f1' },
+  in_review:         { label: 'In Review',          variant: 'purple', chartColor: '#a855f7' },
+  changes_requested: { label: 'Corrections Needed', variant: 'red',   chartColor: '#ef4444' },
+  llm_verification:  { label: 'LLM Check',          variant: 'purple', chartColor: '#a855f7' },
+  approved:          { label: 'Approved',           variant: 'green', chartColor: '#10b981' },
 }
 
-// ── Shared components ─────────────────────────────────────────────────────────
+// ── Shared local components (thin wrappers over the design system) ───────────
+
 function KPI({ label, value, sub, icon, color, trend }: {
   label: string; value: number | string; sub: string
-  icon: React.ReactNode; color: string; trend?: { value: number; label: string }
+  icon: React.ReactNode; color: 'blue' | 'purple' | 'green' | 'red' | 'amber' | 'indigo'
+  trend?: { value: number; label: string }
 }) {
-  const C = ({
-    blue:   { bg: '#eff6ff', ic: '#2563eb', tx: '#1d4ed8' },
-    purple: { bg: '#faf5ff', ic: '#7c3aed', tx: '#6d28d9' },
-    green:  { bg: '#ecfdf5', ic: '#059669', tx: '#047857' },
-    red:    { bg: '#fef2f2', ic: '#dc2626', tx: '#b91c1c' },
-    amber:  { bg: '#fffbeb', ic: '#d97706', tx: '#b45309' },
-    indigo: { bg: '#eef2ff', ic: '#4f46e5', tx: '#4338ca' },
-  } as any)[color] ?? { bg: '#f8fafc', ic: '#64748b', tx: '#475569' }
+  const tones: Record<string, { bg: string; icon: string; text: string }> = {
+    blue:   { bg: 'bg-blue-50',   icon: 'text-blue-600',   text: 'text-blue-700' },
+    purple: { bg: 'bg-purple-50', icon: 'text-purple-600', text: 'text-purple-700' },
+    green:  { bg: 'bg-emerald-50',icon: 'text-emerald-600',text: 'text-emerald-700' },
+    red:    { bg: 'bg-red-50',    icon: 'text-red-600',    text: 'text-red-700' },
+    amber:  { bg: 'bg-amber-50',  icon: 'text-amber-600',  text: 'text-amber-700' },
+    indigo: { bg: 'bg-brand-50',  icon: 'text-brand-600',  text: 'text-brand-700' },
+  }
+  const t = tones[color] ?? tones.indigo
   return (
-    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 18px',
-      boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-        <div style={{ width: 36, height: 36, borderRadius: 10, background: C.bg,
-          display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.ic }}>{icon}</div>
+    <Card className="p-4">
+      <div className="flex items-center justify-between mb-2.5">
+        <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center', t.bg, t.icon)}>{icon}</div>
         {trend && trend.value > 0 && (
-          <span style={{ fontSize: 10, fontWeight: 700, color: '#059669', background: '#ecfdf5',
-            padding: '2px 7px', borderRadius: 20 }}>+{trend.value} {trend.label}</span>
+          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
+            +{trend.value} {trend.label}
+          </span>
         )}
       </div>
-      <p style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: 0, lineHeight: 1 }}>{value}</p>
-      <p style={{ fontSize: 12, fontWeight: 600, color: C.tx, margin: '3px 0 1px' }}>{label}</p>
-      <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>{sub}</p>
-    </div>
+      <p className="text-2xl font-extrabold text-gray-900 leading-none tracking-tight">{value}</p>
+      <p className={cn('text-xs font-semibold mt-1', t.text)}>{label}</p>
+      <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>
+    </Card>
   )
 }
 
 function StatusBadge({ status }: { status: string }) {
   const m = STATUS_META[status]
-  if (!m) return <span style={{ fontSize: 11, color: '#94a3b8' }}>{status}</span>
-  return (
-    <span style={{ fontSize: 10, fontWeight: 600, padding: '3px 8px', borderRadius: 20,
-      background: m.bg, color: m.color, whiteSpace: 'nowrap' }}>{m.label}</span>
-  )
+  if (!m) return <span className="text-xs text-gray-400">{status}</span>
+  return <Badge variant={m.variant}>{m.label}</Badge>
 }
 
-function SectionCard({ title, sub, badge, badgeColor = '#2563eb', action, children }: {
-  title: string; sub?: string; badge?: string | number; badgeColor?: string
+function SectionCard({ title, sub, badge, badgeVariant = 'blue', action, children }: {
+  title: string; sub?: string; badge?: string | number; badgeVariant?: BadgeVariant
   action?: { label: string; to: string }; children: React.ReactNode
 }) {
   return (
-    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
-      overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)', marginBottom: 20 }}>
-      <div style={{ padding: '14px 20px', borderBottom: '1px solid #f1f5f9',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+    <Card className="overflow-hidden mb-5">
+      <div className="px-5 py-3.5 border-b border-gray-100 flex items-center justify-between">
         <div>
-          <h2 style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>{title}</h2>
-          {sub && <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>{sub}</p>}
+          <h2 className="text-sm font-bold text-gray-900">{title}</h2>
+          {sub && <p className="text-xs text-gray-400 mt-0.5">{sub}</p>}
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {badge !== undefined && (
-            <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 10px', borderRadius: 20,
-              background: badgeColor + '18', color: badgeColor, border: `1px solid ${badgeColor}30` }}>{badge}</span>
-          )}
+        <div className="flex items-center gap-2">
+          {badge !== undefined && <Badge variant={badgeVariant}>{badge}</Badge>}
           {action && (
-            <Link to={action.to} style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none',
-              fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
-              {action.label} <ArrowRight style={{ width: 12, height: 12 }} />
+            <Link to={action.to} className="text-xs text-brand-600 hover:text-brand-700 font-semibold flex items-center gap-1">
+              {action.label} <ArrowRight className="w-3 h-3" />
             </Link>
           )}
         </div>
       </div>
       {children}
-    </div>
+    </Card>
   )
 }
 
-function TH({ children, align = 'left' }: { children: React.ReactNode; align?: string }) {
+function TH({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'center' | 'right' }) {
   return (
-    <th style={{ padding: '10px 16px', textAlign: align as any, fontSize: 10, fontWeight: 700,
-      color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.07em', whiteSpace: 'nowrap',
-      background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>{children}</th>
+    <th className={cn('px-4 py-2.5 text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap bg-gray-50 border-b-2 border-gray-100',
+      align === 'center' && 'text-center', align === 'right' && 'text-right', align === 'left' && 'text-left')}>
+      {children}
+    </th>
   )
 }
 
-function TD({ children, align = 'left' }: { children: React.ReactNode; align?: string }) {
+function TD({ children, align = 'left' }: { children: React.ReactNode; align?: 'left' | 'center' | 'right' }) {
   return (
-    <td style={{ padding: '12px 16px', textAlign: align as any, borderBottom: '1px solid #f8fafc',
-      fontSize: 13, color: '#1e293b', verticalAlign: 'middle' }}>{children}</td>
+    <td className={cn('px-4 py-3 border-b border-gray-50 text-sm text-gray-800 align-middle',
+      align === 'center' && 'text-center', align === 'right' && 'text-right', align === 'left' && 'text-left')}>
+      {children}
+    </td>
   )
 }
 
-function Avatar({ name }: { name: string }) {
-  const colors = ['#2563eb','#7c3aed','#059669','#dc2626','#d97706','#0891b2']
-  const color  = colors[name.charCodeAt(0) % colors.length]
-  return (
-    <div style={{ width: 28, height: 28, borderRadius: '50%', background: color,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: 11, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
-      {(name ?? '?')[0].toUpperCase()}
-    </div>
-  )
-}
-
-function MiniBar({ value, max, color = '#2563eb' }: { value: number; max: number; color?: string }) {
+function MiniBar({ value, max, tone = 'brand' }: { value: number; max: number; tone?: 'brand' | 'green' | 'red' }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0
+  const bar = tone === 'green' ? 'bg-emerald-500' : tone === 'red' ? 'bg-red-500' : 'bg-brand-600'
+  const text = tone === 'green' ? 'text-emerald-600' : tone === 'red' ? 'text-red-600' : 'text-brand-600'
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-      <div style={{ background: '#e2e8f0', borderRadius: 99, height: 6, width: 60, overflow: 'hidden', flexShrink: 0 }}>
-        <div style={{ background: color, height: '100%', width: `${pct}%`, borderRadius: 99 }} />
+    <div className="flex items-center gap-2">
+      <div className="bg-gray-100 rounded-full h-1.5 w-14 overflow-hidden shrink-0">
+        <div className={cn('h-full rounded-full transition-all duration-500', bar)} style={{ width: `${pct}%` }} />
       </div>
-      <span style={{ fontSize: 11, fontWeight: 600, color }}>{pct}%</span>
+      <span className={cn('text-xs font-semibold', text)}>{pct}%</span>
     </div>
   )
 }
 
-function Skeleton() {
+function DashSkeleton() {
   return (
-    <div style={{ padding: '22px 28px', maxWidth: 1200, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 24 }}>
-        <div style={{ width: 160, height: 24, borderRadius: 8, background: '#e2e8f0' }} />
+    <div className="px-7 py-6 max-w-[1200px] mx-auto">
+      <UiSkeleton className="w-40 h-6 mb-6" />
+      <div className="space-y-4">
+        <UiSkeleton className="h-24" />
+        <UiSkeleton className="h-20" />
+        <UiSkeleton className="h-56" />
+        <UiSkeleton className="h-44" />
       </div>
-      {[100, 80, 220, 180].map((h, i) => (
-        <div key={i} style={{ background: '#f1f5f9', borderRadius: 16, height: h, marginBottom: 16 }} />
-      ))}
-      <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}`}</style>
     </div>
   )
 }
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
   return (
-    <div style={{ padding: '80px 28px', maxWidth: 1200, margin: '0 auto', textAlign: 'center' }}>
-      <div style={{ fontSize: 40, marginBottom: 16 }}>⚠️</div>
-      <p style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', marginBottom: 8 }}>
-        Dashboard failed to load
-      </p>
-      <p style={{ fontSize: 13, color: '#94a3b8', marginBottom: 24 }}>
-        The server may be waking up — this usually takes 30–60 seconds on first load
-      </p>
-      <button onClick={onRetry}
-        style={{ padding: '10px 24px', background: '#2563eb', color: '#fff', border: 'none',
-          borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
-        Retry
-      </button>
+    <div className="px-7 py-20 max-w-[1200px] mx-auto text-center">
+      <div className="text-4xl mb-4">⚠️</div>
+      <p className="text-base font-semibold text-gray-800 mb-2">Dashboard failed to load</p>
+      <p className="text-sm text-gray-400 mb-6">The server may be waking up — this usually takes 30–60 seconds on first load</p>
+      <Button onClick={onRetry}>Retry</Button>
     </div>
   )
 }
@@ -196,9 +182,33 @@ function useSummary() {
   return { data, loading, error, load, ts, clearError: () => setError(false) }
 }
 
+// ── Reusable header bar (greeting + refresh + primary CTA) ───────────────────
+function DashboardHeader({ subtitle, ctaLabel, ctaTo, ctaIcon, onRefresh }: {
+  subtitle: string; ctaLabel: string; ctaTo: string; ctaIcon: React.ReactNode; onRefresh: () => void
+}) {
+  const { user } = useAuthStore()
+  return (
+    <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
+      <div>
+        <h1 className="text-[22px] font-extrabold text-gray-900">
+          {greeting()}, {user?.full_name?.split(' ')[0]} 👋
+        </h1>
+        <p className="text-[13px] text-gray-400 mt-1">{subtitle}</p>
+      </div>
+      <div className="flex gap-2">
+        <Button variant="secondary" size="sm" onClick={onRefresh}>
+          <RefreshCw className="w-3.5 h-3.5" /> Refresh
+        </Button>
+        <Link to={ctaTo}>
+          <Button size="sm">{ctaIcon} {ctaLabel}</Button>
+        </Link>
+      </div>
+    </div>
+  )
+}
+
 // ── Admin Dashboard ────────────────────────────────────────────────────────────
 function AdminDashboard() {
-  const { user }                               = useAuthStore()
   const { data: s, loading, error, load, ts, clearError } = useSummary()
   const [productivity, setProductivity]        = useState<any>(null)
   const [projects, setProjects]                = useState<any[]>([])
@@ -212,7 +222,7 @@ function AdminDashboard() {
     }).catch(() => {})
   }, [])
 
-  if (loading) return <Skeleton />
+  if (loading) return <DashSkeleton />
   if (error && !s?.total) return <ErrorState onRetry={() => { clearError(); load() }} />
 
   const byStatus      = s?.by_status         ?? {}
@@ -228,7 +238,7 @@ function AdminDashboard() {
     .map(([st, count]) => ({
       name: STATUS_META[st]?.label ?? st,
       value: count as number,
-      color: STATUS_META[st]?.color ?? '#94a3b8',
+      color: STATUS_META[st]?.chartColor ?? '#94a3b8',
     }))
 
   const pName = (id: string) => projects.find(p => p.id === id)?.name ?? id.slice(0, 8) + '…'
@@ -239,94 +249,58 @@ function AdminDashboard() {
   const hasFlagged = reviewers.some((r: any) => r.flagged)
 
   return (
-    <div style={{ padding: '22px 28px', maxWidth: 1200, margin: '0 auto' }}>
-
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-        marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-            {greeting()}, {user?.full_name?.split(' ')[0]} 👋
-          </h1>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-            Platform overview · Updated {ts.toLocaleTimeString()}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={load}
-            style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0',
-              borderRadius: 10, cursor: 'pointer', fontSize: 13, color: '#64748b',
-              display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw style={{ width: 14, height: 14 }} /> Refresh
-          </button>
-          <Link to="/sources"
-            style={{ padding: '8px 16px', background: 'linear-gradient(135deg,#2563eb,#4f46e5)',
-              borderRadius: 10, fontSize: 13, fontWeight: 600, color: '#fff',
-              textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Database style={{ width: 14, height: 14 }} /> All Sources
-          </Link>
-        </div>
-      </div>
+    <div className="px-7 py-6 max-w-[1200px] mx-auto">
+      <DashboardHeader
+        subtitle={`Platform overview · Updated ${ts.toLocaleTimeString()}`}
+        ctaLabel="All Sources" ctaTo="/sources" ctaIcon={<Database className="w-3.5 h-3.5" />}
+        onRefresh={load}
+      />
 
       {/* KPIs */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 20 }}>
-        <KPI label="Total Sources"  value={total}         sub="across all projects"     icon={<Database style={{ width: 18, height: 18 }} />}    color="blue"   />
-        <KPI label="In Progress"    value={inProgress}    sub="active work"             icon={<Activity style={{ width: 18, height: 18 }} />}    color="purple" />
-        <KPI label="Approved"       value={approvedCount} sub={`${total > 0 ? Math.round(approvedCount / total * 100) : 0}% complete`}
-          icon={<CheckCircle style={{ width: 18, height: 18 }} />} color="green"
+      <div className="grid grid-cols-5 gap-3 mb-5">
+        <KPI label="Total Sources" value={total} sub="across all projects" icon={<Database className="w-[18px] h-[18px]" />} color="blue" />
+        <KPI label="In Progress" value={inProgress} sub="active work" icon={<Activity className="w-[18px] h-[18px]" />} color="purple" />
+        <KPI label="Approved" value={approvedCount} sub={`${total > 0 ? Math.round(approvedCount / total * 100) : 0}% complete`}
+          icon={<CheckCircle className="w-[18px] h-[18px]" />} color="green"
           trend={{ value: s?.approved_this_week ?? 0, label: 'this week' }} />
-        <KPI label="Not Started"    value={byStatus['not_started'] ?? 0} sub="awaiting extraction"
-          icon={<Clock style={{ width: 18, height: 18 }} />} color="amber" />
-        <KPI label="Needs Admin ✓"  value={pendingAdmin}  sub="reviewer approved"      icon={<ShieldCheck style={{ width: 18, height: 18 }} />} color="red"    />
+        <KPI label="Not Started" value={byStatus['not_started'] ?? 0} sub="awaiting extraction" icon={<Clock className="w-[18px] h-[18px]" />} color="amber" />
+        <KPI label="Needs Admin ✓" value={pendingAdmin} sub="reviewer approved" icon={<ShieldCheck className="w-[18px] h-[18px]" />} color="red" />
       </div>
 
       {/* Admin review alert */}
       {pendingAdmin > 0 && (
-        <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 14,
-          padding: '14px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <ShieldCheck style={{ width: 20, height: 20, color: '#dc2626', flexShrink: 0 }} />
-          <div style={{ flex: 1 }}>
-            <p style={{ fontSize: 14, fontWeight: 700, color: '#dc2626', margin: 0 }}>
+        <div className="bg-red-50 border border-red-200 rounded-2xl px-5 py-3.5 mb-5 flex items-center gap-3">
+          <ShieldCheck className="w-5 h-5 text-red-600 shrink-0" />
+          <div className="flex-1">
+            <p className="text-sm font-bold text-red-700">
               {pendingAdmin} source{pendingAdmin !== 1 ? 's' : ''} waiting for your final approval
             </p>
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>
-              Reviewer has approved — do your admin final review to mark complete
-            </p>
+            <p className="text-xs text-gray-400 mt-0.5">Reviewer has approved — do your admin final review to mark complete</p>
           </div>
-          <Link to="/sources"
-            style={{ padding: '7px 14px', background: '#dc2626', color: '#fff',
-              borderRadius: 8, fontSize: 12, fontWeight: 600, textDecoration: 'none' }}>
-            Review now →
+          <Link to="/sources">
+            <Button size="sm" variant="danger">Review now →</Button>
           </Link>
         </div>
       )}
 
       {/* Fast review alert */}
       {hasFlagged && (
-        <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 14,
-          padding: '14px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 12 }}>
-          <Zap style={{ width: 20, height: 20, color: '#c2410c', flexShrink: 0 }} />
+        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5 mb-5 flex items-center gap-3">
+          <Zap className="w-5 h-5 text-amber-600 shrink-0" />
           <div>
-            <p style={{ fontSize: 14, fontWeight: 700, color: '#c2410c', margin: 0 }}>
-              Suspiciously fast reviews detected
-            </p>
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '2px 0 0' }}>
-              One or more reviewers completed records in under 90 seconds — check the Reviewers table below
-            </p>
+            <p className="text-sm font-bold text-amber-700">Suspiciously fast reviews detected</p>
+            <p className="text-xs text-gray-400 mt-0.5">One or more reviewers completed records in under 90 seconds — check the Reviewers table below</p>
           </div>
         </div>
       )}
 
       {/* Chart + Per-project table */}
-      <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 16, marginBottom: 20 }}>
-
-        {/* Status chart */}
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
-          padding: '18px 20px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
-          <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: '0 0 4px' }}>Sources by Status</p>
-          <p style={{ fontSize: 11, color: '#94a3b8', margin: '0 0 14px' }}>{total} total</p>
+      <div className="grid gap-4 mb-5" style={{ gridTemplateColumns: '340px 1fr' }}>
+        <Card className="p-5">
+          <p className="text-sm font-bold text-gray-900 mb-1">Sources by Status</p>
+          <p className="text-[11px] text-gray-400 mb-3.5">{total} total</p>
           {chartData.length === 0
-            ? <div style={{ height: 160, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#94a3b8', fontSize: 12 }}>No data yet</div>
+            ? <div className="h-40 flex items-center justify-center text-gray-400 text-xs">No data yet</div>
             : <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={chartData} barSize={16} margin={{ top: 2, right: 2, bottom: 0, left: -20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
@@ -339,27 +313,24 @@ function AdminDashboard() {
                 </BarChart>
               </ResponsiveContainer>
           }
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginTop: 10 }}>
+          <div className="flex flex-col gap-1 mt-2.5">
             {chartData.map(d => (
-              <div key={d.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                padding: '3px 6px', borderRadius: 6 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <div style={{ width: 7, height: 7, borderRadius: 2, background: d.color }} />
-                  <span style={{ fontSize: 10, color: '#64748b' }}>{d.name}</span>
+              <div key={d.name} className="flex items-center justify-between px-1.5 py-0.5 rounded-md">
+                <div className="flex items-center gap-1.5">
+                  <div className="w-1.5 h-1.5 rounded-sm" style={{ background: d.color }} />
+                  <span className="text-[10px] text-gray-500">{d.name}</span>
                 </div>
-                <span style={{ fontSize: 11, fontWeight: 700, color: d.color }}>{d.value}</span>
+                <span className="text-[11px] font-bold" style={{ color: d.color }}>{d.value}</span>
               </div>
             ))}
           </div>
-        </div>
+        </Card>
 
-        {/* Per-project table */}
-        <SectionCard title="Projects Overview"
-          sub="Click a project to filter recent activity">
+        <SectionCard title="Projects Overview" sub="Click a project to filter recent activity">
           {perProject.length === 0
-            ? <div style={{ padding: 32, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No projects yet</div>
-            : <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            ? <div className="p-8 text-center text-gray-400 text-sm">No projects yet</div>
+            : <div className="overflow-x-auto">
+                <table className="w-full border-collapse">
                   <thead>
                     <tr>
                       <TH>Project</TH>
@@ -377,22 +348,19 @@ function AdminDashboard() {
                       return (
                         <tr key={pp.project_id}
                           onClick={() => setActiveProject(active ? null : pp.project_id)}
-                          style={{ cursor: 'pointer', background: active ? '#eff6ff' : 'transparent' }}
-                          onMouseEnter={e => { if (!active) (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
-                          onMouseLeave={e => { if (!active) (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
+                          className={cn('cursor-pointer transition', active ? 'bg-brand-50' : 'hover:bg-gray-50')}>
                           <TD>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                              <div style={{ width: 8, height: 8, borderRadius: '50%',
-                                background: pct === 100 ? '#10b981' : pct > 50 ? '#3b82f6' : '#94a3b8' }} />
-                              <span style={{ fontWeight: 600 }}>{pName(pp.project_id)}</span>
-                              {active && <span style={{ fontSize: 10, background: '#2563eb', color: '#fff', padding: '1px 6px', borderRadius: 20 }}>filtered</span>}
+                            <div className="flex items-center gap-2">
+                              <div className={cn('w-2 h-2 rounded-full', pct === 100 ? 'bg-emerald-500' : pct > 50 ? 'bg-blue-500' : 'bg-gray-300')} />
+                              <span className="font-semibold">{pName(pp.project_id)}</span>
+                              {active && <Badge variant="indigo">filtered</Badge>}
                             </div>
                           </TD>
-                          <TD align="center"><span style={{ fontWeight: 700 }}>{pp.total}</span></TD>
-                          <TD align="center"><span style={{ color: '#059669', fontWeight: 600 }}>{pp.approved}</span></TD>
-                          <TD align="center"><span style={{ color: '#7c3aed' }}>{pp.in_progress}</span></TD>
-                          <TD align="center"><span style={{ color: '#94a3b8' }}>{pp.not_started}</span></TD>
-                          <TD align="center"><MiniBar value={pp.approved} max={pp.total} color={pct === 100 ? '#10b981' : '#2563eb'} /></TD>
+                          <TD align="center"><span className="font-bold">{pp.total}</span></TD>
+                          <TD align="center"><span className="text-emerald-600 font-semibold">{pp.approved}</span></TD>
+                          <TD align="center"><span className="text-purple-600">{pp.in_progress}</span></TD>
+                          <TD align="center"><span className="text-gray-400">{pp.not_started}</span></TD>
+                          <TD align="center"><MiniBar value={pp.approved} max={pp.total} tone={pct === 100 ? 'green' : 'brand'} /></TD>
                         </tr>
                       )
                     })}
@@ -401,9 +369,8 @@ function AdminDashboard() {
               </div>
           }
           {activeProject && (
-            <div style={{ padding: '8px 16px', borderTop: '1px solid #f1f5f9' }}>
-              <button onClick={() => setActiveProject(null)}
-                style={{ fontSize: 12, color: '#2563eb', background: 'none', border: 'none', cursor: 'pointer' }}>
+            <div className="px-4 py-2 border-t border-gray-100">
+              <button onClick={() => setActiveProject(null)} className="text-xs text-brand-600 hover:text-brand-700">
                 ✕ Clear project filter
               </button>
             </div>
@@ -412,67 +379,50 @@ function AdminDashboard() {
       </div>
 
       {/* Productivity tables */}
-      <SectionCard title="Team Productivity"
-        sub="Per-person extraction and review metrics from all projects">
-        <div style={{ padding: '12px 16px 0', display: 'flex', gap: 0, borderBottom: '1px solid #f1f5f9' }}>
+      <SectionCard title="Team Productivity" sub="Per-person extraction and review metrics from all projects">
+        <div className="px-4 pt-3 flex border-b border-gray-100">
           {(['extractors', 'reviewers'] as const).map(t => (
             <button key={t} onClick={() => setProdTab(t)}
-              style={{ padding: '7px 18px', fontSize: 13, fontWeight: 500, cursor: 'pointer',
-                border: 'none', borderBottom: prodTab === t ? '2px solid #2563eb' : '2px solid transparent',
-                background: 'transparent', color: prodTab === t ? '#2563eb' : '#64748b',
-                marginBottom: -1 }}>
-              {t === 'extractors'
-                ? `⛏ Extractors (${extractors.length})`
-                : `🔍 Reviewers (${reviewers.length})`}
+              className={cn('px-4.5 py-1.5 text-sm font-medium border-b-2 -mb-px transition',
+                prodTab === t ? 'border-brand-600 text-brand-600' : 'border-transparent text-gray-500 hover:text-gray-700')}>
+              {t === 'extractors' ? `⛏ Extractors (${extractors.length})` : `🔍 Reviewers (${reviewers.length})`}
             </button>
           ))}
         </div>
 
         {prodTab === 'extractors' && (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  <TH>Extractor</TH>
-                  <TH align="center">Sources</TH>
-                  <TH align="center">Records</TH>
-                  <TH align="center">Valid</TH>
-                  <TH align="center">Errors</TH>
-                  <TH align="center">Error Rate</TH>
-                  <TH align="center">Approval Rate</TH>
+                  <TH>Extractor</TH><TH align="center">Sources</TH><TH align="center">Records</TH>
+                  <TH align="center">Valid</TH><TH align="center">Errors</TH><TH align="center">Error Rate</TH><TH align="center">Approval Rate</TH>
                 </tr>
               </thead>
               <tbody>
                 {extractors.length === 0
-                  ? <tr><td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>No extraction data yet</td></tr>
+                  ? <tr><td colSpan={7} className="p-8 text-center text-gray-400">No extraction data yet</td></tr>
                   : extractors.map((e: any) => (
-                    <tr key={e.user_id}
-                      onMouseEnter={el => { (el.currentTarget as HTMLElement).style.background = '#f8fafc' }}
-                      onMouseLeave={el => { (el.currentTarget as HTMLElement).style.background = 'transparent' }}>
+                    <tr key={e.user_id} className="hover:bg-gray-50 transition">
                       <TD>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Avatar name={e.name} />
+                        <div className="flex items-center gap-2">
+                          <Avatar name={e.name} size="sm" />
                           <div>
-                            <p style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>{e.name}</p>
-                            <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>{e.email}</p>
+                            <p className="text-sm font-semibold m-0">{e.name}</p>
+                            <p className="text-[11px] text-gray-400 m-0">{e.email}</p>
                           </div>
                         </div>
                       </TD>
                       <TD align="center">{e.sources_worked}</TD>
-                      <TD align="center"><span style={{ fontWeight: 700, color: '#2563eb' }}>{e.total_records}</span></TD>
-                      <TD align="center"><span style={{ color: '#059669', fontWeight: 600 }}>{e.valid_records}</span></TD>
+                      <TD align="center"><span className="font-bold text-brand-600">{e.total_records}</span></TD>
+                      <TD align="center"><span className="text-emerald-600 font-semibold">{e.valid_records}</span></TD>
                       <TD align="center">
-                        <span style={{ color: e.invalid_records > 0 ? '#dc2626' : '#94a3b8', fontWeight: e.invalid_records > 0 ? 700 : 400 }}>
-                          {e.invalid_records}
-                        </span>
+                        <span className={cn(e.invalid_records > 0 ? 'text-red-600 font-bold' : 'text-gray-400')}>{e.invalid_records}</span>
                       </TD>
+                      <TD align="center"><MiniBar value={e.error_rate_pct} max={100} tone={e.error_rate_pct > 10 ? 'red' : 'green'} /></TD>
                       <TD align="center">
-                        <MiniBar value={e.error_rate_pct} max={100}
-                          color={e.error_rate_pct > 10 ? '#ef4444' : '#10b981'} />
-                      </TD>
-                      <TD align="center">
-                        <span style={{ fontSize: 12, fontWeight: 700,
-                          color: e.approval_rate_pct >= 80 ? '#059669' : e.approval_rate_pct >= 50 ? '#d97706' : '#dc2626' }}>
+                        <span className={cn('text-xs font-bold',
+                          e.approval_rate_pct >= 80 ? 'text-emerald-600' : e.approval_rate_pct >= 50 ? 'text-amber-600' : 'text-red-600')}>
                           {e.approval_rate_pct}%
                         </span>
                       </TD>
@@ -484,58 +434,44 @@ function AdminDashboard() {
         )}
 
         {prodTab === 'reviewers' && (
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
               <thead>
                 <tr>
-                  <TH>Reviewer</TH>
-                  <TH align="center">Reviewed</TH>
-                  <TH align="center">Approved</TH>
-                  <TH align="center">Rejected</TH>
-                  <TH align="center">Avg Review Time</TH>
-                  <TH align="center">Fast Reviews</TH>
-                  <TH align="center">Approval Rate</TH>
+                  <TH>Reviewer</TH><TH align="center">Reviewed</TH><TH align="center">Approved</TH>
+                  <TH align="center">Rejected</TH><TH align="center">Avg Review Time</TH><TH align="center">Fast Reviews</TH><TH align="center">Approval Rate</TH>
                 </tr>
               </thead>
               <tbody>
                 {reviewers.length === 0
-                  ? <tr><td colSpan={7} style={{ padding: 32, textAlign: 'center', color: '#94a3b8' }}>No review data yet</td></tr>
+                  ? <tr><td colSpan={7} className="p-8 text-center text-gray-400">No review data yet</td></tr>
                   : reviewers.map((r: any) => (
-                    <tr key={r.user_id}
-                      style={{ background: r.flagged ? '#fff7ed' : 'transparent' }}
-                      onMouseEnter={el => { (el.currentTarget as HTMLElement).style.background = r.flagged ? '#fed7aa30' : '#f8fafc' }}
-                      onMouseLeave={el => { (el.currentTarget as HTMLElement).style.background = r.flagged ? '#fff7ed' : 'transparent' }}>
+                    <tr key={r.user_id} className={cn('transition', r.flagged ? 'bg-amber-50 hover:bg-amber-100' : 'hover:bg-gray-50')}>
                       <TD>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                          <Avatar name={r.name} />
+                        <div className="flex items-center gap-2">
+                          <Avatar name={r.name} size="sm" />
                           <div>
-                            <p style={{ fontSize: 13, fontWeight: 600, margin: 0 }}>{r.name}</p>
-                            <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>{r.email}</p>
+                            <p className="text-sm font-semibold m-0">{r.name}</p>
+                            <p className="text-[11px] text-gray-400 m-0">{r.email}</p>
                           </div>
                         </div>
                       </TD>
-                      <TD align="center"><span style={{ fontWeight: 700, color: '#7c3aed' }}>{r.total_reviewed}</span></TD>
-                      <TD align="center"><span style={{ color: '#059669', fontWeight: 600 }}>{r.approved}</span></TD>
-                      <TD align="center"><span style={{ color: r.rejected > 0 ? '#dc2626' : '#94a3b8' }}>{r.rejected}</span></TD>
+                      <TD align="center"><span className="font-bold text-purple-600">{r.total_reviewed}</span></TD>
+                      <TD align="center"><span className="text-emerald-600 font-semibold">{r.approved}</span></TD>
+                      <TD align="center"><span className={cn(r.rejected > 0 ? 'text-red-600' : 'text-gray-400')}>{r.rejected}</span></TD>
                       <TD align="center">
-                        <span style={{ fontSize: 12, fontWeight: 600,
-                          color: r.avg_review_secs && r.avg_review_secs < 90 ? '#dc2626'
-                            : r.avg_review_secs && r.avg_review_secs < 300 ? '#d97706' : '#059669' }}>
+                        <span className={cn('text-xs font-semibold',
+                          r.avg_review_secs && r.avg_review_secs < 90 ? 'text-red-600'
+                            : r.avg_review_secs && r.avg_review_secs < 300 ? 'text-amber-600' : 'text-emerald-600')}>
                           {r.avg_review_label ?? '—'}
                         </span>
                       </TD>
                       <TD align="center">
-                        {r.fast_reviews > 0
-                          ? <span style={{ fontSize: 11, fontWeight: 700, padding: '3px 8px', borderRadius: 20,
-                              background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
-                              ⚡ {r.fast_reviews}
-                            </span>
-                          : <span style={{ fontSize: 11, color: '#94a3b8' }}>—</span>
-                        }
+                        {r.fast_reviews > 0 ? <Badge variant="red">⚡ {r.fast_reviews}</Badge> : <span className="text-xs text-gray-400">—</span>}
                       </TD>
                       <TD align="center">
-                        <span style={{ fontSize: 12, fontWeight: 700,
-                          color: r.approval_rate_pct >= 80 ? '#059669' : r.approval_rate_pct >= 50 ? '#d97706' : '#dc2626' }}>
+                        <span className={cn('text-xs font-bold',
+                          r.approval_rate_pct >= 80 ? 'text-emerald-600' : r.approval_rate_pct >= 50 ? 'text-amber-600' : 'text-red-600')}>
                           {r.approval_rate_pct}%
                         </span>
                       </TD>
@@ -552,37 +488,25 @@ function AdminDashboard() {
         sub={activeProject ? `Filtered: ${pName(activeProject)}` : 'Latest source updates across all projects'}
         action={{ label: 'View all', to: '/sources' }}>
         {recent.length === 0
-          ? <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No recent activity</div>
-          : <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          ? <div className="p-10 text-center text-gray-400 text-sm">No recent activity</div>
+          : <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
                 <thead>
-                  <tr>
-                    <TH>Source</TH>
-                    <TH>Project</TH>
-                    <TH align="center">Status</TH>
-                    <TH align="center">Records</TH>
-                    <TH align="center">Valid</TH>
-                    <TH>Last Updated</TH>
-                  </tr>
+                  <tr><TH>Source</TH><TH>Project</TH><TH align="center">Status</TH><TH align="center">Records</TH><TH align="center">Valid</TH><TH>Last Updated</TH></tr>
                 </thead>
                 <tbody>
                   {recent.map((r: any) => (
-                    <tr key={r.id}
-                      onMouseEnter={el => { (el.currentTarget as HTMLElement).style.background = '#f8fafc' }}
-                      onMouseLeave={el => { (el.currentTarget as HTMLElement).style.background = 'transparent' }}>
+                    <tr key={r.id} className="hover:bg-gray-50 transition">
                       <TD>
-                        <Link to={`/projects/${r.project_id}/sources/${r.id}`}
-                          style={{ color: '#1e293b', textDecoration: 'none', fontWeight: 600 }}>
+                        <Link to={`/projects/${r.project_id}/sources/${r.id}`} className="text-gray-800 font-semibold hover:text-brand-600">
                           {r.name}
                         </Link>
                       </TD>
-                      <TD><span style={{ fontSize: 11, color: '#94a3b8' }}>{pName(r.project_id)}</span></TD>
+                      <TD><span className="text-[11px] text-gray-400">{pName(r.project_id)}</span></TD>
                       <TD align="center"><StatusBadge status={r.status} /></TD>
                       <TD align="center">{r.total_records ?? 0}</TD>
-                      <TD align="center">
-                        <span style={{ color: '#059669', fontWeight: 600 }}>{r.valid_records ?? 0}</span>
-                      </TD>
-                      <TD><span style={{ fontSize: 12, color: '#94a3b8' }}>{safeFromNow(r.updated_at)}</span></TD>
+                      <TD align="center"><span className="text-emerald-600 font-semibold">{r.valid_records ?? 0}</span></TD>
+                      <TD><span className="text-xs text-gray-400">{safeFromNow(r.updated_at)}</span></TD>
                     </tr>
                   ))}
                 </tbody>
@@ -596,10 +520,9 @@ function AdminDashboard() {
 
 // ── Extractor Dashboard ────────────────────────────────────────────────────────
 function ExtractorDashboard() {
-  const { user }                               = useAuthStore()
   const { data: s, loading, error, load, ts, clearError } = useSummary()
 
-  if (loading) return <Skeleton />
+  if (loading) return <DashSkeleton />
   if (error && !s?.my_extracting) return <ErrorState onRetry={() => { clearError(); load() }} />
 
   const mine       : any[] = s?.my_extracting ?? []
@@ -610,56 +533,35 @@ function ExtractorDashboard() {
   const pct                = totalRecords > 0 ? Math.round((totalApproved / totalRecords) * 100) : 0
 
   return (
-    <div style={{ padding: '22px 28px', maxWidth: 1200, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-            {greeting()}, {user?.full_name?.split(' ')[0]} 👋
-          </h1>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-            Your extraction workspace · {ts.toLocaleTimeString()}
-          </p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={load}
-            style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-              cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw style={{ width: 14, height: 14 }} /> Refresh
-          </button>
-          <Link to="/sources"
-            style={{ padding: '8px 16px', background: 'linear-gradient(135deg,#2563eb,#4f46e5)',
-              borderRadius: 10, fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none',
-              display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Database style={{ width: 14, height: 14 }} /> All Sources
-          </Link>
-        </div>
-      </div>
+    <div className="px-7 py-6 max-w-[1200px] mx-auto">
+      <DashboardHeader
+        subtitle={`Your extraction workspace · ${ts.toLocaleTimeString()}`}
+        ctaLabel="All Sources" ctaTo="/sources" ctaIcon={<Database className="w-3.5 h-3.5" />}
+        onRefresh={load}
+      />
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
-        <KPI label="My Sources"         value={mine.length}        sub="assigned to me"           icon={<Upload style={{ width: 18, height: 18 }} />}    color="blue"   />
-        <KPI label="Records Uploaded"   value={totalRecords}       sub={`${pct}% reviewer-approved`} icon={<Database style={{ width: 18, height: 18 }} />} color="purple" />
-        <KPI label="Needs Fixes"        value={needsAction.length} sub="errors or corrections"    icon={<AlertCircle style={{ width: 18, height: 18 }} />} color="red"    />
-        <KPI label="Available to Claim" value={available.length}   sub="unclaimed sources"        icon={<Activity style={{ width: 18, height: 18 }} />}   color="green"  />
+      <div className="grid grid-cols-4 gap-3 mb-5">
+        <KPI label="My Sources" value={mine.length} sub="assigned to me" icon={<Upload className="w-[18px] h-[18px]" />} color="blue" />
+        <KPI label="Records Uploaded" value={totalRecords} sub={`${pct}% reviewer-approved`} icon={<Database className="w-[18px] h-[18px]" />} color="purple" />
+        <KPI label="Needs Fixes" value={needsAction.length} sub="errors or corrections" icon={<AlertCircle className="w-[18px] h-[18px]" />} color="red" />
+        <KPI label="Available to Claim" value={available.length} sub="unclaimed sources" icon={<Activity className="w-[18px] h-[18px]" />} color="green" />
       </div>
 
       {needsAction.length > 0 && (
-        <SectionCard title="Needs Your Attention" sub="Reviewer sent these back — fix and re-upload"
-          badge={needsAction.length} badgeColor="#dc2626">
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <SectionCard title="Needs Your Attention" sub="Reviewer sent these back — fix and re-upload" badge={needsAction.length} badgeVariant="red">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
               <thead><tr><TH>Source</TH><TH align="center">Status</TH><TH align="center">Errors</TH><TH>Updated</TH><TH> </TH></tr></thead>
               <tbody>
                 {needsAction.map((r: any) => (
-                  <tr key={r.id} style={{ background: '#fef2f2' }}>
-                    <TD><span style={{ fontWeight: 600 }}>{r.name}</span></TD>
+                  <tr key={r.id} className="bg-red-50/60">
+                    <TD><span className="font-semibold">{r.name}</span></TD>
                     <TD align="center"><StatusBadge status={r.status} /></TD>
-                    <TD align="center"><span style={{ color: '#dc2626', fontWeight: 700 }}>{r.invalid_records}</span></TD>
-                    <TD><span style={{ fontSize: 12, color: '#94a3b8' }}>{safeFromNow(r.updated_at)}</span></TD>
+                    <TD align="center"><span className="text-red-600 font-bold">{r.invalid_records}</span></TD>
+                    <TD><span className="text-xs text-gray-400">{safeFromNow(r.updated_at)}</span></TD>
                     <TD>
-                      <Link to={`/projects/${r.project_id}/sources/${r.id}`}
-                        style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 8,
-                          background: '#fef2f2', color: '#dc2626', textDecoration: 'none', border: '1px solid #fecaca' }}>
-                        Fix →
+                      <Link to={`/projects/${r.project_id}/sources/${r.id}`}>
+                        <Button size="xs" variant="danger">Fix →</Button>
                       </Link>
                     </TD>
                   </tr>
@@ -671,24 +573,19 @@ function ExtractorDashboard() {
       )}
 
       {available.length > 0 && (
-        <SectionCard title="Available to Claim" sub="No extractor assigned — open and claim"
-          badge={`${available.length} available`} badgeColor="#059669">
-          <div style={{ overflowX: 'auto' }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <SectionCard title="Available to Claim" sub="No extractor assigned — open and claim" badge={`${available.length} available`} badgeVariant="green">
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse">
               <thead><tr><TH>Source</TH><TH align="center">Records</TH><TH>Updated</TH><TH> </TH></tr></thead>
               <tbody>
                 {available.slice(0, 8).map((r: any) => (
-                  <tr key={r.id}
-                    onMouseEnter={el => { (el.currentTarget as HTMLElement).style.background = '#f0fdf4' }}
-                    onMouseLeave={el => { (el.currentTarget as HTMLElement).style.background = 'transparent' }}>
-                    <TD><span style={{ fontWeight: 600 }}>{r.name}</span></TD>
+                  <tr key={r.id} className="hover:bg-emerald-50/40 transition">
+                    <TD><span className="font-semibold">{r.name}</span></TD>
                     <TD align="center">{r.total_records ?? 0}</TD>
-                    <TD><span style={{ fontSize: 12, color: '#94a3b8' }}>{safeFromNow(r.updated_at)}</span></TD>
+                    <TD><span className="text-xs text-gray-400">{safeFromNow(r.updated_at)}</span></TD>
                     <TD>
-                      <Link to={`/projects/${r.project_id}/sources/${r.id}`}
-                        style={{ fontSize: 12, fontWeight: 700, padding: '4px 10px', borderRadius: 8,
-                          background: '#059669', color: '#fff', textDecoration: 'none' }}>
-                        Claim →
+                      <Link to={`/projects/${r.project_id}/sources/${r.id}`}>
+                        <Button size="xs" variant="success">Claim →</Button>
                       </Link>
                     </TD>
                   </tr>
@@ -701,31 +598,28 @@ function ExtractorDashboard() {
 
       <SectionCard title="My Sources" sub="All sources assigned to you" action={{ label: 'Full board', to: '/sources' }}>
         {mine.length === 0
-          ? <div style={{ padding: 48, textAlign: 'center', color: '#94a3b8' }}>
-              <Database style={{ width: 36, height: 36, margin: '0 auto 8px', opacity: .2 }} />
-              <p style={{ fontSize: 14, fontWeight: 600, margin: 0 }}>No sources assigned yet</p>
-              <p style={{ fontSize: 12, margin: '4px 0 0' }}>Claim a source above or ask an admin to assign you</p>
+          ? <div className="p-12 text-center text-gray-400">
+              <Database className="w-9 h-9 mx-auto mb-2 opacity-20" />
+              <p className="text-sm font-semibold">No sources assigned yet</p>
+              <p className="text-xs mt-1">Claim a source above or ask an admin to assign you</p>
             </div>
-          : <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          : <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
                 <thead><tr><TH>Source</TH><TH align="center">Status</TH><TH align="center">Total</TH><TH align="center">Valid</TH><TH align="center">Errors</TH><TH align="center">Approved</TH><TH>Updated</TH></tr></thead>
                 <tbody>
                   {mine.map((r: any) => (
-                    <tr key={r.id}
-                      onMouseEnter={el => { (el.currentTarget as HTMLElement).style.background = '#f8fafc' }}
-                      onMouseLeave={el => { (el.currentTarget as HTMLElement).style.background = 'transparent' }}>
+                    <tr key={r.id} className="hover:bg-gray-50 transition">
                       <TD>
-                        <Link to={`/projects/${r.project_id}/sources/${r.id}`}
-                          style={{ color: '#1e293b', textDecoration: 'none', fontWeight: 600 }}>
+                        <Link to={`/projects/${r.project_id}/sources/${r.id}`} className="text-gray-800 font-semibold hover:text-brand-600">
                           {r.name}
                         </Link>
                       </TD>
                       <TD align="center"><StatusBadge status={r.status} /></TD>
                       <TD align="center">{r.total_records ?? 0}</TD>
-                      <TD align="center"><span style={{ color: '#059669', fontWeight: 600 }}>{r.valid_records ?? 0}</span></TD>
-                      <TD align="center"><span style={{ color: r.invalid_records > 0 ? '#ef4444' : '#94a3b8' }}>{r.invalid_records ?? 0}</span></TD>
-                      <TD align="center"><span style={{ color: '#7c3aed', fontWeight: 600 }}>{r.approved_records ?? 0}</span></TD>
-                      <TD><span style={{ fontSize: 12, color: '#94a3b8' }}>{safeFromNow(r.updated_at)}</span></TD>
+                      <TD align="center"><span className="text-emerald-600 font-semibold">{r.valid_records ?? 0}</span></TD>
+                      <TD align="center"><span className={cn(r.invalid_records > 0 ? 'text-red-500' : 'text-gray-400')}>{r.invalid_records ?? 0}</span></TD>
+                      <TD align="center"><span className="text-purple-600 font-semibold">{r.approved_records ?? 0}</span></TD>
+                      <TD><span className="text-xs text-gray-400">{safeFromNow(r.updated_at)}</span></TD>
                     </tr>
                   ))}
                 </tbody>
@@ -739,10 +633,9 @@ function ExtractorDashboard() {
 
 // ── Reviewer Dashboard ────────────────────────────────────────────────────────
 function ReviewerDashboard() {
-  const { user }                               = useAuthStore()
   const { data: s, loading, error, load, ts, clearError } = useSummary()
 
-  if (loading) return <Skeleton />
+  if (loading) return <DashSkeleton />
   if (error && !s?.my_reviewing) return <ErrorState onRetry={() => { clearError(); load() }} />
 
   const mine            : any[] = s?.my_reviewing         ?? []
@@ -754,74 +647,49 @@ function ReviewerDashboard() {
     ? Math.round((approvedRecords / (approvedRecords + pendingTotal)) * 100) : 0
 
   return (
-    <div style={{ padding: '22px 28px', maxWidth: 1200, margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>
-            {greeting()}, {user?.full_name?.split(' ')[0]} 👋
-          </h1>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>Your review workspace · {ts.toLocaleTimeString()}</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={load}
-            style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-              cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw style={{ width: 14, height: 14 }} /> Refresh
-          </button>
-          <Link to="/sources"
-            style={{ padding: '8px 16px', background: 'linear-gradient(135deg,#7c3aed,#6366f1)',
-              borderRadius: 10, fontSize: 13, fontWeight: 600, color: '#fff', textDecoration: 'none',
-              display: 'flex', alignItems: 'center', gap: 6 }}>
-            <Eye style={{ width: 14, height: 14 }} /> All Sources
-          </Link>
-        </div>
+    <div className="px-7 py-6 max-w-[1200px] mx-auto">
+      <DashboardHeader
+        subtitle={`Your review workspace · ${ts.toLocaleTimeString()}`}
+        ctaLabel="All Sources" ctaTo="/sources" ctaIcon={<Eye className="w-3.5 h-3.5" />}
+        onRefresh={load}
+      />
+
+      <div className="grid grid-cols-4 gap-3 mb-5">
+        <KPI label="Records Approved" value={approvedRecords} sub="approved by you total" icon={<CheckCircle className="w-[18px] h-[18px]" />} color="green" trend={{ value: approvedThisWeek, label: 'this week' }} />
+        <KPI label="Pending" value={pendingTotal} sub="awaiting your review" icon={<Clock className="w-[18px] h-[18px]" />} color="amber" />
+        <KPI label="Ready to Review" value={ready.length} sub="sources waiting for you" icon={<Eye className="w-[18px] h-[18px]" />} color="purple" />
+        <KPI label="My Sources" value={mine.length} sub="assigned to review" icon={<Activity className="w-[18px] h-[18px]" />} color="blue" />
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
-        <KPI label="Records Approved" value={approvedRecords}  sub="approved by you total"     icon={<CheckCircle style={{ width: 18, height: 18 }} />} color="green"  trend={{ value: approvedThisWeek, label: 'this week' }} />
-        <KPI label="Pending"          value={pendingTotal}     sub="awaiting your review"      icon={<Clock style={{ width: 18, height: 18 }} />}       color="amber"  />
-        <KPI label="Ready to Review"  value={ready.length}     sub="sources waiting for you"   icon={<Eye style={{ width: 18, height: 18 }} />}         color="purple" />
-        <KPI label="My Sources"       value={mine.length}      sub="assigned to review"        icon={<Activity style={{ width: 18, height: 18 }} />}    color="blue"   />
-      </div>
-
-      {/* Progress bar */}
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
-        padding: '16px 20px', marginBottom: 20, boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+      {/* Progress card */}
+      <Card className="p-5 mb-5">
+        <div className="flex items-center justify-between mb-2.5">
           <div>
-            <p style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>Your Review Progress</p>
-            <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>
+            <p className="text-sm font-bold text-gray-900">Your Review Progress</p>
+            <p className="text-xs text-gray-400 mt-0.5">
               {approvedRecords} approved · {pendingTotal} pending across {mine.length} source{mine.length !== 1 ? 's' : ''}
             </p>
           </div>
-          <p style={{ fontSize: 28, fontWeight: 800, color: '#7c3aed', margin: 0 }}>{pct}%</p>
+          <p className="text-[28px] font-extrabold text-purple-600 leading-none">{pct}%</p>
         </div>
-        <div style={{ background: '#f1f5f9', borderRadius: 99, height: 10, overflow: 'hidden' }}>
-          <div style={{ background: 'linear-gradient(90deg,#7c3aed,#6366f1)', height: '100%',
-            borderRadius: 99, width: `${pct}%`, transition: 'width 0.8s ease' }} />
+        <div className="bg-gray-100 rounded-full h-2.5 overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-700"
+            style={{ width: `${pct}%`, background: 'linear-gradient(90deg,#7c3aed,#6366f1)' }} />
         </div>
-      </div>
+      </Card>
 
-      {/* Review queue table */}
-      <SectionCard title="My Review Queue" sub="Click any row to open and review"
-        action={{ label: 'Full board', to: '/sources' }}>
+      <SectionCard title="My Review Queue" sub="Click any row to open and review" action={{ label: 'Full board', to: '/sources' }}>
         {mine.length === 0
-          ? <div style={{ padding: 40, textAlign: 'center', color: '#94a3b8' }}>
-              <Eye style={{ width: 32, height: 32, margin: '0 auto 8px', opacity: .2 }} />
+          ? <div className="p-10 text-center text-gray-400">
+              <Eye className="w-8 h-8 mx-auto mb-2 opacity-20" />
               <p>No sources in your review queue yet</p>
             </div>
-          : <div style={{ overflowX: 'auto' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          : <div className="overflow-x-auto">
+              <table className="w-full border-collapse">
                 <thead>
                   <tr>
-                    <TH>Source</TH>
-                    <TH align="center">Status</TH>
-                    <TH align="center">Total</TH>
-                    <TH align="center">Approved</TH>
-                    <TH align="center">Pending</TH>
-                    <TH align="center">Progress</TH>
-                    <TH>Updated</TH>
-                    <TH> </TH>
+                    <TH>Source</TH><TH align="center">Status</TH><TH align="center">Total</TH>
+                    <TH align="center">Approved</TH><TH align="center">Pending</TH><TH align="center">Progress</TH><TH>Updated</TH><TH> </TH>
                   </tr>
                 </thead>
                 <tbody>
@@ -830,22 +698,17 @@ function ReviewerDashboard() {
                     const appr = r.approved_records ?? 0
                     const pend = r.pending_records  ?? Math.max(0, tot - appr)
                     return (
-                      <tr key={r.id}
-                        onMouseEnter={el => { (el.currentTarget as HTMLElement).style.background = '#f8fafc' }}
-                        onMouseLeave={el => { (el.currentTarget as HTMLElement).style.background = 'transparent' }}>
-                        <TD><span style={{ fontWeight: 600 }}>{r.name}</span></TD>
+                      <tr key={r.id} className="hover:bg-gray-50 transition">
+                        <TD><span className="font-semibold">{r.name}</span></TD>
                         <TD align="center"><StatusBadge status={r.status} /></TD>
                         <TD align="center">{tot}</TD>
-                        <TD align="center"><span style={{ color: '#059669', fontWeight: 600 }}>{appr}</span></TD>
-                        <TD align="center">
-                          <span style={{ color: pend > 0 ? '#dc2626' : '#94a3b8', fontWeight: pend > 0 ? 700 : 400 }}>{pend}</span>
-                        </TD>
-                        <TD align="center"><MiniBar value={appr} max={tot} color="#7c3aed" /></TD>
-                        <TD><span style={{ fontSize: 12, color: '#94a3b8' }}>{safeFromNow(r.updated_at)}</span></TD>
+                        <TD align="center"><span className="text-emerald-600 font-semibold">{appr}</span></TD>
+                        <TD align="center"><span className={cn(pend > 0 ? 'text-red-600 font-bold' : 'text-gray-400')}>{pend}</span></TD>
+                        <TD align="center"><MiniBar value={appr} max={tot} tone="brand" /></TD>
+                        <TD><span className="text-xs text-gray-400">{safeFromNow(r.updated_at)}</span></TD>
                         <TD>
                           <Link to={`/projects/${r.project_id}/sources/${r.id}`}
-                            style={{ fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 8,
-                              background: '#faf5ff', color: '#7c3aed', textDecoration: 'none', border: '1px solid #e9d5ff' }}>
+                            className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-purple-50 text-purple-700 border border-purple-100 hover:bg-purple-100 transition">
                             Review →
                           </Link>
                         </TD>
