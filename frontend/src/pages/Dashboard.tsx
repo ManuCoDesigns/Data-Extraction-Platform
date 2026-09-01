@@ -42,29 +42,35 @@ function KPI({ label, value, sub, icon, color, trend }: {
   icon: React.ReactNode; color: 'blue' | 'purple' | 'green' | 'red' | 'amber' | 'indigo'
   trend?: { value: number; label: string }
 }) {
-  const tones: Record<string, { bg: string; icon: string; text: string }> = {
-    blue:   { bg: 'bg-blue-50',   icon: 'text-blue-600',   text: 'text-blue-700' },
-    purple: { bg: 'bg-purple-50', icon: 'text-purple-600', text: 'text-purple-700' },
-    green:  { bg: 'bg-emerald-50',icon: 'text-emerald-600',text: 'text-emerald-700' },
-    red:    { bg: 'bg-red-50',    icon: 'text-red-600',    text: 'text-red-700' },
-    amber:  { bg: 'bg-amber-50',  icon: 'text-amber-600',  text: 'text-amber-700' },
-    indigo: { bg: 'bg-brand-50',  icon: 'text-brand-600',  text: 'text-brand-700' },
+  const tones: Record<string, { grad: string; ring: string; text: string; accent: string }> = {
+    blue:   { grad: 'from-blue-500 to-blue-600',       ring: 'shadow-blue-500/25',   text: 'text-blue-700',    accent: 'bg-blue-500' },
+    purple: { grad: 'from-purple-500 to-purple-600',   ring: 'shadow-purple-500/25', text: 'text-purple-700',  accent: 'bg-purple-500' },
+    green:  { grad: 'from-emerald-500 to-emerald-600', ring: 'shadow-emerald-500/25',text: 'text-emerald-700', accent: 'bg-emerald-500' },
+    red:    { grad: 'from-red-500 to-rose-600',        ring: 'shadow-red-500/25',    text: 'text-red-700',     accent: 'bg-red-500' },
+    amber:  { grad: 'from-amber-500 to-orange-600',    ring: 'shadow-amber-500/25',  text: 'text-amber-700',   accent: 'bg-amber-500' },
+    indigo: { grad: 'from-brand-500 to-brand-700',     ring: 'shadow-brand-500/25',  text: 'text-brand-700',   accent: 'bg-brand-600' },
   }
   const t = tones[color] ?? tones.indigo
   return (
-    <Card className="p-4">
-      <div className="flex items-center justify-between mb-2.5">
-        <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center', t.bg, t.icon)}>{icon}</div>
+    <div className={cn(
+      'relative bg-white rounded-2xl border border-gray-100 p-4 overflow-hidden group',
+      'shadow-card hover:shadow-float hover:-translate-y-0.5 transition-all duration-200'
+    )}>
+      <div className={cn('absolute top-0 left-0 right-0 h-1', t.accent)} />
+      <div className="flex items-center justify-between mb-3">
+        <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center text-white bg-gradient-to-br shadow-lg', t.grad, t.ring)}>
+          {icon}
+        </div>
         {trend && trend.value > 0 && (
-          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">
-            +{trend.value} {trend.label}
+          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-full flex items-center gap-0.5">
+            ↑ {trend.value} {trend.label}
           </span>
         )}
       </div>
-      <p className="text-2xl font-extrabold text-gray-900 leading-none tracking-tight">{value}</p>
-      <p className={cn('text-xs font-semibold mt-1', t.text)}>{label}</p>
+      <p className="text-[28px] font-extrabold text-gray-900 leading-none tracking-tight tabular-nums">{value}</p>
+      <p className={cn('text-xs font-bold mt-1.5', t.text)}>{label}</p>
       <p className="text-[11px] text-gray-400 mt-0.5">{sub}</p>
-    </Card>
+    </div>
   )
 }
 
@@ -188,20 +194,33 @@ function DashboardHeader({ subtitle, ctaLabel, ctaTo, ctaIcon, onRefresh }: {
 }) {
   const { user } = useAuthStore()
   return (
-    <div className="flex items-start justify-between mb-5 flex-wrap gap-3">
-      <div>
-        <h1 className="text-[22px] font-extrabold text-gray-900">
-          {greeting()}, {user?.full_name?.split(' ')[0]} 👋
-        </h1>
-        <p className="text-[13px] text-gray-400 mt-1">{subtitle}</p>
-      </div>
-      <div className="flex gap-2">
-        <Button variant="secondary" size="sm" onClick={onRefresh}>
-          <RefreshCw className="w-3.5 h-3.5" /> Refresh
-        </Button>
-        <Link to={ctaTo}>
-          <Button size="sm">{ctaIcon} {ctaLabel}</Button>
-        </Link>
+    <div className="relative rounded-2xl overflow-hidden mb-6 shadow-float">
+      <div className="absolute inset-0 bg-gradient-to-br from-brand-600 via-brand-700 to-purple-800" />
+      <div className="absolute inset-0 opacity-20"
+        style={{ backgroundImage: 'radial-gradient(circle at 15% 20%, white 0%, transparent 35%), radial-gradient(circle at 85% 80%, white 0%, transparent 40%)' }} />
+      <div className="relative px-7 py-6 flex items-start justify-between flex-wrap gap-4">
+        <div>
+          <h1 className="text-[24px] font-extrabold text-white tracking-tight">
+            {greeting()}, {user?.full_name?.split(' ')[0]} 👋
+          </h1>
+          <p className="text-[13px] text-white/70 mt-1.5 flex items-center gap-1.5">
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+            </span>
+            {subtitle}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={onRefresh}
+            className="px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-sm text-white font-medium flex items-center gap-2 transition backdrop-blur-sm">
+            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+          </button>
+          <Link to={ctaTo}
+            className="px-3.5 py-2 bg-white text-brand-700 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all">
+            {ctaIcon} {ctaLabel}
+          </Link>
+        </div>
       </div>
     </div>
   )
@@ -269,10 +288,13 @@ function AdminDashboard() {
 
       {/* Admin review alert */}
       {pendingAdmin > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-2xl px-5 py-3.5 mb-5 flex items-center gap-3">
-          <ShieldCheck className="w-5 h-5 text-red-600 shrink-0" />
+        <div className="relative bg-white border border-red-100 rounded-2xl pl-5 pr-5 py-4 mb-5 flex items-center gap-4 shadow-card overflow-hidden">
+          <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-gradient-to-b from-red-500 to-rose-600" />
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-red-500 to-rose-600 flex items-center justify-center shadow-lg shadow-red-500/25 shrink-0">
+            <ShieldCheck className="w-5 h-5 text-white" />
+          </div>
           <div className="flex-1">
-            <p className="text-sm font-bold text-red-700">
+            <p className="text-sm font-bold text-gray-900">
               {pendingAdmin} source{pendingAdmin !== 1 ? 's' : ''} waiting for your final approval
             </p>
             <p className="text-xs text-gray-400 mt-0.5">Reviewer has approved — do your admin final review to mark complete</p>
@@ -285,10 +307,13 @@ function AdminDashboard() {
 
       {/* Fast review alert */}
       {hasFlagged && (
-        <div className="bg-amber-50 border border-amber-200 rounded-2xl px-5 py-3.5 mb-5 flex items-center gap-3">
-          <Zap className="w-5 h-5 text-amber-600 shrink-0" />
+        <div className="relative bg-white border border-amber-100 rounded-2xl pl-5 pr-5 py-4 mb-5 flex items-center gap-4 shadow-card overflow-hidden">
+          <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-gradient-to-b from-amber-400 to-orange-600" />
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-400 to-orange-600 flex items-center justify-center shadow-lg shadow-amber-500/25 shrink-0">
+            <Zap className="w-5 h-5 text-white" />
+          </div>
           <div>
-            <p className="text-sm font-bold text-amber-700">Suspiciously fast reviews detected</p>
+            <p className="text-sm font-bold text-gray-900">Suspiciously fast reviews detected</p>
             <p className="text-xs text-gray-400 mt-0.5">One or more reviewers completed records in under 90 seconds — check the Reviewers table below</p>
           </div>
         </div>
@@ -662,21 +687,22 @@ function ReviewerDashboard() {
       </div>
 
       {/* Progress card */}
-      <Card className="p-5 mb-5">
-        <div className="flex items-center justify-between mb-2.5">
+      <div className="relative bg-white rounded-2xl border border-gray-100 p-5 mb-5 shadow-card overflow-hidden">
+        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-purple-500 to-brand-600" />
+        <div className="flex items-center justify-between mb-3">
           <div>
             <p className="text-sm font-bold text-gray-900">Your Review Progress</p>
             <p className="text-xs text-gray-400 mt-0.5">
               {approvedRecords} approved · {pendingTotal} pending across {mine.length} source{mine.length !== 1 ? 's' : ''}
             </p>
           </div>
-          <p className="text-[28px] font-extrabold text-purple-600 leading-none">{pct}%</p>
+          <p className="text-[32px] font-extrabold leading-none tabular-nums bg-gradient-to-br from-purple-600 to-brand-600 bg-clip-text text-transparent">{pct}%</p>
         </div>
         <div className="bg-gray-100 rounded-full h-2.5 overflow-hidden">
           <div className="h-full rounded-full transition-all duration-700"
             style={{ width: `${pct}%`, background: 'linear-gradient(90deg,#7c3aed,#6366f1)' }} />
         </div>
-      </Card>
+      </div>
 
       <SectionCard title="My Review Queue" sub="Click any row to open and review" action={{ label: 'Full board', to: '/sources' }}>
         {mine.length === 0
