@@ -100,10 +100,13 @@ export function SourceDetailPage() {
   }
 
   // Groups the flat raw-file list into a folder tree for display, the same
-  // pattern already used for the records folder tree below.
+  // pattern already used for the records folder tree below. The entry type
+  // is derived from rawFiles itself (rather than redeclared here) so this
+  // can never silently drift out of sync with it again — that mismatch is
+  // exactly what caused the last build to fail.
   type RawDisplayItem =
     | { kind: 'folder'; path: string; depth: number; count: number }
-    | { kind: 'file'; entry: { relative_path: string; is_directory: boolean; size_bytes: number }; depth: number }
+    | { kind: 'file'; entry: (typeof rawFiles)[number]; depth: number }
 
   const rawDisplayItems = useMemo<RawDisplayItem[]>(() => {
     type Node = { files: typeof rawFiles; children: Map<string, Node> }
