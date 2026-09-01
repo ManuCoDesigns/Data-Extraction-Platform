@@ -324,28 +324,43 @@ export function SourcesPage() {
         <Card className="overflow-hidden">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-100 text-xs text-gray-400 uppercase tracking-wide">
-                <th className="text-left px-5 py-3 font-medium">Source</th>
-                {isGlobal && <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Project</th>}
-                <th className="text-left px-4 py-3 font-medium hidden sm:table-cell">Status</th>
-                <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Extractor</th>
-                <th className="text-left px-4 py-3 font-medium hidden md:table-cell">Reviewer</th>
-                <th className="text-right px-4 py-3 font-medium hidden sm:table-cell">Records</th>
-                <th className="text-left px-4 py-3 font-medium hidden lg:table-cell">Updated</th>
+              <tr className="border-b-2 border-gray-100 bg-gray-50/60 text-[10px] text-gray-400 uppercase tracking-wider">
+                <th className="text-left px-5 py-3 font-bold">Source</th>
+                {isGlobal && <th className="text-left px-4 py-3 font-bold hidden md:table-cell">Project</th>}
+                <th className="text-left px-4 py-3 font-bold hidden sm:table-cell">Status</th>
+                <th className="text-left px-4 py-3 font-bold hidden md:table-cell">Extractor</th>
+                <th className="text-left px-4 py-3 font-bold hidden md:table-cell">Reviewer</th>
+                <th className="text-right px-4 py-3 font-bold hidden sm:table-cell">Records</th>
+                <th className="text-left px-4 py-3 font-bold hidden lg:table-cell">Updated</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filtered.map(s => (
-                <tr key={s.id} className="hover:bg-gray-50/60 transition">
+              {filtered.map(s => {
+                const statusGrad: Record<string, string> = {
+                  gray: 'from-gray-400 to-gray-500', amber: 'from-amber-500 to-orange-600',
+                  red: 'from-red-500 to-rose-600', blue: 'from-blue-500 to-blue-600',
+                  purple: 'from-purple-500 to-purple-600', indigo: 'from-brand-500 to-brand-700',
+                  green: 'from-emerald-500 to-emerald-600',
+                }
+                const grad = statusGrad[STATUS_META[s.status].color] ?? statusGrad.indigo
+                const pct = s.total_records > 0 ? Math.round((s.valid_records / s.total_records) * 100) : 0
+                const category = (s as any).category as string | undefined
+                return (
+                <tr key={s.id} className="hover:bg-gray-50/60 transition group">
                   <td className="px-5 py-3">
-                    <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-brand-50 rounded-lg flex items-center justify-center shrink-0">
-                        <Database className="w-4 h-4 text-brand-600" />
+                    <div className="flex items-center gap-2.5">
+                      <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br shadow-sm', grad)}>
+                        <Database className="w-4 h-4 text-white" />
                       </div>
                       <div className="min-w-0">
-                        <p className="font-medium text-gray-900 truncate">{s.name}</p>
-                        <p className="text-xs text-gray-400 truncate">{s.schema_name}</p>
+                        <p className="font-semibold text-gray-900 truncate">{s.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="text-xs text-gray-400 truncate">{s.schema_name}</p>
+                          {category && (
+                            <span className="text-[10px] font-semibold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded-full shrink-0">{category}</span>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </td>
@@ -355,17 +370,27 @@ export function SourcesPage() {
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-600 hidden md:table-cell">{s.assigned_extractor_name ?? '—'}</td>
                   <td className="px-4 py-3 text-xs text-gray-600 hidden md:table-cell">{s.assigned_reviewer_name ?? '—'}</td>
-                  <td className="px-4 py-3 text-right text-xs hidden sm:table-cell">
-                    <span className="text-emerald-700 font-medium">{s.valid_records}</span>
-                    <span className="text-gray-400"> / </span>
-                    <span className="text-gray-700">{s.total_records}</span>
+                  <td className="px-4 py-3 text-right hidden sm:table-cell">
+                    <div className="flex items-center justify-end gap-2">
+                      <span className="text-xs">
+                        <span className="text-emerald-700 font-bold">{s.valid_records}</span>
+                        <span className="text-gray-300"> / </span>
+                        <span className="text-gray-600">{s.total_records}</span>
+                      </span>
+                      {s.total_records > 0 && (
+                        <div className="w-10 bg-gray-100 rounded-full h-1.5 overflow-hidden shrink-0">
+                          <div className={cn('h-full rounded-full bg-gradient-to-r', grad)} style={{ width: `${pct}%` }} />
+                        </div>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-400 hidden lg:table-cell">
                     {safeFromNow(s.updated_at)}
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center gap-2 justify-end">
-                      <Link to={`/projects/${s.project_id}/sources/${s.id}`} className="text-brand-600 hover:text-brand-700 text-xs font-medium">
+                      <Link to={`/projects/${s.project_id}/sources/${s.id}`}
+                        className="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-brand-50 text-brand-700 border border-brand-100 hover:bg-brand-100 transition opacity-0 group-hover:opacity-100">
                         Open →
                       </Link>
                       {canManage && (
@@ -376,7 +401,7 @@ export function SourcesPage() {
                     </div>
                   </td>
                 </tr>
-              ))}
+              )})}
             </tbody>
           </table>
         </Card>
@@ -479,14 +504,29 @@ export function SourcesPage() {
 }
 
 function SourceCard({ source, projectId, projectName }: { source: Source; projectId: string; projectName?: string }) {
+  const statusGrad: Record<string, string> = {
+    gray: 'from-gray-400 to-gray-500', amber: 'from-amber-500 to-orange-600',
+    red: 'from-red-500 to-rose-600', blue: 'from-blue-500 to-blue-600',
+    purple: 'from-purple-500 to-purple-600', indigo: 'from-brand-500 to-brand-700',
+    green: 'from-emerald-500 to-emerald-600',
+  }
+  const grad = statusGrad[STATUS_META[source.status].color] ?? statusGrad.indigo
+  const category = (source as any).category as string | undefined
+  const pct = source.total_records > 0 ? Math.round((source.valid_records / source.total_records) * 100) : 0
   return (
     <Link to={`/projects/${projectId}/sources/${source.id}`}>
-      <Card hover className="p-3.5 space-y-2.5">
-        {projectName && (
-          <p className="text-xs text-brand-600 font-medium flex items-center gap-1">
-            <ArrowUpRight className="w-3 h-3" /> {projectName}
-          </p>
-        )}
+      <div className="relative bg-white rounded-2xl border border-gray-100 shadow-card hover:shadow-float hover:-translate-y-0.5 transition-all duration-200 cursor-pointer overflow-hidden p-3.5 space-y-2.5">
+        <div className={cn('absolute top-0 left-0 right-0 h-1 bg-gradient-to-r', grad)} />
+        <div className="flex items-start justify-between gap-2">
+          {projectName ? (
+            <p className="text-xs text-brand-600 font-semibold flex items-center gap-1">
+              <ArrowUpRight className="w-3 h-3" /> {projectName}
+            </p>
+          ) : <span />}
+          {category && (
+            <span className="text-[10px] font-semibold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded-full shrink-0">{category}</span>
+          )}
+        </div>
         <p className="text-sm font-semibold text-gray-900 leading-snug line-clamp-2">{source.name}</p>
         {source.website_url && (
           <p className="text-xs text-gray-400 flex items-center gap-1 truncate">
@@ -494,12 +534,17 @@ function SourceCard({ source, projectId, projectName }: { source: Source; projec
           </p>
         )}
         {source.total_records > 0 && (
-          <div className="flex items-center gap-1.5 text-xs">
-            <span className="text-emerald-600 font-medium">{source.valid_records}</span>
-            <span className="text-gray-300">/</span>
-            <span className="text-gray-500">{source.total_records}</span>
-            <span className="text-gray-400">valid</span>
-            {source.invalid_records > 0 && <AlertCircle className="w-3 h-3 text-amber-500 ml-auto" />}
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5 text-xs">
+              <span className="text-emerald-600 font-bold">{source.valid_records}</span>
+              <span className="text-gray-300">/</span>
+              <span className="text-gray-500">{source.total_records}</span>
+              <span className="text-gray-400">valid</span>
+              {source.invalid_records > 0 && <AlertCircle className="w-3 h-3 text-amber-500 ml-auto" />}
+            </div>
+            <div className="bg-gray-100 rounded-full h-1.5 overflow-hidden">
+              <div className={cn('h-full rounded-full bg-gradient-to-r transition-all duration-500', grad)} style={{ width: `${pct}%` }} />
+            </div>
           </div>
         )}
         <div className="flex items-center justify-between pt-1.5 border-t border-gray-50">
@@ -513,7 +558,7 @@ function SourceCard({ source, projectId, projectName }: { source: Source; projec
           )}
           <span className="text-xs text-gray-300">{safeFromNow(source.updated_at, false)}</span>
         </div>
-      </Card>
+      </div>
     </Link>
   )
 }
