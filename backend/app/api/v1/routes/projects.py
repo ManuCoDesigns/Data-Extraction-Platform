@@ -5,7 +5,8 @@ import re
 from app.db.session import get_db
 from app.core.security import get_current_user, require_roles
 from app.models.all_models import (
-    Project, ProjectMember, UserRole, User, AuditLog, AuditAction, ProjectStatus
+    Project, ProjectMember, UserRole, User, AuditLog, AuditAction, ProjectStatus,
+    Source, SourceStatus,
 )
 from app.schemas.api_schemas import ProjectCreate, ProjectOut, ProjectUpdate, ProjectMemberAdd, ProjectMemberOut, PaginatedResponse
 
@@ -13,6 +14,10 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 def _serialize(p: Project, db: Session) -> ProjectOut:
+    total_sources = db.query(Source).filter(Source.project_id == p.id).count()
+    approved_sources = db.query(Source).filter(
+        Source.project_id == p.id, Source.status == SourceStatus.APPROVED
+    ).count()
     return ProjectOut(
         id=p.id,
         name=p.name,
@@ -23,6 +28,8 @@ def _serialize(p: Project, db: Session) -> ProjectOut:
         created_at=p.created_at,
         member_count=len(p.members),
         job_count=len(p.jobs),
+        total_sources=total_sources,
+        approved_sources=approved_sources,
     )
 
 

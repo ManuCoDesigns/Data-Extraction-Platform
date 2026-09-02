@@ -69,6 +69,8 @@ class ProjectOut(BaseModel):
     created_at: datetime
     member_count: Optional[int] = None
     job_count: Optional[int] = None
+    total_sources: Optional[int] = None
+    approved_sources: Optional[int] = None
 
     model_config = {"from_attributes": True}
 
