@@ -102,7 +102,7 @@ export const authApi = {
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
 export const projectsApi = {
-  list: (page = 1) => api.get('/projects', { params: { page } }).then(r => r.data),
+  list: (page = 1, page_size = 20) => api.get('/projects', { params: { page, page_size } }).then(r => r.data),
   get: (id: string) => api.get(`/projects/${id}`).then(r => r.data),
   create: (data: { name: string; description?: string }) =>
     api.post('/projects', data).then(r => r.data),

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, FolderKanban, Database, CheckCircle, Clock, ArrowRight, Trash2, Edit3, Download, TrendingUp, Package } from 'lucide-react'
-import { projectsApi, sourcesApi } from '@/api/client'
-import { Modal, Input, Textarea, Select, ConfirmDialog, toast, cn } from '@/components/ui'
+import { Plus, FolderKanban, Database, CheckCircle, Clock, ArrowRight, Trash2, Edit3, Download, TrendingUp, Package, Users, Search, X } from 'lucide-react'
+import { projectsApi, sourcesApi, usersApi } from '@/api/client'
+import { Modal, Input, Textarea, Select, ConfirmDialog, Avatar, toast, cn } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
 import type { Project } from '@/types'
@@ -18,11 +18,28 @@ export function ProjectsPage() {
   const { user }  = useAuthStore()
   const navigate  = useNavigate()
 
-  const load = () => {
+  // Fetches every page (using the backend's max page_size of 100 per call)
+  // instead of only ever reading page 1 — previously anything beyond the
+  // first 20 projects was silently invisible with no error or indication.
+  const load = async () => {
     setLoading(true)
-    projectsApi.list().then((r: any) => {
-      setProjects(Array.isArray(r) ? r : r?.items ?? [])
-    }).catch(() => {}).finally(() => setLoading(false))
+    try {
+      let page = 1
+      let all: Project[] = []
+      while (true) {
+        const r: any = await projectsApi.list(page, 100)
+        const items = Array.isArray(r) ? r : r?.items ?? []
+        all = [...all, ...items]
+        const totalPages = r?.pages ?? 1
+        if (page >= totalPages || items.length === 0) break
+        page++
+      }
+      setProjects(all)
+    } catch {
+      toast.error('Failed to load projects')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => { load() }, [])
@@ -120,6 +137,76 @@ export function ProjectsPage() {
     }
   }
 
+  // ── Search + status filter ────────────────────────────────────────────────
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'paused' | 'archived' | 'template'>('all')
+
+  const filteredProjects = projects.filter(p => {
+    if (search && !p.name.toLowerCase().includes(search.toLowerCase())) return false
+    if (statusFilter !== 'all' && ((p as any).status ?? 'active') !== statusFilter) return false
+    return true
+  })
+
+  // ── Member management ─────────────────────────────────────────────────────
+  const [membersProject, setMembersProject] = useState<Project | null>(null)
+  const [members, setMembers] = useState<any[]>([])
+  const [loadingMembers, setLoadingMembers] = useState(false)
+  const [allUsers, setAllUsers] = useState<any[]>([])
+  const [addUserId, setAddUserId] = useState('')
+  const [addRole, setAddRole] = useState('pipeline_operator')
+  const [addingMember, setAddingMember] = useState(false)
+  const [removingMemberId, setRemovingMemberId] = useState<string | null>(null)
+
+  const openMembers = async (p: Project) => {
+    setMembersProject(p)
+    setLoadingMembers(true)
+    setAddUserId('')
+    try {
+      const [m, u] = await Promise.all([
+        projectsApi.listMembers(p.id),
+        usersApi.list(),
+      ])
+      setMembers(Array.isArray(m) ? m : [])
+      setAllUsers(Array.isArray(u) ? u : (u as any)?.items ?? [])
+    } catch {
+      toast.error('Failed to load members')
+    } finally {
+      setLoadingMembers(false)
+    }
+  }
+
+  const handleAddMember = async () => {
+    if (!membersProject || !addUserId) return
+    setAddingMember(true)
+    try {
+      await projectsApi.addMember(membersProject.id, addUserId, addRole)
+      toast.success('Member added')
+      const m = await projectsApi.listMembers(membersProject.id)
+      setMembers(Array.isArray(m) ? m : [])
+      setAddUserId('')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to add member')
+    } finally {
+      setAddingMember(false)
+    }
+  }
+
+  const handleRemoveMember = async (userId: string) => {
+    if (!membersProject) return
+    setRemovingMemberId(userId)
+    try {
+      await projectsApi.removeMember(membersProject.id, userId)
+      setMembers(prev => prev.filter((m: any) => m.user_id !== userId))
+      toast.success('Member removed')
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to remove member')
+    } finally {
+      setRemovingMemberId(null)
+    }
+  }
+
+  const memberableUsers = allUsers.filter(u => !members.some((m: any) => m.user_id === u.id))
+
   const totalSources   = (p: Project) => (p as any).total_sources   ?? 0
   const approvedSources = (p: Project) => (p as any).approved_sources ?? 0
   const pct = (p: Project) => totalSources(p) > 0
@@ -138,11 +225,13 @@ export function ProjectsPage() {
     <div style={{ padding: '24px 28px', maxWidth: 1200, margin: '0 auto' }}>
 
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
           <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Projects</h1>
           <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-            {projects.length} project{projects.length !== 1 ? 's' : ''} · manage extraction pipelines
+            {filteredProjects.length !== projects.length
+              ? `${filteredProjects.length} of ${projects.length} project${projects.length !== 1 ? 's' : ''}`
+              : `${projects.length} project${projects.length !== 1 ? 's' : ''}`} · manage extraction pipelines
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
@@ -167,6 +256,36 @@ export function ProjectsPage() {
           )}
         </div>
       </div>
+
+      {/* Search + status filter */}
+      {projects.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#f1f5f9', borderRadius: 10, padding: 3 }}>
+            {(['all', 'active', 'paused', 'archived', 'template'] as const).map(s => (
+              <button key={s} onClick={() => setStatusFilter(s)}
+                style={{ padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 600, textTransform: 'capitalize', transition: 'all 0.15s',
+                  background: statusFilter === s ? '#fff' : 'transparent',
+                  color: statusFilter === s ? '#1d4ed8' : '#64748b',
+                  boxShadow: statusFilter === s ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>
+                {s}
+              </button>
+            ))}
+          </div>
+          <div style={{ position: 'relative', marginLeft: 'auto', width: 220 }}>
+            <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#94a3b8' }} />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects…"
+              style={{ width: '100%', padding: '7px 10px 7px 32px', borderRadius: 10, border: '1px solid #e2e8f0',
+                fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+            {search && (
+              <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                background: 'none', border: 'none', cursor: 'pointer', color: '#94a3b8', display: 'flex' }}>
+                <X style={{ width: 13, height: 13 }} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Stats row */}
       {projects.length > 0 && (
@@ -214,6 +333,14 @@ export function ProjectsPage() {
             </button>
           )}
         </div>
+      ) : filteredProjects.length === 0 ? (
+        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 48, textAlign: 'center' }}>
+          <p style={{ fontSize: 14, fontWeight: 600, color: '#1e293b', margin: '0 0 4px' }}>No projects match your filters</p>
+          <button onClick={() => { setSearch(''); setStatusFilter('all') }}
+            style={{ fontSize: 12, color: '#2563eb', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', marginTop: 8 }}>
+            Clear search & filters
+          </button>
+        </div>
       ) : (
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
           overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
@@ -229,14 +356,15 @@ export function ProjectsPage() {
               </tr>
             </thead>
             <tbody>
-              {projects.map((p, i) => {
+              {filteredProjects.map((p, i) => {
                 const { bg, color, label } = statusColor(p)
                 const progress = pct(p)
                 return (
                   <tr key={p.id}
+                    onClick={() => navigate(`/projects/${p.id}/sources`)}
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                    style={{ borderBottom: i < projects.length - 1 ? '1px solid #f8fafc' : 'none', transition: 'background 0.12s' }}>
+                    style={{ borderBottom: i < filteredProjects.length - 1 ? '1px solid #f8fafc' : 'none', transition: 'background 0.12s', cursor: 'pointer' }}>
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div className="bg-gradient-to-br from-brand-500 to-brand-700 shadow-sm"
@@ -305,6 +433,13 @@ export function ProjectsPage() {
                         </button>
                         {canManage && (
                           <>
+                            <button onClick={e => { e.stopPropagation(); openMembers(p) }}
+                              title="Manage members"
+                              style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
+                                border: '1px solid #e2e8f0', color: '#64748b', transition: 'all 0.15s',
+                                cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                              <Users style={{ width: 13, height: 13 }} />
+                            </button>
                             <button onClick={e => { e.stopPropagation(); openEdit(p) }}
                               title="Edit project"
                               style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
@@ -321,7 +456,7 @@ export function ProjectsPage() {
                             </button>
                           </>
                         )}
-                        <Link to={`/projects/${p.id}/sources`}
+                        <Link to={`/projects/${p.id}/sources`} onClick={e => e.stopPropagation()}
                           style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
                             fontWeight: 700, color: '#2563eb', textDecoration: 'none', transition: 'all 0.15s',
                             padding: '5px 12px', borderRadius: 8,
@@ -426,6 +561,71 @@ export function ProjectsPage() {
         onConfirm={handleDelete}
         onCancel={() => setDeleteProject(null)}
       />
+
+      {/* Members modal */}
+      <Modal open={!!membersProject} onClose={() => setMembersProject(null)}
+        title={`Members — ${membersProject?.name ?? ''}`} size="md">
+        {loadingMembers ? (
+          <div style={{ padding: 30, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>Loading members…</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto' }} className="scrollbar-thin">
+              {members.length === 0 ? (
+                <p style={{ fontSize: 13, color: '#94a3b8', textAlign: 'center', padding: '16px 0' }}>No members yet</p>
+              ) : members.map((m: any) => (
+                <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
+                  background: '#f8fafc', borderRadius: 10, border: '1px solid #f1f5f9' }}>
+                  <Avatar name={m.full_name} size="sm" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{m.full_name}</p>
+                    <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>{m.email}</p>
+                  </div>
+                  <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                    background: '#eff6ff', color: '#2563eb', textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
+                    {String(m.role).replace(/_/g, ' ')}
+                  </span>
+                  <button onClick={() => handleRemoveMember(m.user_id)} disabled={removingMemberId === m.user_id}
+                    title="Remove from project"
+                    style={{ padding: 5, borderRadius: 8, background: 'none', border: 'none',
+                      color: '#dc2626', cursor: removingMemberId === m.user_id ? 'not-allowed' : 'pointer',
+                      opacity: removingMemberId === m.user_id ? .5 : 1, display: 'flex', alignItems: 'center' }}>
+                    <Trash2 style={{ width: 13, height: 13 }} />
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 14 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Add a member</p>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <Select value={addUserId} onChange={e => setAddUserId(e.target.value)} style={{ flex: 1 }}>
+                  <option value="">Select a person…</option>
+                  {memberableUsers.map((u: any) => (
+                    <option key={u.id} value={u.id}>{u.full_name} ({u.email})</option>
+                  ))}
+                </Select>
+                <Select value={addRole} onChange={e => setAddRole(e.target.value)} style={{ width: 150 }}>
+                  <option value="pipeline_operator">Extractor</option>
+                  <option value="reviewer">Reviewer</option>
+                  <option value="qa_lead">QA Lead</option>
+                  <option value="project_admin">Project Admin</option>
+                  <option value="read_only">Read Only</option>
+                </Select>
+                <button onClick={handleAddMember} disabled={!addUserId || addingMember}
+                  style={{ padding: '8px 16px', background: 'linear-gradient(135deg,#2563eb,#4f46e5)', color: '#fff',
+                    border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, whiteSpace: 'nowrap',
+                    cursor: (!addUserId || addingMember) ? 'not-allowed' : 'pointer',
+                    opacity: (!addUserId || addingMember) ? .6 : 1 }}>
+                  {addingMember ? 'Adding…' : 'Add'}
+                </button>
+              </div>
+              {memberableUsers.length === 0 && allUsers.length > 0 && (
+                <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>Everyone is already a member of this project.</p>
+              )}
+            </div>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }
