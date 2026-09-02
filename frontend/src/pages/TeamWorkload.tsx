@@ -21,13 +21,22 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+// Gradient avatar, matching the pattern already used on Escalations —
+// deterministic per-name colour, just upgraded from a flat fill to a
+// gradient + shadow so it reads consistently with the rest of the app.
+const AVATAR_GRADIENTS = [
+  'linear-gradient(135deg,#3b82f6,#1d4ed8)', 'linear-gradient(135deg,#a855f7,#7c3aed)',
+  'linear-gradient(135deg,#10b981,#047857)', 'linear-gradient(135deg,#ef4444,#b91c1c)',
+  'linear-gradient(135deg,#f59e0b,#b45309)', 'linear-gradient(135deg,#06b6d4,#0e7490)',
+]
+
 function Avatar({ name }: { name: string }) {
-  const colors = ['#2563eb', '#7c3aed', '#059669', '#dc2626', '#d97706', '#0891b2']
-  const color = colors[name.charCodeAt(0) % colors.length]
+  const grad = AVATAR_GRADIENTS[(name ?? '?').charCodeAt(0) % AVATAR_GRADIENTS.length]
   return (
-    <div style={{ width: 26, height: 26, borderRadius: '50%', background: color,
+    <div style={{ width: 26, height: 26, borderRadius: '50%', background: grad,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: 10, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+      fontSize: 10, fontWeight: 700, color: '#fff', flexShrink: 0,
+      boxShadow: '0 1px 3px rgba(0,0,0,0.15)' }}>
       {(name ?? '?')[0].toUpperCase()}
     </div>
   )
@@ -35,17 +44,23 @@ function Avatar({ name }: { name: string }) {
 
 export function TeamWorkloadPage() {
   const [data, setData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(true)         // only true before the very first load
+  const [refreshing, setRefreshing] = useState(false)   // true during the silent 30s poll / filter change / manual refresh
   const [projects, setProjects] = useState<any[]>([])
   const [activeProject, setActiveProject] = useState<string>('')
   const [exporting, setExporting] = useState(false)
 
-  const load = useCallback(() => {
-    setLoading(true)
+  // The 30s poll and every filter change previously replaced the ENTIRE
+  // page — KPIs, table, everything — with a bare "Loading workload…" text,
+  // exactly like the Dashboard bug before its fix. Only the very first
+  // load now shows that; everything after updates silently in place.
+  const load = useCallback((opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false
+    if (silent) setRefreshing(true); else setLoading(true)
     sourcesApi.workload(activeProject || undefined)
       .then(setData)
-      .catch(() => setData({ sources: [], by_person: [], unclaimed_count: 0 }))
-      .finally(() => setLoading(false))
+      .catch(() => { if (!silent) setData({ sources: [], by_person: [], unclaimed_count: 0, llm_verifying_count: 0 }) })
+      .finally(() => { if (silent) setRefreshing(false); else setLoading(false) })
   }, [activeProject])
 
   useEffect(() => {
@@ -54,10 +69,16 @@ export function TeamWorkloadPage() {
     }).catch(() => {})
   }, [])
 
+  // First mount does a real (non-silent) load; every subsequent call from
+  // this same effect firing again (i.e. activeProject changing) is silent —
+  // switching the filter no longer blanks the page while it refetches.
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false)
   useEffect(() => {
-    load()
-    const iv = setInterval(load, 30_000)
+    load(hasLoadedOnce ? { silent: true } : undefined)
+    setHasLoadedOnce(true)
+    const iv = setInterval(() => load({ silent: true }), 30_000)
     return () => clearInterval(iv)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [load])
 
   const exportTimesheet = async () => {
@@ -76,11 +97,17 @@ export function TeamWorkloadPage() {
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Team Workload</h1>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-            Live view of who's handling what · updates every 30s
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-lg shadow-brand-500/25 shrink-0">
+            <Users className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Team Workload</h1>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4, display: 'flex', alignItems: 'center', gap: 6 }}>
+              {refreshing && <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />}
+              Live view of who's handling what · updates every 30s
+            </p>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <select value={activeProject} onChange={e => setActiveProject(e.target.value)}
@@ -92,13 +119,13 @@ export function TeamWorkloadPage() {
           <button onClick={exportTimesheet} disabled={exporting}
             style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
               cursor: exporting ? 'not-allowed' : 'pointer', fontSize: 13, color: '#64748b',
-              display: 'flex', alignItems: 'center', gap: 6, opacity: exporting ? .6 : 1 }}>
+              display: 'flex', alignItems: 'center', gap: 6, opacity: exporting ? .6 : 1, transition: 'all 0.15s' }}>
             <Download style={{ width: 14, height: 14 }} /> {exporting ? 'Exporting…' : 'Export Timesheet'}
           </button>
-          <button onClick={load}
+          <button onClick={() => load({ silent: true })}
             style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-              cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw style={{ width: 14, height: 14 }} /> Refresh
+              cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s' }}>
+            <RefreshCw className={refreshing ? 'animate-spin' : ''} style={{ width: 14, height: 14 }} /> Refresh
           </button>
         </div>
       </div>
@@ -109,24 +136,25 @@ export function TeamWorkloadPage() {
         <>
           {/* KPI row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 20 }}>
-            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 18px' }}>
-              <p style={{ fontSize: 24, fontWeight: 800, color: '#0f172a', margin: 0 }}>{sources.length}</p>
-              <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', margin: '4px 0 0' }}>Active Sources</p>
-            </div>
-            <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 14, padding: '16px 18px' }}>
-              <p style={{ fontSize: 24, fontWeight: 800, color: '#7c3aed', margin: 0 }}>{byPerson.length}</p>
-              <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', margin: '4px 0 0' }}>People Working</p>
-            </div>
-            <div style={{ background: llmVerifyingCount > 0 ? '#ecfdf5' : '#fff',
-              border: `1px solid ${llmVerifyingCount > 0 ? '#bbf7d0' : '#e2e8f0'}`, borderRadius: 14, padding: '16px 18px' }}>
-              <p style={{ fontSize: 24, fontWeight: 800, color: llmVerifyingCount > 0 ? '#059669' : '#0f172a', margin: 0 }}>{llmVerifyingCount}</p>
-              <p style={{ fontSize: 12, fontWeight: 600, color: llmVerifyingCount > 0 ? '#059669' : '#64748b', margin: '4px 0 0' }}>LLM Verifying</p>
-            </div>
-            <div style={{ background: unclaimedCount > 0 ? '#fef2f2' : '#fff',
-              border: `1px solid ${unclaimedCount > 0 ? '#fecaca' : '#e2e8f0'}`, borderRadius: 14, padding: '16px 18px' }}>
-              <p style={{ fontSize: 24, fontWeight: 800, color: unclaimedCount > 0 ? '#dc2626' : '#0f172a', margin: 0 }}>{unclaimedCount}</p>
-              <p style={{ fontSize: 12, fontWeight: 600, color: unclaimedCount > 0 ? '#dc2626' : '#64748b', margin: '4px 0 0' }}>Unclaimed</p>
-            </div>
+            {[
+              { value: sources.length, label: 'Active Sources', icon: '📋', grad: 'linear-gradient(135deg,#6366f1,#4338ca)', accent: '#4f46e5', bg: '#fff', border: '#e2e8f0' },
+              { value: byPerson.length, label: 'People Working', icon: '👥', grad: 'linear-gradient(135deg,#a855f7,#7c3aed)', accent: '#7c3aed', bg: '#fff', border: '#e2e8f0' },
+              { value: llmVerifyingCount, label: 'LLM Verifying', icon: '🤖', grad: 'linear-gradient(135deg,#10b981,#047857)', accent: '#059669',
+                bg: llmVerifyingCount > 0 ? '#ecfdf5' : '#fff', border: llmVerifyingCount > 0 ? '#bbf7d0' : '#e2e8f0' },
+              { value: unclaimedCount, label: 'Unclaimed', icon: '⚠️', grad: 'linear-gradient(135deg,#ef4444,#b91c1c)', accent: '#dc2626',
+                bg: unclaimedCount > 0 ? '#fef2f2' : '#fff', border: unclaimedCount > 0 ? '#fecaca' : '#e2e8f0' },
+            ].map(({ value, label, icon, grad, accent, bg, border }) => (
+              <div key={label} style={{ position: 'relative', background: bg, border: `1px solid ${border}`,
+                borderRadius: 14, padding: '16px 18px', overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: grad }} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <div style={{ width: 30, height: 30, borderRadius: 9, background: grad, display: 'flex',
+                    alignItems: 'center', justifyContent: 'center', fontSize: 14, boxShadow: '0 2px 6px rgba(0,0,0,0.12)' }}>{icon}</div>
+                  <p style={{ fontSize: 24, fontWeight: 800, color: accent, margin: 0, lineHeight: 1 }}>{value}</p>
+                </div>
+                <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', margin: '4px 0 0' }}>{label}</p>
+              </div>
+            ))}
           </div>
 
           {/* Per-person summary */}
@@ -156,10 +184,14 @@ export function TeamWorkloadPage() {
 
           {/* Unclaimed alert */}
           {unclaimedCount > 0 && (
-            <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 14,
-              padding: '12px 18px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10 }}>
-              <AlertCircle style={{ width: 18, height: 18, color: '#dc2626', flexShrink: 0 }} />
-              <p style={{ fontSize: 13, color: '#dc2626', margin: 0 }}>
+            <div style={{ position: 'relative', background: '#fff', border: '1px solid #fecaca', borderRadius: 14,
+              padding: '12px 18px 12px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 10, overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, background: 'linear-gradient(180deg,#ef4444,#b91c1c)' }} />
+              <div style={{ width: 26, height: 26, borderRadius: 8, background: 'linear-gradient(135deg,#ef4444,#b91c1c)',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                <AlertCircle style={{ width: 14, height: 14, color: '#fff' }} />
+              </div>
+              <p style={{ fontSize: 13, color: '#7f1d1d', margin: 0 }}>
                 <strong>{unclaimedCount}</strong> source{unclaimedCount !== 1 ? 's have' : ' has'} no extractor assigned yet
               </p>
             </div>
@@ -168,6 +200,7 @@ export function TeamWorkloadPage() {
           {/* Main table */}
           <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
             overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+            <div style={{ overflowX: 'auto' }} className="scrollbar-thin">
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
@@ -186,7 +219,7 @@ export function TeamWorkloadPage() {
                   <tr key={s.source_id}
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                    style={{ borderBottom: '1px solid #f8fafc' }}>
+                    style={{ borderBottom: '1px solid #f8fafc', transition: 'background 0.12s' }}>
                     <td style={{ padding: '12px 14px' }}>
                       <span style={{ fontSize: 13, fontWeight: 600, color: '#1e293b' }}>{s.source_name}</span>
                     </td>
@@ -247,7 +280,7 @@ export function TeamWorkloadPage() {
                     <td style={{ padding: '12px 14px' }}>
                       <Link to={`/projects/${s.project_id}/sources/${s.source_id}`}
                         style={{ fontSize: 11, fontWeight: 700, color: '#2563eb', textDecoration: 'none',
-                          display: 'flex', alignItems: 'center', gap: 3 }}>
+                          display: 'flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap' }}>
                         Open <ArrowRight style={{ width: 11, height: 11 }} />
                       </Link>
                     </td>
@@ -255,6 +288,7 @@ export function TeamWorkloadPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}
