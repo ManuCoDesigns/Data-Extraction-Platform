@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, FolderKanban, Database, CheckCircle, Clock, ArrowRight, Trash2, Edit3, Download } from 'lucide-react'
+import { Plus, FolderKanban, Database, CheckCircle, Clock, ArrowRight, Trash2, Edit3, Download, TrendingUp } from 'lucide-react'
 import { projectsApi, sourcesApi } from '@/api/client'
 import { Modal, Input, Textarea, toast, cn } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
@@ -82,7 +82,7 @@ export function ProjectsPage() {
             title="Download delivery timesheet for all projects" style={{
             display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px',
             background: '#fff', color: '#374151', border: '1px solid #e2e8f0',
-            borderRadius: 10, fontSize: 13, fontWeight: 600,
+            borderRadius: 10, fontSize: 13, fontWeight: 600, transition: 'all 0.15s',
             cursor: exporting === 'all' ? 'not-allowed' : 'pointer', opacity: exporting === 'all' ? .6 : 1,
           }}>
             <Download style={{ width: 15, height: 15 }} /> {exporting === 'all' ? 'Exporting…' : 'Export Timesheet'}
@@ -92,6 +92,7 @@ export function ProjectsPage() {
               display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px',
               background: 'linear-gradient(135deg,#2563eb,#4f46e5)', color: '#fff',
               border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              boxShadow: '0 3px 10px rgba(37,99,235,0.3)', transition: 'all 0.15s',
             }}>
               <Plus style={{ width: 16, height: 16 }} /> New Project
             </button>
@@ -103,17 +104,23 @@ export function ProjectsPage() {
       {projects.length > 0 && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
           {[
-            { label: 'Total Projects', value: projects.length, color: '#2563eb', bg: '#eff6ff' },
-            { label: 'Total Sources',  value: projects.reduce((a,p) => a + totalSources(p), 0), color: '#7c3aed', bg: '#faf5ff' },
-            { label: 'Approved',       value: projects.reduce((a,p) => a + approvedSources(p), 0), color: '#059669', bg: '#ecfdf5' },
+            { label: 'Total Projects', value: projects.length, icon: FolderKanban, grad: 'from-brand-500 to-brand-700', accent: 'bg-brand-600' },
+            { label: 'Total Sources',  value: projects.reduce((a,p) => a + totalSources(p), 0), icon: Database, grad: 'from-purple-500 to-purple-700', accent: 'bg-purple-500' },
+            { label: 'Approved',       value: projects.reduce((a,p) => a + approvedSources(p), 0), icon: CheckCircle, grad: 'from-emerald-500 to-emerald-700', accent: 'bg-emerald-500' },
             { label: 'Avg Completion', value: projects.length > 0
               ? Math.round(projects.reduce((a,p) => a + pct(p), 0) / projects.length) + '%'
-              : '0%', color: '#d97706', bg: '#fffbeb' },
-          ].map(({ label, value, color, bg }) => (
-            <div key={label} style={{ background: '#fff', border: '1px solid #e2e8f0',
-              borderRadius: 14, padding: '16px 18px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)' }}>
-              <p style={{ fontSize: 24, fontWeight: 800, color, margin: 0 }}>{value}</p>
-              <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', margin: '4px 0 0' }}>{label}</p>
+              : '0%', icon: TrendingUp, grad: 'from-amber-500 to-orange-600', accent: 'bg-amber-500' },
+          ].map(({ label, value, icon: Icon, grad, accent }) => (
+            <div key={label} className={cn('relative bg-white rounded-2xl border border-gray-100 overflow-hidden',
+              'shadow-card hover:shadow-float hover:-translate-y-0.5 transition-all duration-200')} style={{ padding: '16px 18px' }}>
+              <div className={cn('absolute top-0 left-0 right-0 h-1', accent)} />
+              <div className="flex items-center justify-between mb-2.5">
+                <div className={cn('w-9 h-9 rounded-xl flex items-center justify-center text-white bg-gradient-to-br shadow-md', grad)}>
+                  <Icon className="w-[18px] h-[18px]" />
+                </div>
+              </div>
+              <p style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: 0, lineHeight: 1 }}>{value}</p>
+              <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', margin: '6px 0 0' }}>{label}</p>
             </div>
           ))}
         </div>
@@ -125,13 +132,16 @@ export function ProjectsPage() {
       ) : projects.length === 0 ? (
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
           padding: 60, textAlign: 'center' }}>
-          <FolderKanban style={{ width: 40, height: 40, color: '#e2e8f0', margin: '0 auto 12px' }} />
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center mx-auto mb-4 shadow-sm">
+            <FolderKanban className="w-7 h-7 text-white" />
+          </div>
           <p style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', margin: '0 0 6px' }}>No projects yet</p>
           <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 20px' }}>Create your first project to get started</p>
           {canManage && (
             <button onClick={() => setShowNew(true)} style={{
-              padding: '9px 20px', background: '#2563eb', color: '#fff',
-              border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer' }}>
+              padding: '9px 20px', background: 'linear-gradient(135deg,#2563eb,#4f46e5)', color: '#fff',
+              border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer',
+              boxShadow: '0 3px 10px rgba(37,99,235,0.3)' }}>
               Create Project
             </button>
           )}
@@ -139,6 +149,7 @@ export function ProjectsPage() {
       ) : (
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
           overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+          <div style={{ overflowX: 'auto' }} className="scrollbar-thin">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
@@ -157,12 +168,13 @@ export function ProjectsPage() {
                   <tr key={p.id}
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                    style={{ borderBottom: i < projects.length - 1 ? '1px solid #f8fafc' : 'none' }}>
+                    style={{ borderBottom: i < projects.length - 1 ? '1px solid #f8fafc' : 'none', transition: 'background 0.12s' }}>
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 36, height: 36, borderRadius: 10, background: '#eff6ff',
+                        <div className="bg-gradient-to-br from-brand-500 to-brand-700 shadow-sm"
+                          style={{ width: 36, height: 36, borderRadius: 10,
                           display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <FolderKanban style={{ width: 16, height: 16, color: '#2563eb' }} />
+                          <FolderKanban style={{ width: 16, height: 16, color: '#fff' }} />
                         </div>
                         <div>
                           <p style={{ fontSize: 14, fontWeight: 600, color: '#1e293b', margin: 0 }}>{p.name}</p>
@@ -190,8 +202,9 @@ export function ProjectsPage() {
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div style={{ background: '#e2e8f0', borderRadius: 99, height: 6, width: 80, overflow: 'hidden' }}>
-                          <div style={{ background: progress === 100 ? '#10b981' : '#2563eb',
-                            height: '100%', width: `${progress}%`, borderRadius: 99 }} />
+                          <div style={{
+                            background: progress === 100 ? 'linear-gradient(90deg,#10b981,#059669)' : 'linear-gradient(90deg,#3b82f6,#2563eb)',
+                            height: '100%', width: `${progress}%`, borderRadius: 99, transition: 'width 0.4s ease' }} />
                         </div>
                         <span style={{ fontSize: 12, fontWeight: 600,
                           color: progress === 100 ? '#059669' : '#2563eb' }}>
@@ -208,14 +221,14 @@ export function ProjectsPage() {
                           disabled={exporting === p.id}
                           title="Download delivery timesheet for this project"
                           style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
-                            border: '1px solid #e2e8f0', color: '#64748b',
+                            border: '1px solid #e2e8f0', color: '#64748b', transition: 'all 0.15s',
                             cursor: exporting === p.id ? 'not-allowed' : 'pointer',
                             opacity: exporting === p.id ? .6 : 1, display: 'flex', alignItems: 'center' }}>
                           <Download style={{ width: 13, height: 13 }} />
                         </button>
                         <Link to={`/projects/${p.id}/sources`}
                           style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
-                            fontWeight: 700, color: '#2563eb', textDecoration: 'none',
+                            fontWeight: 700, color: '#2563eb', textDecoration: 'none', transition: 'all 0.15s',
                             padding: '5px 12px', borderRadius: 8,
                             background: '#eff6ff', border: '1px solid #bfdbfe' }}>
                           Open <ArrowRight style={{ width: 12, height: 12 }} />
@@ -227,6 +240,7 @@ export function ProjectsPage() {
               })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -254,9 +268,10 @@ export function ProjectsPage() {
               Cancel
             </button>
             <button type="submit" disabled={saving || !name.trim()}
-              style={{ padding: '9px 18px', background: '#2563eb', color: '#fff',
+              style={{ padding: '9px 18px', background: 'linear-gradient(135deg,#2563eb,#4f46e5)', color: '#fff',
                 border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600,
-                cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? .7 : 1 }}>
+                cursor: saving ? 'not-allowed' : 'pointer', opacity: saving ? .7 : 1,
+                boxShadow: saving ? 'none' : '0 3px 10px rgba(37,99,235,0.3)' }}>
               {saving ? 'Creating…' : 'Create Project'}
             </button>
           </div>

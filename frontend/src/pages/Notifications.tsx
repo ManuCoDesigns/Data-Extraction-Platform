@@ -8,6 +8,28 @@ import { formatDistanceToNow } from 'date-fns'
 
 const PAGE_SIZE = 20
 
+// Groups notifications into Today / Yesterday / Earlier sections, the same
+// pattern most inbox-style UIs use — makes a long list scannable instead of
+// one undifferentiated column.
+function groupByDate(items: Notification[]) {
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const startOfYesterday = new Date(startOfToday.getTime() - 86400000)
+
+  const groups: { label: string; items: Notification[] }[] = [
+    { label: 'Today', items: [] },
+    { label: 'Yesterday', items: [] },
+    { label: 'Earlier', items: [] },
+  ]
+  for (const n of items) {
+    const d = new Date(n.created_at)
+    if (d >= startOfToday) groups[0].items.push(n)
+    else if (d >= startOfYesterday) groups[1].items.push(n)
+    else groups[2].items.push(n)
+  }
+  return groups.filter(g => g.items.length > 0)
+}
+
 export function NotificationsPage() {
   const navigate = useNavigate()
   const [items, setItems] = useState<Notification[]>([])
@@ -108,30 +130,35 @@ export function NotificationsPage() {
         />
       ) : (
         <>
-          <Card className="overflow-hidden divide-y divide-gray-50">
-            {items.map(n => (
-              <div key={n.id} onClick={() => handleClick(n)}
-                className={cn('relative px-5 py-4 flex items-start gap-3 cursor-pointer transition group',
-                  n.is_read ? 'bg-white hover:bg-gray-50' : 'bg-brand-50/40 hover:bg-brand-50')}>
-                {!n.is_read && (
-                  <span className="absolute left-2 top-6 w-2 h-2 rounded-full bg-gradient-to-br from-brand-500 to-brand-700" />
-                )}
-                <div className="flex-1 min-w-0 pl-2">
-                  <p className={cn('text-sm', n.is_read ? 'text-gray-700 font-normal' : 'text-gray-900 font-semibold')}>
-                    {n.title}
-                  </p>
-                  {n.body && <p className="text-xs text-gray-400 mt-1 leading-relaxed">{n.body}</p>}
-                  <p className="text-[11px] text-gray-400 mt-1.5">
-                    {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
-                  </p>
-                </div>
-                <button onClick={e => handleDelete(e, n.id)}
-                  className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg hover:bg-red-50 transition opacity-0 group-hover:opacity-100 shrink-0">
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            ))}
-          </Card>
+          {groupByDate(items).map(group => (
+            <div key={group.label} className="space-y-2">
+              <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider px-1">{group.label}</p>
+              <Card className="overflow-hidden divide-y divide-gray-50">
+                {group.items.map(n => (
+                  <div key={n.id} onClick={() => handleClick(n)}
+                    className={cn('relative px-5 py-4 flex items-start gap-3 cursor-pointer transition group',
+                      n.is_read ? 'bg-white hover:bg-gray-50' : 'bg-brand-50/40 hover:bg-brand-50')}>
+                    {!n.is_read && (
+                      <span className="absolute left-2 top-6 w-2 h-2 rounded-full bg-gradient-to-br from-brand-500 to-brand-700" />
+                    )}
+                    <div className="flex-1 min-w-0 pl-2">
+                      <p className={cn('text-sm', n.is_read ? 'text-gray-700 font-normal' : 'text-gray-900 font-semibold')}>
+                        {n.title}
+                      </p>
+                      {n.body && <p className="text-xs text-gray-400 mt-1 leading-relaxed">{n.body}</p>}
+                      <p className="text-[11px] text-gray-400 mt-1.5">
+                        {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
+                      </p>
+                    </div>
+                    <button onClick={e => handleDelete(e, n.id)}
+                      className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg hover:bg-red-50 transition opacity-0 group-hover:opacity-100 shrink-0">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+              </Card>
+            </div>
+          ))}
 
           {hasMore && (
             <div className="flex justify-center pt-2">

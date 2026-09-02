@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
-import { AlertTriangle, RefreshCw, MessageSquare, ArrowRight, Clock } from 'lucide-react'
+import { AlertTriangle, RefreshCw, MessageSquare, ArrowRight, Clock, CheckCircle2 } from 'lucide-react'
 import { sourcesApi } from '@/api/client'
+import { cn } from '@/components/ui'
 
 function timeAgo(iso: string | null) {
   if (!iso) return ''
@@ -13,13 +14,17 @@ function timeAgo(iso: string | null) {
   return `${Math.floor(diff / 86400)}d ago`
 }
 
+// Gradient pairing per name-hash, matching the visual language used
+// throughout the rest of the app for avatar-style badges.
+const AVATAR_GRADIENTS = [
+  'from-blue-500 to-blue-700', 'from-purple-500 to-purple-700', 'from-emerald-500 to-emerald-700',
+  'from-red-500 to-rose-700', 'from-amber-500 to-orange-700', 'from-cyan-500 to-cyan-700',
+]
+
 function Avatar({ name }: { name: string }) {
-  const colors = ['#2563eb', '#7c3aed', '#059669', '#dc2626', '#d97706', '#0891b2']
-  const color = colors[(name || '?').charCodeAt(0) % colors.length]
+  const grad = AVATAR_GRADIENTS[(name || '?').charCodeAt(0) % AVATAR_GRADIENTS.length]
   return (
-    <div style={{ width: 30, height: 30, borderRadius: '50%', background: color,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: 12, fontWeight: 700, color: '#fff', flexShrink: 0 }}>
+    <div className={cn('w-[30px] h-[30px] rounded-full flex items-center justify-center text-xs font-bold text-white shrink-0 bg-gradient-to-br shadow-sm', grad)}>
       {(name || '?')[0].toUpperCase()}
     </div>
   )
@@ -27,20 +32,26 @@ function Avatar({ name }: { name: string }) {
 
 export function EscalationsPage() {
   const [data, setData] = useState<any>(null)
-  const [loading, setLoading] = useState(true)
+  const [loading, setLoading] = useState(true)       // only true before the very first load
+  const [refreshing, setRefreshing] = useState(false) // true during the silent 30s poll
   const [showAll, setShowAll] = useState(false)
 
-  const load = useCallback(() => {
-    setLoading(true)
+  // Mirrors the same fix applied to the Dashboard: the 30s poll updates
+  // data silently instead of flashing the whole list back to "Loading…"
+  // every cycle. Only the very first load, or an explicit filter change,
+  // shows the loading state.
+  const load = useCallback((opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false
+    if (silent) setRefreshing(true); else setLoading(true)
     sourcesApi.escalations(!showAll)
       .then(setData)
-      .catch(() => setData({ escalations: [], count: 0 }))
-      .finally(() => setLoading(false))
+      .catch(() => { if (!silent) setData({ escalations: [], count: 0 }) })
+      .finally(() => { if (silent) setRefreshing(false); else setLoading(false) })
   }, [showAll])
 
   useEffect(() => {
     load()
-    const iv = setInterval(load, 30_000)
+    const iv = setInterval(() => load({ silent: true }), 30_000)
     return () => clearInterval(iv)
   }, [load])
 
@@ -51,26 +62,31 @@ export function EscalationsPage() {
 
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
-            <AlertTriangle style={{ width: 22, height: 22, color: '#dc2626' }} />
-            Escalations
-          </h1>
-          <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
-            Records sent back with feedback — needs your attention
-          </p>
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-red-500 to-rose-700 flex items-center justify-center shadow-lg shadow-red-500/25 shrink-0">
+            <AlertTriangle className="w-5 h-5 text-white" />
+          </div>
+          <div>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+              Escalations
+              {refreshing && <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 ml-2 align-middle animate-pulse" />}
+            </h1>
+            <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
+              Records sent back with feedback — needs your attention
+            </p>
+          </div>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowAll(s => !s)}
             style={{ padding: '8px 16px', background: showAll ? '#eff6ff' : '#fff',
               border: `1px solid ${showAll ? '#bfdbfe' : '#e2e8f0'}`, borderRadius: 10,
-              cursor: 'pointer', fontSize: 13, color: showAll ? '#2563eb' : '#64748b', fontWeight: 600 }}>
+              cursor: 'pointer', fontSize: 13, color: showAll ? '#2563eb' : '#64748b', fontWeight: 600, transition: 'all 0.15s' }}>
             {showAll ? 'Showing All' : 'Show Mine Only'}
           </button>
-          <button onClick={load}
+          <button onClick={() => load({ silent: true })}
             style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-              cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <RefreshCw style={{ width: 14, height: 14 }} /> Refresh
+              cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s' }}>
+            <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} /> Refresh
           </button>
         </div>
       </div>
@@ -80,7 +96,9 @@ export function EscalationsPage() {
       ) : escalations.length === 0 ? (
         <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
           padding: 60, textAlign: 'center' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 mx-auto mb-4">
+            <CheckCircle2 className="w-7 h-7 text-white" />
+          </div>
           <p style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', margin: '0 0 6px' }}>
             Nothing sent back
           </p>
@@ -91,10 +109,11 @@ export function EscalationsPage() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {escalations.map((e: any) => (
-            <div key={e.record_id} style={{
+            <div key={e.record_id} className="relative overflow-hidden" style={{
               background: '#fff', border: '1px solid #fecaca', borderRadius: 14,
-              padding: '16px 18px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+              padding: '16px 18px 16px 21px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
             }}>
+              <div className="absolute top-0 left-0 bottom-0 w-1 bg-gradient-to-b from-red-500 to-rose-600" />
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
@@ -102,7 +121,7 @@ export function EscalationsPage() {
                     <span style={{ fontSize: 11, color: '#94a3b8' }}>· {e.project_name}</span>
                     {e.correction_count > 1 && (
                       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                        background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca' }}>
+                        background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff' }}>
                         Returned {e.correction_count}×
                       </span>
                     )}
@@ -114,7 +133,7 @@ export function EscalationsPage() {
                 <Link to={`/projects/${e.project_id}/sources/${e.source_id}`}
                   style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', textDecoration: 'none',
                     display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
-                    padding: '6px 12px', borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                    padding: '6px 12px', borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', transition: 'all 0.15s' }}>
                   Open <ArrowRight style={{ width: 12, height: 12 }} />
                 </Link>
               </div>
