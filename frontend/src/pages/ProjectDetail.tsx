@@ -54,9 +54,19 @@ export function ProjectDetailPage() {
     setLoading(true); load()
     const iv = setInterval(() => load(), 30_000)
     const onFocus = () => load()
+    // Named (not inline) so the cleanup below can actually remove it — the
+    // previous inline arrow function had no reference to remove, so a new
+    // listener piled up on `document` every time this effect re-ran (i.e.
+    // every time projectId changed, switching between projects), each one
+    // calling load() for its own stale closure's projectId.
+    const onVisibility = () => { if (!document.hidden) load() }
     window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) load() })
-    return () => { clearInterval(iv); window.removeEventListener('focus', onFocus) }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      clearInterval(iv)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
   }, [projectId])
 
   if (loading) return <div className="flex justify-center py-16"><Spinner className="w-8 h-8" /></div>
@@ -68,7 +78,13 @@ export function ProjectDetailPage() {
   const TABS: { id: Tab; label: string; count?: number }[] = [
     { id: 'overview', label: 'Overview' },
     { id: 'resources', label: 'Resources', count: resources.length || undefined },
-    { id: 'jobs', label: 'Jobs', count: jobs.length || undefined },
+    // Only shown for projects that already have job history — this is the
+    // older, pre-Source pipeline (uploads directly against a schema,
+    // bypassing Source tracking, folder classification, and raw-file
+    // review entirely). Hidden for new projects so it can't be used to
+    // start new work; kept visible where it exists so old data stays
+    // reachable.
+    ...(jobs.length > 0 ? [{ id: 'jobs' as Tab, label: 'Jobs (legacy)', count: jobs.length }] : []),
     { id: 'submissions', label: 'Submissions', count: submissions.length || undefined },
     ...(isAdmin ? [{ id: 'members' as Tab, label: 'Members', count: members.length || undefined }] : []),
   ]
@@ -80,6 +96,9 @@ export function ProjectDetailPage() {
           <Link to="/projects" className="text-gray-400 hover:text-gray-600 transition">
             <ArrowLeft className="w-5 h-5" />
           </Link>
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-lg shadow-brand-500/25 shrink-0">
+            <Briefcase className="w-5 h-5 text-white" />
+          </div>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{project.name}</h1>
             {project.description && <p className="text-sm text-gray-500 mt-0.5">{project.description}</p>}
@@ -112,24 +131,31 @@ export function ProjectDetailPage() {
         </div>
       </div>
 
-      {/* Pipeline overview */}
+      {/* Pipeline overview — driven by Sources (the current workflow), not
+          the legacy Jobs system, which is empty for most projects now */}
       <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '20px 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 16px' }}>
-          Pipeline Progress · {jobs.length} extraction job{jobs.length !== 1 ? 's' : ''}
+          Pipeline Progress
         </p>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
-          {[
-            { icon: '📤', step: '1', label: 'Uploaded', desc: 'Records in system', value: jobs.reduce((s: number, j: any) => s + (j.total_extracted || 0), 0), color: '#3b82f6', bg: '#eff6ff' },
-            { icon: '🔍', step: '2', label: 'Approved', desc: 'Records reviewed ✓', value: jobs.reduce((s: number, j: any) => s + (j.total_approved || 0), 0), color: '#8b5cf6', bg: '#faf5ff' },
-            { icon: '✅', step: '3', label: 'Team', desc: 'Members assigned', value: members.length, color: '#10b981', bg: '#f0fdf4' },
-            { icon: '🚀', step: '4', label: 'Submitted', desc: 'Records delivered', value: jobs.reduce((s: number, j: any) => s + (j.total_submitted || 0), 0), color: '#f97316', bg: '#fff7ed' },
-          ].map(({ icon, step, label, desc, value, color, bg }) => (
-            <div key={step} style={{ background: bg, borderRadius: 12, padding: '16px', borderTop: `3px solid ${color}` }}>
+          {(() => {
+            const totalSources = (project as any).total_sources ?? 0
+            const approvedSources = (project as any).approved_sources ?? 0
+            const completionPct = totalSources > 0 ? Math.round((approvedSources / totalSources) * 100) : 0
+            return [
+              { icon: '📚', step: '1', label: 'Total Sources', desc: 'Tracked in this project', value: totalSources, grad: 'from-brand-500 to-brand-700', accent: 'bg-brand-600' },
+              { icon: '✅', step: '2', label: 'Approved', desc: 'Fully delivered', value: approvedSources, grad: 'from-emerald-500 to-emerald-700', accent: 'bg-emerald-500' },
+              { icon: '👥', step: '3', label: 'Team', desc: 'Members assigned', value: members.length, grad: 'from-purple-500 to-purple-700', accent: 'bg-purple-500' },
+              { icon: '📈', step: '4', label: 'Completion', desc: 'Approved / total', value: `${completionPct}%`, grad: 'from-amber-500 to-orange-600', accent: 'bg-amber-500' },
+            ]
+          })().map(({ icon, step, label, desc, value, grad, accent }) => (
+            <div key={step} className="relative bg-gray-50 rounded-xl p-4 overflow-hidden">
+              <div className={cn('absolute top-0 left-0 right-0 h-1', accent)} />
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <span style={{ fontSize: 22 }}>{icon}</span>
-                <span style={{ fontSize: 28, fontWeight: 800, color, lineHeight: 1 }}>{value}</span>
+                <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center text-sm bg-gradient-to-br shadow-sm', grad)}>{icon}</div>
+                <span style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>{value}</span>
               </div>
-              <p style={{ fontSize: 12, fontWeight: 700, color, margin: 0 }}>Step {step} · {label}</p>
+              <p style={{ fontSize: 12, fontWeight: 700, color: '#374151', margin: 0 }}>{label}</p>
               <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{desc}</p>
             </div>
           ))}
@@ -282,8 +308,8 @@ function ResourcesTab({ projectId, resources, isAdmin, onChange }: {
             return (
               <Card key={r.id} className="p-5 flex flex-col gap-3">
                 <div className="flex items-start justify-between">
-                  <div className="w-9 h-9 rounded-lg bg-brand-50 flex items-center justify-center">
-                    <Icon className="w-4 h-4 text-brand-600" />
+                  <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 flex items-center justify-center shadow-sm">
+                    <Icon className="w-4 h-4 text-white" />
                   </div>
                   <Badge variant="gray">{RESOURCE_LABEL[r.type]}</Badge>
                 </div>
@@ -436,7 +462,12 @@ function SubmissionsTab({ projectId, submissions, members, currentUserId, canRev
       ) : (
         <div className="space-y-2">
           {(view === 'mine' ? mine : queue).map(s => (
-            <Card key={s.id} className="p-4 flex items-center justify-between gap-4">
+            <Card key={s.id} className="relative p-4 pl-5 flex items-center justify-between gap-4 overflow-hidden">
+              <div className={cn('absolute top-0 left-0 bottom-0 w-1',
+                s.status === 'approved' ? 'bg-emerald-500' :
+                s.status === 'rejected' ? 'bg-red-500' :
+                s.status === 'needs_revision' ? 'bg-amber-500' :
+                s.status === 'in_review' ? 'bg-blue-500' : 'bg-gray-300')} />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <p className="font-medium text-gray-900 text-sm">{s.title || s.file_name}</p>
@@ -547,7 +578,9 @@ function MembersTab({ projectId, members, onChange }: {
   const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    if (showAdd) usersApi.list().then((r: any) => setAllUsers(r.items)).catch(() => toast.error('Could not load users'))
+    if (showAdd) usersApi.list()
+      .then((r: any) => setAllUsers(Array.isArray(r) ? r : r?.items ?? []))
+      .catch(() => toast.error('Could not load users'))
   }, [showAdd])
 
   const availableUsers = allUsers.filter(u => !members.some(m => m.user_id === u.id))
@@ -668,6 +701,14 @@ function JobsTab({ projectId, jobs, schemas, canUpload, onChange }: {
 
   return (
     <div className="space-y-4">
+      <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-2.5">
+        <span className="text-base leading-none">⚠️</span>
+        <p className="text-xs text-amber-800 leading-relaxed">
+          <strong>Legacy pipeline.</strong> This bypasses the Source workflow entirely — no folder
+          classification, raw-file preservation, or category tracking applies here. For new work,
+          use <strong>Upload Data</strong> directly on a Source instead.
+        </p>
+      </div>
       <div className="flex items-center justify-between">
         <p className="text-sm text-gray-500">{jobs.length} extraction job{jobs.length !== 1 ? 's' : ''} in this project</p>
         {canUpload && (
@@ -704,8 +745,8 @@ function JobsTab({ projectId, jobs, schemas, canUpload, onChange }: {
                 <tr key={job.id} className="hover:bg-gray-50/60 transition">
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 bg-brand-50 rounded-lg flex items-center justify-center shrink-0">
-                        <FileText className="w-3.5 h-3.5 text-brand-600" />
+                      <div className="w-7 h-7 bg-gradient-to-br from-gray-400 to-gray-500 rounded-lg flex items-center justify-center shrink-0 shadow-sm">
+                        <FileText className="w-3.5 h-3.5 text-white" />
                       </div>
                       <div className="min-w-0">
                         <p className="font-medium text-gray-900 truncate">{job.name}</p>
