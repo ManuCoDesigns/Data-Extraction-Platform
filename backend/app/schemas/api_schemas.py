@@ -263,6 +263,7 @@ class SourceUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     website_url: Optional[str] = None
+    category: Optional[str] = None
     status: Optional[str] = None
     assigned_extractor_id: Optional[str] = None
     assigned_reviewer_id: Optional[str] = None

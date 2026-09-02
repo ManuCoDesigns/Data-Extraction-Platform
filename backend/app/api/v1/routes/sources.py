@@ -671,6 +671,8 @@ def update_source(
         source.description = payload.description
     if payload.website_url is not None:
         source.website_url = payload.website_url
+    if payload.category is not None:
+        source.category = payload.category
     if payload.notes is not None:
         source.notes = payload.notes
 
