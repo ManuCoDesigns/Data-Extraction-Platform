@@ -6,7 +6,7 @@ from app.core.config import settings
 from app.api.v1.routes import (
     auth, users, projects, jobs, records, schemas,
     submission, project_resources, work_submissions, sources,
-    integrations,
+    integrations, notifications,
 )
 
 
@@ -67,7 +67,7 @@ app.include_router(records.router,                          prefix=PREFIX)
 app.include_router(schemas.router,                          prefix=PREFIX)
 app.include_router(submission.router,                       prefix=PREFIX)
 app.include_router(submission.stats_router,                 prefix=PREFIX)
-app.include_router(submission.notifications_router,         prefix=PREFIX)
+app.include_router(notifications.router,                    prefix=PREFIX)
 app.include_router(project_resources.router,                prefix=PREFIX)
 app.include_router(work_submissions.router,                 prefix=PREFIX)
 app.include_router(sources.router,                          prefix=PREFIX)

@@ -15,7 +15,6 @@ from app.schemas.api_schemas import SubmitRequest, SubmissionBatchOut
 
 router = APIRouter(tags=["submission"])
 stats_router = APIRouter(prefix="/stats", tags=["stats"])
-notifications_router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 
 # ─── Submission ──────────────────────────────────────────────────────────────
@@ -170,9 +169,6 @@ def dashboard_stats(
     }
 
 
-# ─── Notifications ────────────────────────────────────────────────────────────
-
-
 @stats_router.get("/productivity")
 def productivity_stats(
     project_id: str | None = None,
@@ -315,37 +311,6 @@ def productivity_stats(
         logging.getLogger(__name__).error("productivity error: %s", traceback.format_exc())
         return {"extractors": [], "reviewers": [], "error": str(exc)}
 
-@notifications_router.get("")
-def list_notifications(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    from app.models.all_models import Notification
-    notes = db.query(Notification).filter(
-        Notification.user_id == current_user.id
-    ).order_by(Notification.created_at.desc()).limit(50).all()
-    return [
-        {"id": n.id, "title": n.title, "body": n.body, "link": n.link, "is_read": n.is_read, "created_at": n.created_at}
-        for n in notes
-    ]
-
-
-@notifications_router.post("/{notification_id}/read")
-def mark_read(
-    notification_id: str,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    from app.models.all_models import Notification
-    n = db.query(Notification).filter(
-        Notification.id == notification_id, Notification.user_id == current_user.id
-    ).first()
-    if n:
-        n.is_read = True
-        db.commit()
-    return {"ok": True}
-
-
 @stats_router.get("/sources-summary")
 def sources_summary(
     db: Session = Depends(get_db),
@@ -434,16 +399,3 @@ def sources_summary(
         "pending_admin_review": pending_admin_sources[:20],
     }
 
-
-@notifications_router.post("/read-all")
-def mark_all_read(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    from app.models.all_models import Notification
-    db.query(Notification).filter(
-        Notification.user_id == current_user.id,
-        Notification.is_read == False,
-    ).update({"is_read": True})
-    db.commit()
-    return {"ok": True}

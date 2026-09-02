@@ -8,6 +8,7 @@ import { ProjectDetailPage } from '@/pages/ProjectDetail'
 import { SourcesPage } from '@/pages/Sources'
 import { SourceDetailPage } from '@/pages/SourceDetail'
 import { HelpPage } from '@/pages/Help'
+import { NotificationsPage } from '@/pages/Notifications'
 import { JobsPage } from '@/pages/Jobs'
 import { JobDetailPage } from '@/pages/JobDetail'
 import { ReviewPage } from '@/pages/Review'
@@ -125,6 +126,11 @@ export function App() {
           <Route
             path="escalations"
             element={<EscalationsPage />}
+          />
+
+          <Route
+            path="notifications"
+            element={<NotificationsPage />}
           />
 
           <Route path="jobs" element={<Navigate to="/projects" replace />} />

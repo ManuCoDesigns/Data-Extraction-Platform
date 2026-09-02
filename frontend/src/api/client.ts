@@ -199,9 +199,15 @@ export const statsApi = {
 
 // ─── Notifications ────────────────────────────────────────────────────────────
 export const notificationsApi = {
-  list: () => api.get('/notifications').then(r => r.data),
+  // Called with no args, behaves exactly like the old "recent 50" list did
+  // (the sidebar dropdown uses it this way) — now returns
+  // {items, total, page, page_size, has_more} instead of a bare array.
+  list: (params?: { page?: number; page_size?: number; unread_only?: boolean }) =>
+    api.get('/notifications', { params }).then(r => r.data),
+  unreadCount: () => api.get('/notifications/unread-count').then(r => r.data),
   markRead: (id: string) => api.post(`/notifications/${id}/read`).then(r => r.data),
   markAllRead: () => api.post('/notifications/read-all').then(r => r.data),
+  delete: (id: string) => api.delete(`/notifications/${id}`).then(r => r.data),
 }
 
 // ─── Users ────────────────────────────────────────────────────────────────────

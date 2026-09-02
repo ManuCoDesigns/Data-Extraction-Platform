@@ -6,7 +6,7 @@ import {
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
   Menu, X, Shield, Activity, AlertTriangle,
 } from 'lucide-react'
-import { cn, ToastContainer } from '@/components/ui'
+import { cn, ToastContainer, toast } from '@/components/ui'
 import { notificationsApi, sourcesApi } from '@/api/client'
 import { useCapability } from '@/lib/permissions'
 import type { Notification } from '@/types'
@@ -21,6 +21,10 @@ export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
   const [escalationCount, setEscalationCount] = useState(0)
+  // Tracks notification ids already seen, so a genuinely new one arriving
+  // between polls can get its own toast — without spamming a toast for
+  // every item already in the mailbox on first load.
+  const seenNotifIds = useRef<Set<string> | null>(null)
 
   const canManageUsers   = useCapability('manage_users')
   const canManageSchemas = useCapability('manage_schemas')
@@ -38,8 +42,23 @@ export function AppLayout() {
 
   useEffect(() => {
     if (!user) return
-    notificationsApi.list().then(setNotifications).catch(() => {})
-    const iv = setInterval(() => notificationsApi.list().then(setNotifications).catch(() => {}), 60000)
+    const loadNotifications = () => {
+      notificationsApi.list().then((r: any) => {
+        const items: Notification[] = r?.items ?? []
+        if (seenNotifIds.current === null) {
+          // First load this session — establish the baseline silently,
+          // no toasts for a backlog of notifications from before now.
+          seenNotifIds.current = new Set(items.map(n => n.id))
+        } else {
+          const fresh = items.filter(n => !n.is_read && !seenNotifIds.current!.has(n.id))
+          fresh.forEach(n => toast.info(n.title))
+          items.forEach(n => seenNotifIds.current!.add(n.id))
+        }
+        setNotifications(items)
+      }).catch(() => {})
+    }
+    loadNotifications()
+    const iv = setInterval(loadNotifications, 60000)
     return () => clearInterval(iv)
   }, [user])
 
@@ -50,6 +69,20 @@ export function AppLayout() {
     const iv = setInterval(loadEscalations, 60000)
     return () => clearInterval(iv)
   }, [user])
+
+  const handleNotifClick = async (n: Notification) => {
+    if (!n.is_read) {
+      setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, is_read: true } : x))
+      notificationsApi.markRead(n.id).catch(() => {})
+    }
+    setShowNotif(false)
+    if (n.link) navigate(n.link)
+  }
+
+  const handleMarkAllRead = async () => {
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })))
+    try { await notificationsApi.markAllRead() } catch { /* local state already optimistic */ }
+  }
 
   if (!user) return null
   const unread = notifications.filter(n => !n.is_read).length
@@ -178,27 +211,49 @@ export function AppLayout() {
             <div style={{
               position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 4,
               background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12,
-              boxShadow: '0 8px 24px rgba(0,0,0,0.12)', maxHeight: 320, overflowY: 'auto', zIndex: 50,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.12)', maxHeight: 380, display: 'flex', flexDirection: 'column', zIndex: 50,
             }}>
-              <div style={{ padding: '12px 14px', borderBottom: '1px solid #f1f5f9', display: 'flex', justifyContent: 'space-between' }}>
+              <div style={{ padding: '12px 14px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
                 <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Notifications</span>
-                {unread > 0 && <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 600 }}>{unread} unread</span>}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  {unread > 0 && (
+                    <button onClick={handleMarkAllRead}
+                      style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                      Mark all read
+                    </button>
+                  )}
+                  {unread > 0 && <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 600 }}>{unread} unread</span>}
+                </div>
               </div>
-              {notifications.length === 0
-                ? <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No notifications</div>
-                : notifications.slice(0, 10).map(n => (
-                  <div key={n.id} style={{
-                    padding: '10px 14px', borderBottom: '1px solid #f8fafc',
-                    background: n.is_read ? '#fff' : '#eff6ff',
-                  }}>
-                    <p style={{ fontSize: 13, color: '#1e293b', margin: '0 0 2px', fontWeight: n.is_read ? 400 : 600 }}>
-                      {n.title}
-                    </p>
-                    <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
-                      {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
-                    </p>
-                  </div>
-                ))}
+              <div style={{ overflowY: 'auto', flex: 1 }} className="scrollbar-thin">
+                {notifications.length === 0
+                  ? <div style={{ padding: 24, textAlign: 'center', color: '#94a3b8', fontSize: 13 }}>No notifications</div>
+                  : notifications.slice(0, 10).map(n => (
+                    <div key={n.id} onClick={() => handleNotifClick(n)}
+                      style={{
+                        position: 'relative', padding: '10px 14px 10px 18px', borderBottom: '1px solid #f8fafc',
+                        background: n.is_read ? '#fff' : '#eff6ff', cursor: 'pointer', transition: 'background 0.12s',
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.background = n.is_read ? '#f8fafc' : '#dbeafe'}
+                      onMouseLeave={e => e.currentTarget.style.background = n.is_read ? '#fff' : '#eff6ff'}>
+                      {!n.is_read && (
+                        <span style={{ position: 'absolute', left: 6, top: 14, width: 6, height: 6, borderRadius: '50%', background: 'linear-gradient(135deg,#3b82f6,#2563eb)' }} />
+                      )}
+                      <p style={{ fontSize: 13, color: '#1e293b', margin: '0 0 2px', fontWeight: n.is_read ? 400 : 600 }}>
+                        {n.title}
+                      </p>
+                      <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
+                        {formatDistanceToNow(new Date(n.created_at), { addSuffix: true })}
+                      </p>
+                    </div>
+                  ))}
+              </div>
+              <button onClick={() => { setShowNotif(false); navigate('/notifications') }}
+                style={{ padding: '9px 14px', borderTop: '1px solid #f1f5f9', background: '#f8fafc', border: 'none',
+                  borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: '#f1f5f9', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 600, color: '#2563eb', flexShrink: 0, width: '100%', textAlign: 'center' }}>
+                View all notifications →
+              </button>
             </div>
           )}
         </div>
