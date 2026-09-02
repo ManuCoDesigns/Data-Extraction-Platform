@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Plus, FolderKanban, Database, CheckCircle, Clock, ArrowRight, Trash2, Edit3, Download, TrendingUp } from 'lucide-react'
+import { Plus, FolderKanban, Database, CheckCircle, Clock, ArrowRight, Trash2, Edit3, Download, TrendingUp, Package } from 'lucide-react'
 import { projectsApi, sourcesApi } from '@/api/client'
-import { Modal, Input, Textarea, toast, cn } from '@/components/ui'
+import { Modal, Input, Textarea, Select, ConfirmDialog, toast, cn } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
 import type { Project } from '@/types'
@@ -40,6 +40,22 @@ export function ProjectsPage() {
     }
   }
 
+  // Surfaces the existing /export-package endpoint (Word cover doc + all
+  // JSON records) — fully built server-side already, but had no UI entry
+  // point anywhere on this page before now.
+  const [exportingPackage, setExportingPackage] = useState<string | null>(null)
+  const exportPackage = async (p: Project) => {
+    setExportingPackage(p.id)
+    try {
+      await projectsApi.exportPackage(p.id, p.name)
+      toast.success('Package downloaded')
+    } catch {
+      toast.error('Failed to export package — the project may have no approved records yet')
+    } finally {
+      setExportingPackage(null)
+    }
+  }
+
   const create = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!name.trim()) return
@@ -53,6 +69,57 @@ export function ProjectsPage() {
     finally { setSaving(false) }
   }
 
+  // ── Edit ───────────────────────────────────────────────────────────────────
+  const [editProject, setEditProject] = useState<Project | null>(null)
+  const [editName, setEditName] = useState('')
+  const [editDesc, setEditDesc] = useState('')
+  const [editStatus, setEditStatus] = useState('active')
+  const [savingEdit, setSavingEdit] = useState(false)
+
+  const openEdit = (p: Project) => {
+    setEditProject(p)
+    setEditName(p.name)
+    setEditDesc(p.description ?? '')
+    setEditStatus((p as any).status ?? 'active')
+  }
+
+  const handleEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editProject || !editName.trim()) return
+    setSavingEdit(true)
+    try {
+      await projectsApi.update(editProject.id, {
+        name: editName.trim(), description: editDesc.trim(), status: editStatus,
+      })
+      toast.success('Project updated')
+      setEditProject(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to update project')
+    } finally {
+      setSavingEdit(false)
+    }
+  }
+
+  // ── Delete ─────────────────────────────────────────────────────────────────
+  const [deleteProject, setDeleteProject] = useState<Project | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
+  const handleDelete = async () => {
+    if (!deleteProject) return
+    setDeleting(true)
+    try {
+      await projectsApi.delete(deleteProject.id)
+      toast.success('Project deleted')
+      setDeleteProject(null)
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to delete project')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const totalSources   = (p: Project) => (p as any).total_sources   ?? 0
   const approvedSources = (p: Project) => (p as any).approved_sources ?? 0
   const pct = (p: Project) => totalSources(p) > 0
@@ -63,6 +130,7 @@ export function ProjectsPage() {
     if (s === 'active')   return { bg: '#ecfdf5', color: '#059669', label: 'Active' }
     if (s === 'paused')   return { bg: '#fffbeb', color: '#d97706', label: 'Paused' }
     if (s === 'archived') return { bg: '#f1f5f9', color: '#64748b', label: 'Archived' }
+    if (s === 'template') return { bg: '#faf5ff', color: '#7c3aed', label: 'Template' }
     return { bg: '#eff6ff', color: '#2563eb', label: 'Active' }
   }
 
@@ -226,6 +294,33 @@ export function ProjectsPage() {
                             opacity: exporting === p.id ? .6 : 1, display: 'flex', alignItems: 'center' }}>
                           <Download style={{ width: 13, height: 13 }} />
                         </button>
+                        <button onClick={e => { e.stopPropagation(); exportPackage(p) }}
+                          disabled={exportingPackage === p.id}
+                          title="Download full package (Word cover doc + JSON records)"
+                          style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
+                            border: '1px solid #e2e8f0', color: '#64748b', transition: 'all 0.15s',
+                            cursor: exportingPackage === p.id ? 'not-allowed' : 'pointer',
+                            opacity: exportingPackage === p.id ? .6 : 1, display: 'flex', alignItems: 'center' }}>
+                          <Package style={{ width: 13, height: 13 }} />
+                        </button>
+                        {canManage && (
+                          <>
+                            <button onClick={e => { e.stopPropagation(); openEdit(p) }}
+                              title="Edit project"
+                              style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
+                                border: '1px solid #e2e8f0', color: '#64748b', transition: 'all 0.15s',
+                                cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                              <Edit3 style={{ width: 13, height: 13 }} />
+                            </button>
+                            <button onClick={e => { e.stopPropagation(); setDeleteProject(p) }}
+                              title="Delete project"
+                              style={{ padding: '5px 9px', borderRadius: 8, background: '#fef2f2',
+                                border: '1px solid #fecaca', color: '#dc2626', transition: 'all 0.15s',
+                                cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
+                              <Trash2 style={{ width: 13, height: 13 }} />
+                            </button>
+                          </>
+                        )}
                         <Link to={`/projects/${p.id}/sources`}
                           style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
                             fontWeight: 700, color: '#2563eb', textDecoration: 'none', transition: 'all 0.15s',
@@ -277,6 +372,60 @@ export function ProjectsPage() {
           </div>
         </form>
       </Modal>
+
+      {/* Edit project modal */}
+      <Modal open={!!editProject} onClose={() => setEditProject(null)} title="Edit Project">
+        <form onSubmit={handleEdit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Project name *
+            </label>
+            <Input value={editName} onChange={e => setEditName(e.target.value)} required />
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Description
+            </label>
+            <Textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3} />
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Status
+            </label>
+            <Select value={editStatus} onChange={e => setEditStatus(e.target.value)}>
+              <option value="active">Active</option>
+              <option value="paused">Paused</option>
+              <option value="archived">Archived</option>
+              <option value="template">Template</option>
+            </Select>
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8 }}>
+            <button type="button" onClick={() => setEditProject(null)}
+              style={{ padding: '9px 18px', background: '#f1f5f9', border: 'none',
+                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#64748b' }}>
+              Cancel
+            </button>
+            <button type="submit" disabled={savingEdit || !editName.trim()}
+              style={{ padding: '9px 18px', background: 'linear-gradient(135deg,#2563eb,#4f46e5)', color: '#fff',
+                border: 'none', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                cursor: savingEdit ? 'not-allowed' : 'pointer', opacity: savingEdit ? .7 : 1,
+                boxShadow: savingEdit ? 'none' : '0 3px 10px rgba(37,99,235,0.3)' }}>
+              {savingEdit ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleteProject}
+        title="Delete Project"
+        description={`"${deleteProject?.name}" will be removed from your project list. Its sources and records are kept in the database but become inaccessible through the normal UI. This is reversible only by an engineer restoring it directly in the database.`}
+        confirmLabel="Delete Project"
+        variant="danger"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeleteProject(null)}
+      />
     </div>
   )
 }
