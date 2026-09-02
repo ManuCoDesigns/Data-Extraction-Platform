@@ -164,33 +164,42 @@ function ErrorState({ onRetry }: { onRetry: () => void }) {
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 function useSummary() {
-  const [data, setData]       = useState<any>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError]     = useState(false)
-  const [ts, setTs]           = useState(new Date())
+  const [data, setData]           = useState<any>(null)
+  const [loading, setLoading]     = useState(true)      // only true before the very first successful load
+  const [refreshing, setRefreshing] = useState(false)   // true during a silent background refresh
+  const [error, setError]         = useState(false)
+  const [ts, setTs]               = useState(new Date())
 
-  const load = useCallback(() => {
-    setLoading(true)
-    setError(false)
+  // silent=true is used for the 30s poll and window-focus refresh — it
+  // updates data in place without ever showing the full-page skeleton, and
+  // a failed silent refresh is swallowed quietly instead of wiping out
+  // whatever good data is already on screen. Only the very first load (or
+  // an explicit manual retry) shows the skeleton / a hard error state.
+  const load = useCallback((opts?: { silent?: boolean }) => {
+    const silent = opts?.silent ?? false
+    if (silent) setRefreshing(true)
+    else { setLoading(true); setError(false) }
+
     statsApi.sourcesSummary()
-      .then(d => { setData(d && typeof d === 'object' ? d : {}); setTs(new Date()) })
-      .catch(() => { setData({}); setError(true) })
-      .finally(() => setLoading(false))
+      .then(d => { setData(d && typeof d === 'object' ? d : {}); setTs(new Date()); if (!silent) setError(false) })
+      .catch(() => { if (!silent) { setData({}); setError(true) } })
+      .finally(() => { if (silent) setRefreshing(false); else setLoading(false) })
   }, [])
 
   useEffect(() => {
     load()
-    const iv = setInterval(load, 30_000)
-    window.addEventListener('focus', load)
-    return () => { clearInterval(iv); window.removeEventListener('focus', load) }
+    const iv = setInterval(() => load({ silent: true }), 30_000)
+    const onFocus = () => load({ silent: true })
+    window.addEventListener('focus', onFocus)
+    return () => { clearInterval(iv); window.removeEventListener('focus', onFocus) }
   }, [load])
 
-  return { data, loading, error, load, ts, clearError: () => setError(false) }
+  return { data, loading, refreshing, error, load, ts, clearError: () => setError(false) }
 }
 
 // ── Reusable header bar (greeting + refresh + primary CTA) ───────────────────
-function DashboardHeader({ subtitle, ctaLabel, ctaTo, ctaIcon, onRefresh }: {
-  subtitle: string; ctaLabel: string; ctaTo: string; ctaIcon: React.ReactNode; onRefresh: () => void
+function DashboardHeader({ subtitle, ctaLabel, ctaTo, ctaIcon, onRefresh, refreshing }: {
+  subtitle: string; ctaLabel: string; ctaTo: string; ctaIcon: React.ReactNode; onRefresh: () => void; refreshing?: boolean
 }) {
   const { user } = useAuthStore()
   return (
@@ -205,16 +214,16 @@ function DashboardHeader({ subtitle, ctaLabel, ctaTo, ctaIcon, onRefresh }: {
           </h1>
           <p className="text-[13px] text-white/70 mt-1.5 flex items-center gap-1.5">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
+              {!refreshing && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />}
+              <span className={cn('relative inline-flex rounded-full h-2 w-2', refreshing ? 'bg-amber-300' : 'bg-emerald-400')} />
             </span>
-            {subtitle}
+            {refreshing ? 'Refreshing…' : subtitle}
           </p>
         </div>
         <div className="flex gap-2">
           <button onClick={onRefresh}
             className="px-3.5 py-2 bg-white/10 hover:bg-white/20 border border-white/20 rounded-xl text-sm text-white font-medium flex items-center gap-2 transition backdrop-blur-sm">
-            <RefreshCw className="w-3.5 h-3.5" /> Refresh
+            <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} /> Refresh
           </button>
           <Link to={ctaTo}
             className="px-3.5 py-2 bg-white text-brand-700 rounded-xl text-sm font-bold flex items-center gap-2 shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all">
@@ -228,7 +237,7 @@ function DashboardHeader({ subtitle, ctaLabel, ctaTo, ctaIcon, onRefresh }: {
 
 // ── Admin Dashboard ────────────────────────────────────────────────────────────
 function AdminDashboard() {
-  const { data: s, loading, error, load, ts, clearError } = useSummary()
+  const { data: s, loading, refreshing, error, load, ts, clearError } = useSummary()
   const [productivity, setProductivity]        = useState<any>(null)
   const [projects, setProjects]                = useState<any[]>([])
   const [activeProject, setActiveProject]      = useState<string | null>(null)
@@ -272,7 +281,7 @@ function AdminDashboard() {
       <DashboardHeader
         subtitle={`Platform overview · Updated ${ts.toLocaleTimeString()}`}
         ctaLabel="All Sources" ctaTo="/sources" ctaIcon={<Database className="w-3.5 h-3.5" />}
-        onRefresh={load}
+        onRefresh={() => load({ silent: true })} refreshing={refreshing}
       />
 
       {/* KPIs */}
@@ -545,7 +554,7 @@ function AdminDashboard() {
 
 // ── Extractor Dashboard ────────────────────────────────────────────────────────
 function ExtractorDashboard() {
-  const { data: s, loading, error, load, ts, clearError } = useSummary()
+  const { data: s, loading, refreshing, error, load, ts, clearError } = useSummary()
 
   if (loading) return <DashSkeleton />
   if (error && !s?.my_extracting) return <ErrorState onRetry={() => { clearError(); load() }} />
@@ -562,7 +571,7 @@ function ExtractorDashboard() {
       <DashboardHeader
         subtitle={`Your extraction workspace · ${ts.toLocaleTimeString()}`}
         ctaLabel="All Sources" ctaTo="/sources" ctaIcon={<Database className="w-3.5 h-3.5" />}
-        onRefresh={load}
+        onRefresh={() => load({ silent: true })} refreshing={refreshing}
       />
 
       <div className="grid grid-cols-4 gap-3 mb-5">
@@ -658,7 +667,7 @@ function ExtractorDashboard() {
 
 // ── Reviewer Dashboard ────────────────────────────────────────────────────────
 function ReviewerDashboard() {
-  const { data: s, loading, error, load, ts, clearError } = useSummary()
+  const { data: s, loading, refreshing, error, load, ts, clearError } = useSummary()
 
   if (loading) return <DashSkeleton />
   if (error && !s?.my_reviewing) return <ErrorState onRetry={() => { clearError(); load() }} />
@@ -676,7 +685,7 @@ function ReviewerDashboard() {
       <DashboardHeader
         subtitle={`Your review workspace · ${ts.toLocaleTimeString()}`}
         ctaLabel="All Sources" ctaTo="/sources" ctaIcon={<Eye className="w-3.5 h-3.5" />}
-        onRefresh={load}
+        onRefresh={() => load({ silent: true })} refreshing={refreshing}
       />
 
       <div className="grid grid-cols-4 gap-3 mb-5">
