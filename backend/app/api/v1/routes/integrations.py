@@ -47,6 +47,68 @@ def _require_admin(current_user: User):
         raise HTTPException(status_code=403, detail="Only admins can manage the Xtrium integration")
 
 
+def _create_sources_from_xtrium_items(items: list[dict], project_id: str, current_user: User, db: Session) -> dict:
+    """
+    Shared by both pull_xtrium_batch (fetched live from Xtrium) and
+    import_xtrium_items (fed raw item JSON directly, for recovering items
+    claimed outside our normal pull flow). Identical creation logic either
+    way, so the resulting Sources are indistinguishable regardless of path.
+    """
+    created, skipped = [], []
+    for item in items:
+        item_id = str(item.get("id"))
+        existing = db.query(Source).filter(
+            Source.external_system == "xtrium_catalog_iq",
+            Source.external_ref_id == item_id,
+        ).first()
+        if existing:
+            skipped.append({"item_id": item_id, "name": item.get("name"), "existing_source_id": existing.id})
+            continue
+        description_parts = []
+        if item.get("kg_node"):
+            description_parts.append(f"KG Node: {item['kg_node']}")
+        if item.get("type"):
+            description_parts.append(f"Type: {item['type']}")
+        if item.get("sub_type"):
+            description_parts.append(f"Sub-type: {item['sub_type']}")
+        if item.get("sub_products"):
+            description_parts.append(f"Sub-products: {item['sub_products']}")
+        if item.get("country_of_origin"):
+            description_parts.append(f"Country of origin: {item['country_of_origin']}")
+        if item.get("notes"):
+            description_parts.append(f"Notes: {item['notes']}")
+        description_parts.append(f"Xtrium item #{item_id}, priority {item.get('priority_rank', '—')}")
+        source = Source(
+            project_id=project_id,
+            schema_id=None,
+            name=item.get("name") or f"Xtrium item {item_id}",
+            description=" | ".join(description_parts),
+            website_url=item.get("resolved_link") or item.get("url"),
+            category=item.get("category") or item.get("kg_node"),
+            status=SourceStatus.NOT_STARTED,
+            created_by=current_user.id,
+            external_system="xtrium_catalog_iq",
+            external_ref_id=item_id,
+            external_synced_at=datetime.now(timezone.utc),
+        )
+        db.add(source)
+        db.flush()
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=project_id, source_id=source.id,
+            action=AuditAction.SOURCE_CREATED,
+            after_value={"origin": "xtrium_catalog_iq_pull", "external_item_id": item_id},
+        ))
+        created.append({"item_id": item_id, "name": item.get("name"), "source_id": source.id})
+    db.commit()
+    return {
+        "pulled": len(items),
+        "created": len(created),
+        "skipped_existing": len(skipped),
+        "created_sources": created,
+        "skipped_sources": skipped,
+    }
+
+
 # ─── Pull a batch, create Sources ────────────────────────────────────────────
 
 class PullRequest(BaseModel):
@@ -82,69 +144,37 @@ async def pull_xtrium_batch(
     except XtriumClientError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    created, skipped = [], []
-
-    for item in items:
-        item_id = str(item.get("id"))
-
-        existing = db.query(Source).filter(
-            Source.external_system == "xtrium_catalog_iq",
-            Source.external_ref_id == item_id,
-        ).first()
-        if existing:
-            skipped.append({"item_id": item_id, "name": item.get("name"), "existing_source_id": existing.id})
-            continue
-
-        description_parts = []
-        if item.get("kg_node"):
-            description_parts.append(f"KG Node: {item['kg_node']}")
-        if item.get("type"):
-            description_parts.append(f"Type: {item['type']}")
-        if item.get("sub_type"):
-            description_parts.append(f"Sub-type: {item['sub_type']}")
-        if item.get("sub_products"):
-            description_parts.append(f"Sub-products: {item['sub_products']}")
-        if item.get("country_of_origin"):
-            description_parts.append(f"Country of origin: {item['country_of_origin']}")
-        if item.get("notes"):
-            description_parts.append(f"Notes: {item['notes']}")
-        description_parts.append(f"Xtrium item #{item_id}, priority {item.get('priority_rank', '—')}")
-
-        source = Source(
-            project_id=payload.project_id,
-            schema_id=None,
-            name=item.get("name") or f"Xtrium item {item_id}",
-            description=" | ".join(description_parts),
-            website_url=item.get("resolved_link") or item.get("url"),
-            category=item.get("category") or item.get("kg_node"),
-            status=SourceStatus.NOT_STARTED,
-            created_by=current_user.id,
-            external_system="xtrium_catalog_iq",
-            external_ref_id=item_id,
-            external_synced_at=datetime.now(timezone.utc),
-        )
-        db.add(source)
-        db.flush()
-
-        db.add(AuditLog(
-            user_id=current_user.id, project_id=payload.project_id, source_id=source.id,
-            action=AuditAction.SOURCE_CREATED,
-            after_value={"origin": "xtrium_catalog_iq_pull", "external_item_id": item_id},
-        ))
-        created.append({"item_id": item_id, "name": item.get("name"), "source_id": source.id})
-
-    db.commit()
-
-    return {
-        "pulled": len(items),
-        "created": len(created),
-        "skipped_existing": len(skipped),
-        "created_sources": created,
-        "skipped_sources": skipped,
-    }
+    return _create_sources_from_xtrium_items(items, payload.project_id, current_user, db)
 
 
 # ─── Submit an approved source back to Xtrium ────────────────────────────────
+
+class ImportXtriumItemsRequest(BaseModel):
+    project_id: str
+    items: list[dict]
+
+
+@router.post("/import-items")
+def import_xtrium_items(
+    payload: ImportXtriumItemsRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Creates Sources from raw Xtrium item JSON directly, without calling
+    Xtrium's API at all. For recovering items that got claimed (moved to
+    in_progress on their side) by something that bypassed our normal pull
+    endpoint — e.g. a diagnostic script hitting their API directly — so
+    that data isn't lost even though it never went through pull_xtrium_batch.
+    Uses the exact same creation logic as a real pull, so the resulting
+    Sources are indistinguishable from ones a normal pull would create.
+    """
+    _require_admin(current_user)
+    project = db.query(Project).filter(Project.id == payload.project_id, Project.deleted_at == None).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return _create_sources_from_xtrium_items(payload.items, payload.project_id, current_user, db)
+
 
 class SubmitToXtriumRequest(BaseModel):
     notes: str = ""
