@@ -85,6 +85,8 @@ def _create_sources_from_xtrium_items(items: list[dict], project_id: str, curren
             description=" | ".join(description_parts),
             website_url=item.get("resolved_link") or item.get("url"),
             category=item.get("category") or item.get("kg_node"),
+            country=item.get("country_of_origin"),
+            type=item.get("type"),
             status=SourceStatus.NOT_STARTED,
             created_by=current_user.id,
             external_system="xtrium_catalog_iq",

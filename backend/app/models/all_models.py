@@ -323,6 +323,8 @@ class Source(Base):
     description = Column(Text, nullable=True)
     website_url = Column(String(1024), nullable=True)
     category = Column(String(255), nullable=True, index=True)
+    country = Column(String(255), nullable=True, index=True)
+    type = Column(String(255), nullable=True, index=True)
     status = Column(SAEnum(SourceStatus), default=SourceStatus.NOT_STARTED, nullable=False, index=True)
 
     assigned_extractor_id = Column(String(36), ForeignKey("users.id"), nullable=True)

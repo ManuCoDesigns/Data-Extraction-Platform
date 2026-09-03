@@ -225,6 +225,8 @@ def _serialize_source(s: Source) -> SourceOut:
         schema_name=s.schema.name if s.schema else None,
         name=s.name, description=s.description, website_url=s.website_url,
         category=getattr(s, "category", None),
+        country=getattr(s, "country", None),
+        type=getattr(s, "type", None),
         status=s.status.value,
         assigned_extractor_id=s.assigned_extractor_id,
         assigned_extractor_name=s.extractor.full_name if s.extractor else None,
@@ -407,6 +409,8 @@ def create_source(
         project_id=project_id, schema_id=payload.schema_id, name=payload.name,
         description=payload.description, website_url=payload.website_url,
         category=payload.category,
+        country=payload.country,
+        type=payload.type,
         assigned_extractor_id=payload.assigned_extractor_id,
         assigned_reviewer_id=payload.assigned_reviewer_id,
         status=SourceStatus.EXTRACTING if payload.assigned_extractor_id else SourceStatus.NOT_STARTED,
@@ -673,6 +677,10 @@ def update_source(
         source.website_url = payload.website_url
     if payload.category is not None:
         source.category = payload.category
+    if payload.country is not None:
+        source.country = payload.country
+    if payload.type is not None:
+        source.type = payload.type
     if payload.notes is not None:
         source.notes = payload.notes
 

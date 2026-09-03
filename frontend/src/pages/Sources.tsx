@@ -358,6 +358,8 @@ export function SourcesPage() {
                 const grad = statusGrad[STATUS_META[s.status].color] ?? statusGrad.indigo
                 const pct = s.total_records > 0 ? Math.round((s.valid_records / s.total_records) * 100) : 0
                 const category = (s as any).category as string | undefined
+                const srcCountry = (s as any).country as string | undefined
+                const srcType = (s as any).type as string | undefined
                 return (
                 <tr key={s.id} className="hover:bg-gray-50/60 transition group">
                   <td className="px-5 py-3">
@@ -371,6 +373,12 @@ export function SourcesPage() {
                           <p className="text-xs text-gray-400 truncate">{s.schema_name}</p>
                           {category && (
                             <span className="text-[10px] font-semibold text-brand-600 bg-brand-50 px-1.5 py-0.5 rounded-full shrink-0">{category}</span>
+                          )}
+                          {srcType && (
+                            <span className="text-[10px] font-semibold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full shrink-0">{srcType}</span>
+                          )}
+                          {srcCountry && (
+                            <span className="text-[10px] font-medium text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded-full shrink-0">🌍 {srcCountry}</span>
                           )}
                         </div>
                       </div>
@@ -566,6 +574,16 @@ function SourceCard({ source, projectId, projectName }: { source: Source; projec
           )}
         </div>
         <p className="text-sm font-semibold text-gray-900 leading-snug line-clamp-2">{source.name}</p>
+        {((source as any).type || (source as any).country) && (
+          <div className="flex items-center gap-1.5 flex-wrap">
+            {(source as any).type && (
+              <span className="text-[10px] font-semibold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded-full">{(source as any).type}</span>
+            )}
+            {(source as any).country && (
+              <span className="text-[10px] font-medium text-gray-500 bg-gray-50 px-1.5 py-0.5 rounded-full">🌍 {(source as any).country}</span>
+            )}
+          </div>
+        )}
         {source.website_url && (
           <p className="text-xs text-gray-400 flex items-center gap-1 truncate">
             <Globe className="w-3 h-3 shrink-0" /> {source.website_url.replace(/^https?:\/\//, '')}
