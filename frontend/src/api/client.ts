@@ -358,6 +358,8 @@ export const sourcesApi = {
     api.get(`/sources/${sourceId}/files/${fileId}/content`).then(r => r.data),
   reviewFile: (sourceId: string, fileId: string, action: 'approve' | 'reject', note = '') =>
     api.post(`/sources/${sourceId}/files/${fileId}/review`, { action, note }).then(r => r.data),
+  escalateNoData: (sourceId: string, reason: string, note = '') =>
+    api.post(`/sources/${sourceId}/escalate-no-data`, { reason, note }).then(r => r.data),
 }
 
 // ─── Xtrium Catalog IQ integration ────────────────────────────────────────────
