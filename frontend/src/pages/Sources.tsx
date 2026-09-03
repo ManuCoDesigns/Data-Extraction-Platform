@@ -81,6 +81,17 @@ export function SourcesPage() {
   const [xtriumProjectId, setXtriumProjectId] = useState(projectId ?? '')
   const [xtriumBatchSize, setXtriumBatchSize] = useState(25)
   const [pullingXtrium, setPullingXtrium] = useState(false)
+  const [xtriumStats, setXtriumStats] = useState<any>(null)
+  const [loadingXtriumStats, setLoadingXtriumStats] = useState(false)
+
+  useEffect(() => {
+    if (!showXtriumPull) return
+    setLoadingXtriumStats(true)
+    xtriumApi.stats()
+      .then(setXtriumStats)
+      .catch(() => setXtriumStats(null))
+      .finally(() => setLoadingXtriumStats(false))
+  }, [showXtriumPull])
 
   const handlePullFromXtrium = async () => {
     const targetProjectId = isGlobal ? xtriumProjectId : projectId
@@ -470,6 +481,31 @@ export function SourcesPage() {
       <Modal open={showXtriumPull} onClose={() => !pullingXtrium && setShowXtriumPull(false)} title="Pull from Xtrium Catalog IQ"
         description="Pulls the highest-priority batch of links currently assigned to us. Each item becomes a new Source — items already pulled before are skipped, not duplicated.">
         <div className="space-y-4">
+          {/* Live availability — read-only, no side effects, so it's safe
+              to check every time the modal opens without consuming anything. */}
+          {loadingXtriumStats ? (
+            <div className="rounded-xl bg-gray-50 border border-gray-100 px-4 py-3 text-xs text-gray-400">
+              Checking availability…
+            </div>
+          ) : xtriumStats ? (
+            <div className="rounded-xl bg-gradient-to-br from-brand-50 to-purple-50 border border-brand-100 px-4 py-3 flex items-center gap-4">
+              <div>
+                <p className="text-2xl font-extrabold text-brand-700 leading-none">
+                  {xtriumStats.queued ?? xtriumStats.assigned ?? 0}
+                </p>
+                <p className="text-[11px] font-semibold text-brand-600 mt-1">available to pull</p>
+              </div>
+              <div className="w-px h-8 bg-brand-200" />
+              <div>
+                <p className="text-lg font-bold text-gray-500 leading-none">{xtriumStats.in_progress ?? 0}</p>
+                <p className="text-[11px] text-gray-400 mt-1">in progress</p>
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-xl bg-amber-50 border border-amber-200 px-4 py-3 text-xs text-amber-700">
+              Couldn't check current availability — you can still try pulling below.
+            </div>
+          )}
           {isGlobal && (
             <Select label="Project to create sources in" value={xtriumProjectId} onChange={e => setXtriumProjectId(e.target.value)} required>
               <option value="">Select a project…</option>
