@@ -227,6 +227,8 @@ def _serialize_source(s: Source) -> SourceOut:
         category=getattr(s, "category", None),
         country=getattr(s, "country", None),
         type=getattr(s, "type", None),
+        external_ref_id=getattr(s, "external_ref_id", None),
+        external_system=getattr(s, "external_system", None),
         status=s.status.value,
         assigned_extractor_id=s.assigned_extractor_id,
         assigned_extractor_name=s.extractor.full_name if s.extractor else None,
