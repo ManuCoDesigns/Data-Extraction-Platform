@@ -383,3 +383,18 @@ async def check_source_xtrium_status(
     db.commit()
 
     return {**result, "rework_applied_to_source": applied_rework}
+
+
+@router.get("/stats")
+async def get_xtrium_queue_stats(current_user: User = Depends(get_current_user)):
+    """
+    Live counts straight from Xtrium's own queue — how many items are
+    currently available to pull, in progress, etc. Purely read-only, no
+    side effects, unlike /pull which claims items the instant it's called.
+    Lets the UI show real availability before anyone commits to a pull.
+    """
+    _require_admin(current_user)
+    try:
+        return await xtrium_client.get_stats()
+    except XtriumClientError as e:
+        raise HTTPException(status_code=502, detail=str(e))
