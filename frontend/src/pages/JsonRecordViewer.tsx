@@ -296,7 +296,46 @@ export function JsonRecordViewer({
       )}
 
       {/* ── MAIN BODY ───────────────────────────────────────────────────── */}
-      {viewTab === 'review' && <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignContent: 'start' }} className="scrollbar-thin">
+      {viewTab === 'review' && record.is_escalation_only && (() => {
+        const isSchemaUncertainty = (record.escalation_reason || '').toLowerCase().includes('schema uncertainty')
+        return (
+          <div style={{ flex: 1, overflow: 'auto', padding: '32px', display: 'flex', justifyContent: 'center' }} className="scrollbar-thin">
+            <div style={{ maxWidth: 560, width: '100%' }}>
+              <div style={{
+                background: isSchemaUncertainty ? 'linear-gradient(135deg,#fffbeb,#fef3c7)' : '#fff',
+                border: `1px solid ${isSchemaUncertainty ? '#fde68a' : '#e2e8f0'}`,
+                borderRadius: 16, padding: 28, boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+                  <div style={{ width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                    background: isSchemaUncertainty ? 'linear-gradient(135deg,#f59e0b,#b45309)' : 'linear-gradient(135deg,#94a3b8,#64748b)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <AlertTriangle size={22} color="#fff" />
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.06em', margin: 0 }}>
+                      Escalation — No Data Found
+                    </p>
+                    <p style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: '2px 0 0' }}>{record.escalation_reason}</p>
+                  </div>
+                </div>
+                {isSchemaUncertainty && (
+                  <div style={{ background: '#fff', border: '1px solid #fde68a', borderRadius: 10, padding: '10px 14px',
+                    marginBottom: 18, display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <AlertTriangle size={14} color="#b45309" />
+                    <p style={{ fontSize: 12, color: '#92400e', margin: 0, fontWeight: 700 }}>Needs Project Lead input before approval</p>
+                  </div>
+                )}
+                <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.06em', margin: '0 0 8px' }}>Note</p>
+                <p style={{ fontSize: 14, color: '#374151', lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0 }}>
+                  {record.raw_text && record.raw_text !== '(no note provided)' ? record.raw_text : 'No additional note provided.'}
+                </p>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+      {viewTab === 'review' && !record.is_escalation_only && <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignContent: 'start' }} className="scrollbar-thin">
 
         {/* ── LEFT COLUMN ────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

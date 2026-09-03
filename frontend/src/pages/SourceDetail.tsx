@@ -8,7 +8,7 @@ import {
   Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
   Folder, AlertTriangle, File as FileIcon, Zap, Link2, Database
 } from 'lucide-react'
-import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi, xtriumApi } from '@/api/client'
+import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi, xtriumApi, resourcesApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
 import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
@@ -54,6 +54,37 @@ export function SourceDetailPage() {
   }
   const [validityFilter, setValidityFilter] = useState('')
   const [showUpload, setShowUpload] = useState(false)
+  const [showEscalate, setShowEscalate] = useState(false)
+  const [escalateReason, setEscalateReason] = useState('')
+  const [escalateNote, setEscalateNote] = useState('')
+  const [escalating, setEscalating] = useState(false)
+  const [escalationReasons, setEscalationReasons] = useState<string[]>([])
+
+  useEffect(() => {
+    if (!showEscalate || !source) return
+    resourcesApi.list(source.project_id)
+      .then((r: any) => {
+        const list = Array.isArray(r) ? r : r?.items ?? []
+        setEscalationReasons(list.filter((res: any) => res.type === 'escalation_reason').map((res: any) => res.title))
+      })
+      .catch(() => setEscalationReasons([]))
+  }, [showEscalate, source])
+
+  const handleEscalateNoData = async () => {
+    if (!escalateReason) { toast.error('Select a reason'); return }
+    setEscalating(true)
+    try {
+      await sourcesApi.escalateNoData(sourceId!, escalateReason, escalateNote)
+      toast.success('Escalated — sent for reviewer approval')
+      setShowEscalate(false)
+      setEscalateReason(''); setEscalateNote('')
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Failed to escalate')
+    } finally {
+      setEscalating(false)
+    }
+  }
   const [showEditSource, setShowEditSource] = useState(false)
   const [editSourceForm, setEditSourceForm] = useState({ name: '', description: '', website_url: '' })
   const [showSchemaJson, setShowSchemaJson] = useState(false)
@@ -853,6 +884,12 @@ export function SourceDetailPage() {
               <Upload className="w-3.5 h-3.5" /> Upload Data
             </Button>
           )}
+          {isExtractor && source.status !== 'approved' && (
+            <Button variant="secondary" size="sm" onClick={() => setShowEscalate(true)}
+              style={{ color: '#b45309', borderColor: '#fde68a' }}>
+              <AlertTriangle className="w-3.5 h-3.5" /> Escalate — No Data Found
+            </Button>
+          )}
           {isAdmin && (
             <Button variant="secondary" size="sm" onClick={() => {
               setEditSourceForm({ name: source.name, description: source.description || '', website_url: source.website_url || '' })
@@ -1582,6 +1619,44 @@ export function SourceDetailPage() {
       )}
 
       <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Add extracted data to this source.">
+
+      <Modal open={showEscalate} onClose={() => !escalating && setShowEscalate(false)} title="Escalate — No Data Found"
+        description="Per SOP-DS-003 Section 8 — for sources with nothing extractable. Goes through the same reviewer approval as a normal record.">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Reason *
+            </label>
+            <select value={escalateReason} onChange={e => setEscalateReason(e.target.value)}
+              style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid #e2e8f0',
+                borderRadius: 10, outline: 'none', background: '#fff', color: '#1e293b' }}>
+              <option value="">— Select a reason —</option>
+              {escalationReasons.map(r => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {escalationReasons.length === 0 && (
+              <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+                No escalation reasons attached to this project yet — add some in the Resources tab.
+              </p>
+            )}
+          </div>
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              Note (optional)
+            </label>
+            <textarea value={escalateNote} onChange={e => setEscalateNote(e.target.value)} rows={4}
+              placeholder="Any extra context for the reviewer"
+              style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid #e2e8f0',
+                borderRadius: 10, outline: 'none', resize: 'vertical', boxSizing: 'border-box' }} />
+          </div>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
+            <Button variant="secondary" onClick={() => setShowEscalate(false)} disabled={escalating}>Cancel</Button>
+            <Button onClick={handleEscalateNoData} loading={escalating} disabled={!escalateReason}
+              style={{ background: 'linear-gradient(135deg,#f59e0b,#b45309)', border: 'none' }}>
+              <AlertTriangle className="w-3.5 h-3.5" /> Submit Escalation
+            </Button>
+          </div>
+        </div>
+      </Modal>
         <form onSubmit={handleUpload} className="flex flex-col" style={{ maxHeight: '72vh' }}>
 
           <div className="overflow-y-auto scrollbar-thin -mx-6 px-6 space-y-4" style={{ paddingBottom: 4 }}>

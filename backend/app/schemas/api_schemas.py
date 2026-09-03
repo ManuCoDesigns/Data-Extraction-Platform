@@ -194,6 +194,8 @@ class RecordOut(BaseModel):
     canonical_name: Optional[str]
     created_at: datetime
     correction_count: int = 0
+    is_escalation_only: bool = False
+    escalation_reason: Optional[str] = None
     revision_count: int = 0
     reviewer_field_comments: dict[str, Any] = {}
     admin_review_note: Optional[str] = None

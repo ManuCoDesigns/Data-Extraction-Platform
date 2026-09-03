@@ -142,6 +142,7 @@ class ResourceType(str, enum.Enum):
     LINK = "link"
     INSTRUCTION = "instruction"
     SOP = "sop"
+    ESCALATION_REASON = "escalation_reason"
 
 
 class SubmissionStatus(str, enum.Enum):
@@ -470,6 +471,12 @@ class ExtractedRecord(Base):
     revision_count          = Column(Integer, default=0, server_default="0", nullable=False)
     correction_count        = Column(Integer, default=0, server_default="0", nullable=False)
     extraction_started_at   = Column(DateTime(timezone=True), nullable=True)
+
+    # "Escalate — No Data Found" — an extractor's declaration that a source
+    # has nothing extractable, submitted through the exact same
+    # review pipeline as a real record (still needs reviewer approval).
+    is_escalation_only = Column(Boolean, default=False, server_default='false', nullable=False)
+    escalation_reason  = Column(String(255), nullable=True)
     review_started_at       = Column(DateTime(timezone=True), nullable=True)
     admin_review_started_at = Column(DateTime(timezone=True), nullable=True)
     reviewer_field_comments = Column(JSON, default=dict, server_default="{}")

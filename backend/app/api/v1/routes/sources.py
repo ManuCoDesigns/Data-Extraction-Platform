@@ -247,6 +247,8 @@ def _serialize_source(s: Source) -> SourceOut:
 
 def _serialize_record(r: ExtractedRecord) -> RecordOut:
     return RecordOut(
+        is_escalation_only=getattr(r, "is_escalation_only", False),
+        escalation_reason=getattr(r, "escalation_reason", None),
         id=r.id, job_id=r.job_id, schema_version=r.schema_version,
         extraction_confidence=r.extraction_confidence.value,
         pipeline_warnings=r.pipeline_warnings or [],
@@ -2969,3 +2971,67 @@ def dismiss_flag(
 
     db.commit()
     return {"dismissed": removed, "remaining_flags": len(flags)}
+
+
+class EscalateNoDataRequest(BaseModel):
+    reason: str
+    note: str = ""
+
+
+@router.post("/{source_id}/escalate-no-data")
+def escalate_no_data(
+    source_id: str,
+    payload: EscalateNoDataRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    "Escalate — No Data Found": an extractor's declaration that a source
+    has nothing extractable (out of scope, broken page, hoax, etc.), per
+    SOP-DS-003 Section 8. Creates a special ExtractedRecord flagged
+    is_escalation_only=True, going through the exact same review pipeline
+    as a real record — a reviewer still approves or rejects it; rejecting
+    sends it to Escalations automatically via the existing mechanism,
+    same as any other returned-for-correction record.
+    """
+    source = _get_source_or_404(source_id, db)
+    user_roles = {r.role.value for r in current_user.roles}
+    is_admin = "org_admin" in user_roles or "project_admin" in user_roles
+    if not is_admin and source.assigned_extractor_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Only the assigned extractor or an admin can escalate this source")
+
+    if not payload.reason.strip():
+        raise HTTPException(status_code=422, detail="A reason is required")
+
+    job = ExtractionJob(
+        project_id=source.project_id, source_id=source.id, schema_id=source.schema_id,
+        name=f"{source.name} — Escalation (No Data Found)",
+        source_type=FileSourceType.CSV,  # placeholder — not a meaningful classification for an escalation-only job
+        status=JobStatus.READY_FOR_REVIEW,
+        total_extracted=1, created_by=current_user.id,
+    )
+    db.add(job)
+    db.flush()
+
+    record = ExtractedRecord(
+        job_id=job.id,
+        extraction_confidence=ExtractionConfidence.HIGH,
+        is_schema_valid=True, validation_errors=[],
+        review_status=ReviewStatus.PENDING,
+        extracted_fields={}, raw_text=payload.note or "(no note provided)",
+        is_escalation_only=True, escalation_reason=payload.reason,
+    )
+    db.add(record)
+    db.flush()
+
+    source.status = SourceStatus.READY_FOR_REVIEW
+    source.total_records = (source.total_records or 0) + 1
+
+    db.add(AuditLog(
+        user_id=current_user.id, project_id=source.project_id, source_id=source.id,
+        action=AuditAction.SOURCE_STATUS_CHANGED,
+        after_value={"stage": "escalated_no_data", "reason": payload.reason},
+    ))
+    db.commit()
+
+    return {"job_id": job.id, "record_id": record.id, "status": "ready_for_review"}

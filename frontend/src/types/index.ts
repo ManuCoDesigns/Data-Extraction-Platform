@@ -133,6 +133,8 @@ export interface ExtractedRecord {
   is_submitted: boolean
   canonical_name?: string
   created_at: string
+  is_escalation_only?: boolean
+  escalation_reason?: string
 }
 
 // ─── Submission ──────────────────────────────────────────────────────────────
@@ -191,7 +193,7 @@ export interface Notification {
 }
 
 // ─── Project Resource ───────────────────────────────────────────────────────
-export type ResourceType = 'file' | 'link' | 'instruction' | 'sop'
+export type ResourceType = 'file' | 'link' | 'instruction' | 'sop' | 'escalation_reason'
 
 export interface ProjectResource {
   id: string

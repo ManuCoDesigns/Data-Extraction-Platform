@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import {
   ArrowLeft, FileText, Link as LinkIcon, BookOpen, ClipboardList,
   Plus, Trash2, Download, Upload, CheckCircle, XCircle, RotateCcw,
-  Briefcase, RefreshCw, Database,
+  Briefcase, RefreshCw, Database, Flag,
 } from 'lucide-react'
 import { projectsApi, resourcesApi, workSubmissionsApi, usersApi, jobsApi, schemasApi } from '@/api/client'
 import type { Project, ProjectMember, ProjectResource, ProjectSubmission, ResourceType, User, Job, Schema } from '@/types'
@@ -18,9 +18,11 @@ type Tab = 'overview' | 'resources' | 'jobs' | 'submissions' | 'members'
 
 const RESOURCE_ICON: Record<ResourceType, typeof FileText> = {
   file: FileText, link: LinkIcon, instruction: ClipboardList, sop: BookOpen,
+  escalation_reason: Flag,
 }
 const RESOURCE_LABEL: Record<ResourceType, string> = {
   file: 'File', link: 'Link', instruction: 'Instructions', sop: 'SOP',
+  escalation_reason: 'Escalation Reason',
 }
 const SUBMISSION_STATUS_COLOR: Record<string, 'gray' | 'amber' | 'green' | 'red' | 'blue'> = {
   submitted: 'gray', in_review: 'amber', approved: 'green', rejected: 'red', needs_revision: 'amber',
@@ -248,6 +250,11 @@ function ResourcesTab({ projectId, resources, isAdmin, onChange }: {
         await resourcesApi.createLink(projectId, title, url, description || undefined)
       } else if (type === 'instruction' || type === 'sop') {
         await resourcesApi.createInstruction(projectId, type, title, body, description || undefined)
+      } else if (type === 'escalation_reason') {
+        // Body is optional here — the reason tag itself (title) is the
+        // meaningful content; unlike SOPs/instructions there's no long-form
+        // text required.
+        await resourcesApi.createInstruction(projectId, type, title, body || title, description || undefined)
       } else {
         if (!file) return
         const fd = new FormData()
@@ -350,6 +357,7 @@ function ResourcesTab({ projectId, resources, isAdmin, onChange }: {
         <form onSubmit={submit} className="space-y-4">
           <Select label="Type" value={type} onChange={e => setType(e.target.value as ResourceType)}>
             <option value="sop">SOP</option>
+            <option value="escalation_reason">Escalation Reason</option>
             <option value="instruction">Instructions</option>
             <option value="file">File</option>
             <option value="link">Link</option>
@@ -363,6 +371,9 @@ function ResourcesTab({ projectId, resources, isAdmin, onChange }: {
 
           {(type === 'instruction' || type === 'sop') && (
             <Textarea label="Content" rows={8} value={body} onChange={e => setBody(e.target.value)} required placeholder="Write the guideline or SOP text here…" />
+          )}
+          {type === 'escalation_reason' && (
+            <Textarea label="Extra detail (optional)" rows={3} value={body} onChange={e => setBody(e.target.value)} placeholder="Any extra guidance for when to use this reason — the title above is what shows in the dropdown" />
           )}
 
           {type === 'file' && (
