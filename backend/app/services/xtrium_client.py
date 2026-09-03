@@ -216,4 +216,22 @@ class XtriumClient:
         return r.json()
 
 
+    async def get_items(self, status: str = "Queued,In Progress", limit: int = 50) -> list[dict]:
+        """
+        GET /api/careerflow/items
+        Read-only inspection across statuses — NEVER mutates state, per
+        their docs, unlike pull_batch's default claim=True behaviour. Safe
+        to call anytime just to see what's out there, including items
+        already claimed/In Progress — useful for recovering data from
+        items claimed outside our normal pull flow, without claiming
+        anything new in the process.
+        """
+        r = await self._request(
+            "GET", "/api/careerflow/items",
+            headers=self._headers(), params={"status": status, "limit": limit},
+        )
+        if r.status_code != 200:
+            raise XtriumClientError(f"Items inspection failed: {r.status_code} — {r.text[:300]}")
+        return r.json()
+
 xtrium_client = XtriumClient()

@@ -398,3 +398,23 @@ async def get_xtrium_queue_stats(current_user: User = Depends(get_current_user))
         return await xtrium_client.get_stats()
     except XtriumClientError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/items")
+async def get_xtrium_items(
+    status: str = "Queued,In Progress",
+    limit: int = 50,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Read-only inspection of our Xtrium queue across statuses — including
+    already-claimed/In Progress items — without claiming or mutating
+    anything. Lets us see exactly what's stuck in a given state, e.g. to
+    recover items claimed outside our normal pull flow via /import-items
+    afterward, without needing to claim anything further first.
+    """
+    _require_admin(current_user)
+    try:
+        return await xtrium_client.get_items(status=status, limit=limit)
+    except XtriumClientError as e:
+        raise HTTPException(status_code=502, detail=str(e))
