@@ -348,6 +348,15 @@ class Source(Base):
 
     created_by = Column(String(36), ForeignKey("users.id"), nullable=False)
 
+    # Xtrium Catalog IQ integration — columns already exist in the database
+    # since migration 017, but were never declared here on the model until
+    # now. A Source pulled from Xtrium has external_system="xtrium_catalog_iq"
+    # and external_ref_id set to their item id; both are None for any
+    # source created directly on this platform.
+    external_system = Column(String(50), nullable=True, index=True)
+    external_ref_id = Column(String(100), nullable=True, index=True)
+    external_synced_at = Column(DateTime(timezone=True), nullable=True)
+
     project = relationship("Project", foreign_keys=[project_id])
     schema = relationship("Schema", foreign_keys=[schema_id])
     extractor = relationship("User", foreign_keys=[assigned_extractor_id])
