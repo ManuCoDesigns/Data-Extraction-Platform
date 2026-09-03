@@ -236,7 +236,7 @@ export const resourcesApi = {
       headers: { 'Content-Type': 'multipart/form-data' },
     }).then(r => r.data)
   },
-  createInstruction: (projectId: string, type: 'instruction' | 'sop', title: string, body: string, description?: string) => {
+  createInstruction: (projectId: string, type: 'instruction' | 'sop' | 'escalation_reason', title: string, body: string, description?: string) => {
     const fd = new FormData()
     fd.append('type', type)
     fd.append('title', title)
