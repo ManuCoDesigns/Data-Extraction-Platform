@@ -126,17 +126,32 @@ class XtriumClient:
         # clean XtriumClientError with the real status code and body.
         return last_response
 
-    async def pull_batch(self, batch_size: int = 50) -> list[dict]:
+    async def pull_batch(
+        self, batch_size: int = 50, status: str = "Queued",
+        claim: bool = True, include_in_progress: bool = False,
+    ) -> list[dict]:
         """
         POST /api/careerflow/batch/pull
         Pulls the highest-priority batch of links currently assigned to us.
         batch_size is capped at 50 by their API — we don't enforce that
         client-side, just pass through what's asked and let their API
         respond however it responds to an over-limit request.
+
+        claim=True (their default, and ours) atomically transitions Queued
+        items to In Progress — i.e. it's a REAL, non-idempotent action, not
+        a read-only check. Pass claim=False for a genuinely safe query that
+        doesn't consume anything. This was the source of an earlier stuck
+        state: every pull, including diagnostic ones, was silently claiming
+        real items because claim defaulted to true and nothing made that
+        explicit.
         """
         r = await self._request(
             "POST", "/api/careerflow/batch/pull",
-            headers=self._headers(), json={"batch_size": batch_size},
+            headers=self._headers(),
+            json={
+                "batch_size": batch_size, "status": status,
+                "claim": claim, "include_in_progress": include_in_progress,
+            },
         )
         if r.status_code != 200:
             raise XtriumClientError(f"Pull failed: {r.status_code} — {r.text[:300]}")
