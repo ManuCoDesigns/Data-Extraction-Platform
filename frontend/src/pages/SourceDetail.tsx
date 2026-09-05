@@ -801,6 +801,7 @@ export function SourceDetailPage() {
           schemaName={schemaDefinition?.name}
           sourceWebsiteUrl={source.website_url}
           sourceId={sourceId!}
+          projectId={source.project_id}
           isExtractor={isExtractor}
           isReviewer={isReviewer}
           isAdmin={isAdmin}
