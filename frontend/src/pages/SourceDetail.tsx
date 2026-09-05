@@ -282,11 +282,11 @@ export function SourceDetailPage() {
     }
   }
 
-  const handleAdminReview = async (recordId: string, action: 'approve' | 'return') => {
+  const handleAdminReview = async (recordId: string, action: 'approve' | 'return', noteOverride?: string) => {
     if (!sourceId) return
     setAdminReviewing(true)
     try {
-      await sourcesApi.adminReview(sourceId, recordId, { action, note: adminNote, field_comments: fieldComments })
+      await sourcesApi.adminReview(sourceId, recordId, { action, note: noteOverride ?? adminNote, field_comments: fieldComments })
       toast.success(action === 'approve' ? 'Record fully approved' : 'Record returned for correction')
       setAdminNote('')
       setFieldComments({})
@@ -798,8 +798,10 @@ export function SourceDetailPage() {
           sourceId={sourceId!}
           isExtractor={isExtractor}
           isReviewer={isReviewer}
+          isAdmin={isAdmin}
           onFix={handleFixRecord}
           onReview={handleReviewRecord}
+          onAdminReview={handleAdminReview}
           onNavigate={setActiveRecordIndex}
           onClose={() => { setActiveRecordIndex(null); load() }}
         />

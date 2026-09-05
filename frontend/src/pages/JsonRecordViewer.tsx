@@ -18,7 +18,8 @@ interface Props {
   schemaFields: SchemaField[]; extractionInstructions?: string; schemaName?: string
   sourceWebsiteUrl?: string; extrasFields?: string[]; extrasSource?: string
   sourceId: string
-  isExtractor: boolean; isReviewer: boolean
+  isExtractor: boolean; isReviewer: boolean; isAdmin: boolean
+  onAdminReview: (id: string, action: 'approve' | 'return', note?: string) => Promise<void>
   onFix: (id: string, fields: Record<string, unknown>) => Promise<void>
   onReview: (id: string, action: 'approve' | 'reject', note?: string) => Promise<void>
   onNavigate: (index: number) => void; onClose: () => void
@@ -111,7 +112,7 @@ function EditField({ label, value, field, onSave, required, isExtra }: {
 export function JsonRecordViewer({
   record, allRecords, currentIndex, schemaFields, schemaName,
   sourceWebsiteUrl, extrasFields = [], extrasSource, sourceId,
-  isExtractor, isReviewer, onFix, onReview, onNavigate, onClose,
+  isExtractor, isReviewer, isAdmin, onFix, onReview, onAdminReview, onNavigate, onClose,
 }: Props) {
   const fields = record.extracted_fields || {}
   const errors = record.validation_errors || []
@@ -135,6 +136,25 @@ export function JsonRecordViewer({
       setHasChanges(false)
       toast.success('Changes saved')
     } catch { toast.error('Save failed') }
+  }
+
+  const [showAdminReturn, setShowAdminReturn] = useState(false)
+  const [adminReturnNote, setAdminReturnNote] = useState('')
+  const [adminActing, setAdminActing] = useState<'approve' | 'return' | null>(null)
+
+  const handleAdminApprove = async () => {
+    setAdminActing('approve')
+    try { await onAdminReview(record.id, 'approve'); onNavigate(Math.min(currentIndex + 1, allRecords.length - 1)) }
+    catch { toast.error('Admin approve failed') }
+    finally { setAdminActing(null) }
+  }
+
+  const handleAdminReturn = async () => {
+    if (!adminReturnNote.trim()) { toast.error('Add a note explaining what needs fixing'); return }
+    setAdminActing('return')
+    try { await onAdminReview(record.id, 'return', adminReturnNote); setShowAdminReturn(false); setAdminReturnNote('') }
+    catch { toast.error('Return failed') }
+    finally { setAdminActing(null) }
   }
 
   const handleApprove = async () => {
@@ -243,6 +263,25 @@ export function JsonRecordViewer({
               <Save size={13} /> Save changes
             </button>
           )}
+          {isAdmin && record.review_status === 'pending_admin_review' && (
+            <>
+              <button onClick={() => setShowAdminReturn(r => !r)}
+                style={{ padding: '7px 14px', background: showAdminReturn ? '#fef2f2' : '#fff', border: `1.5px solid ${showAdminReturn ? '#ef4444' : '#fde68a'}`, borderRadius: 8, color: showAdminReturn ? '#dc2626' : '#b45309', fontSize: 12, fontWeight: 600, cursor: 'pointer', transition: 'all 0.15s' }}>
+                {adminActing === 'return' ? 'Returning…' : '↩ Return for Correction'}
+              </button>
+              <button onClick={handleAdminApprove} disabled={adminActing === 'approve'}
+                style={{
+                  padding: '7px 18px',
+                  background: adminActing === 'approve' ? '#d1fae5' : 'linear-gradient(135deg,#f59e0b,#b45309)',
+                  border: 'none', borderRadius: 8, color: '#fff', fontSize: 12, fontWeight: 700,
+                  cursor: 'pointer', opacity: adminActing === 'approve' ? 0.7 : 1,
+                  boxShadow: adminActing === 'approve' ? 'none' : '0 3px 10px rgba(245,158,11,0.35)',
+                  transition: 'all 0.15s',
+                }}>
+                {adminActing === 'approve' ? 'Approving…' : '✓ Admin Approve — Fully Delivered'}
+              </button>
+            </>
+          )}
           {isReviewer && !isApproved && (
             <>
               <button onClick={() => setShowReject(r => !r)}
@@ -269,6 +308,19 @@ export function JsonRecordViewer({
       </div>
 
       {/* Reject note input */}
+      {showAdminReturn && (
+        <div style={{ position: 'relative', background: '#fff', borderBottom: '1px solid #fde68a', padding: '12px 24px', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0, overflow: 'hidden' }}>
+          <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg,#f59e0b,#b45309)' }} />
+          <input value={adminReturnNote} onChange={e => setAdminReturnNote(e.target.value)}
+            placeholder="What needs to be fixed before this can be delivered? (required)"
+            style={{ flex: 1, padding: '8px 12px', border: '1.5px solid #fde68a', borderRadius: 8, fontSize: 13, outline: 'none', background: '#fff' }}
+            onKeyDown={e => e.key === 'Enter' && handleAdminReturn()} />
+          <button onClick={handleAdminReturn} style={{ padding: '8px 16px', background: 'linear-gradient(135deg,#f59e0b,#b45309)', color: '#fff', border: 'none', borderRadius: 8, fontSize: 12, fontWeight: 700, cursor: 'pointer', boxShadow: '0 3px 10px rgba(245,158,11,0.3)' }}>
+            {adminActing === 'return' ? 'Returning…' : 'Return for Correction'}
+          </button>
+          <button onClick={() => setShowAdminReturn(false)} style={{ padding: 8, background: 'none', border: 'none', cursor: 'pointer' }}><X size={14} color="#b45309" /></button>
+        </div>
+      )}
       {showReject && (
         <div style={{ position: 'relative', background: '#fff', borderBottom: '1px solid #fca5a5', padding: '12px 24px', display: 'flex', gap: 10, alignItems: 'center', flexShrink: 0, overflow: 'hidden' }}>
           <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg,#ef4444,#dc2626)' }} />
