@@ -59,16 +59,21 @@ export function SourceDetailPage() {
   const [escalateNote, setEscalateNote] = useState('')
   const [escalating, setEscalating] = useState(false)
   const [escalationReasons, setEscalationReasons] = useState<string[]>([])
-
+  const [loadingEscalationReasons, setLoadingEscalationReasons] = useState(true)
   useEffect(() => {
-    if (!showEscalate || !source) return
+    // Pre-fetches as soon as the source itself loads — not gated behind the
+    // modal opening — so the reason list is already sitting ready by the
+    // time someone actually clicks Escalate, no felt delay.
+    if (!source?.project_id) return
+    setLoadingEscalationReasons(true)
     resourcesApi.list(source.project_id)
       .then((r: any) => {
         const list = Array.isArray(r) ? r : r?.items ?? []
         setEscalationReasons(list.filter((res: any) => res.type === 'escalation_reason').map((res: any) => res.title))
       })
       .catch(() => setEscalationReasons([]))
-  }, [showEscalate, source])
+      .finally(() => setLoadingEscalationReasons(false))
+  }, [source?.project_id])
 
   const handleEscalateNoData = async () => {
     if (!escalateReason) { toast.error('Select a reason'); return }
@@ -1622,38 +1627,80 @@ export function SourceDetailPage() {
 
       <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Add extracted data to this source.">
 
-      <Modal open={showEscalate} onClose={() => !escalating && setShowEscalate(false)} title="Escalate — No Data Found"
-        description="Per SOP-DS-003 Section 8 — for sources with nothing extractable. Goes through the same reviewer approval as a normal record.">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <Modal open={showEscalate} onClose={() => !escalating && setShowEscalate(false)} title="Escalate — No Data Found">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12,
+            background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', border: '1px solid #fde68a',
+            borderRadius: 12, padding: '14px 16px' }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+              background: 'linear-gradient(135deg,#f59e0b,#b45309)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <AlertTriangle className="w-4 h-4" color="#fff" />
+            </div>
+            <p style={{ fontSize: 12.5, color: '#92400e', margin: 0, lineHeight: 1.5 }}>
+              Per SOP-DS-003 Section 8 — for sources with nothing extractable.
+              Goes through the same reviewer approval as a normal record.
+            </p>
+          </div>
+
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 8 }}>
               Reason *
             </label>
-            <select value={escalateReason} onChange={e => setEscalateReason(e.target.value)}
-              style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid #e2e8f0',
-                borderRadius: 10, outline: 'none', background: '#fff', color: '#1e293b' }}>
-              <option value="">— Select a reason —</option>
-              {escalationReasons.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-            {escalationReasons.length === 0 && (
-              <p style={{ fontSize: 11, color: '#94a3b8', marginTop: 6 }}>
+            {loadingEscalationReasons ? (
+              <div style={{ padding: '14px 12px', textAlign: 'center', fontSize: 12, color: '#94a3b8',
+                background: '#f8fafc', borderRadius: 10, border: '1px solid #f1f5f9' }}>
+                Loading reasons…
+              </div>
+            ) : escalationReasons.length === 0 ? (
+              <p style={{ fontSize: 12, color: '#94a3b8', padding: '10px 12px', background: '#f8fafc',
+                borderRadius: 10, border: '1px solid #f1f5f9', margin: 0 }}>
                 No escalation reasons attached to this project yet — add some in the Resources tab.
               </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {escalationReasons.map(r => {
+                  const selected = escalateReason === r
+                  return (
+                    <button key={r} type="button" onClick={() => setEscalateReason(r)}
+                      style={{
+                        textAlign: 'left', padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                        cursor: 'pointer', transition: 'all 0.12s',
+                        background: selected ? 'linear-gradient(135deg,#fffbeb,#fef3c7)' : '#fff',
+                        border: `1.5px solid ${selected ? '#f59e0b' : '#e2e8f0'}`,
+                        color: selected ? '#92400e' : '#374151',
+                        display: 'flex', alignItems: 'center', gap: 10,
+                      }}>
+                      <span style={{
+                        width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                        border: `2px solid ${selected ? '#f59e0b' : '#cbd5e1'}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {selected && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b' }} />}
+                      </span>
+                      {r}
+                    </button>
+                  )
+                })}
+              </div>
             )}
           </div>
+
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
-              Note (optional)
+            <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 8 }}>
+              Note <span style={{ fontWeight: 500, color: '#94a3b8' }}>(optional)</span>
             </label>
-            <textarea value={escalateNote} onChange={e => setEscalateNote(e.target.value)} rows={4}
+            <textarea value={escalateNote} onChange={e => setEscalateNote(e.target.value)} rows={3}
               placeholder="Any extra context for the reviewer"
-              style={{ width: '100%', padding: '9px 12px', fontSize: 13, border: '1px solid #e2e8f0',
+              style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #e2e8f0',
                 borderRadius: 10, outline: 'none', resize: 'vertical', boxSizing: 'border-box' }} />
           </div>
+
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
             <Button variant="secondary" onClick={() => setShowEscalate(false)} disabled={escalating}>Cancel</Button>
             <Button onClick={handleEscalateNoData} loading={escalating} disabled={!escalateReason}
-              style={{ background: 'linear-gradient(135deg,#f59e0b,#b45309)', border: 'none' }}>
+              style={{ background: 'linear-gradient(135deg,#f59e0b,#b45309)', border: 'none',
+                boxShadow: escalateReason ? '0 3px 10px rgba(245,158,11,0.3)' : 'none' }}>
               <AlertTriangle className="w-3.5 h-3.5" /> Submit Escalation
             </Button>
           </div>
