@@ -7,6 +7,7 @@ import { useState, useRef, useCallback, useEffect } from 'react'
 import { X, CheckCircle, XCircle, AlertTriangle, Globe, ChevronLeft, ChevronRight, Edit3, Save, ExternalLink, Code } from 'lucide-react'
 import type { ExtractedRecord } from '@/types'
 import { toast } from '@/components/ui'
+import { resourcesApi } from '@/api/client'
 import { JsonEditor } from './JsonEditor'
 
 interface SchemaField {
@@ -17,7 +18,7 @@ interface Props {
   record: ExtractedRecord; allRecords: ExtractedRecord[]; currentIndex: number
   schemaFields: SchemaField[]; extractionInstructions?: string; schemaName?: string
   sourceWebsiteUrl?: string; extrasFields?: string[]; extrasSource?: string
-  sourceId: string
+  sourceId: string; projectId: string
   isExtractor: boolean; isReviewer: boolean; isAdmin: boolean
   onAdminReview: (id: string, action: 'approve' | 'return', note?: string) => Promise<void>
   onFix: (id: string, fields: Record<string, unknown>) => Promise<void>
@@ -111,9 +112,22 @@ function EditField({ label, value, field, onSave, required, isExtra }: {
 
 export function JsonRecordViewer({
   record, allRecords, currentIndex, schemaFields, schemaName,
-  sourceWebsiteUrl, extrasFields = [], extrasSource, sourceId,
+  sourceWebsiteUrl, extrasFields = [], extrasSource, sourceId, projectId,
   isExtractor, isReviewer, isAdmin, onFix, onReview, onAdminReview, onNavigate, onClose,
 }: Props) {
+  // SOP dropdown auto-detects from whatever SOP resources are actually
+  // attached to this project (Resources tab, type=sop) — rather than a
+  // hardcoded list, so newly-added SOPs show up here automatically.
+  const [sopOptions, setSopOptions] = useState<string[]>([])
+  useEffect(() => {
+    if (!projectId) return
+    resourcesApi.list(projectId)
+      .then((r: any) => {
+        const list = Array.isArray(r) ? r : r?.items ?? []
+        setSopOptions(list.filter((res: any) => res.type === 'sop').map((res: any) => res.title))
+      })
+      .catch(() => setSopOptions([]))
+  }, [projectId])
   const fields = record.extracted_fields || {}
   const errors = record.validation_errors || []
   const webFlags = record.web_check_flags || []
@@ -451,9 +465,33 @@ export function JsonRecordViewer({
                 onMouseLeave={e => e.currentTarget.querySelectorAll<HTMLElement>('.edit-icon').forEach(el => el.style.opacity = '0')}>
                 <SectionHeader icon="✏️" label="Additional Fields" grad="linear-gradient(135deg,#64748b,#475569)" />
                 {others.map(field => (
-                  <EditField key={field} field={field} label={field.replace(/_/g,' ')}
-                    value={localFields[field]} isExtra={extrasFields.includes(field)}
-                    onSave={handleSaveField} />
+                  field === 'sop_used' ? (
+                    <div key={field} style={{ padding: '10px 0', borderBottom: '1px solid #f1f5f9', display: 'flex', gap: 12, alignItems: 'center' }}>
+                      <div style={{ minWidth: 180, flexShrink: 0 }}>
+                        <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0 }}>
+                          SOP Used
+                        </p>
+                      </div>
+                      <select
+                        value={String(localFields.sop_used ?? '')}
+                        onChange={e => handleSaveField('sop_used', e.target.value)}
+                        style={{ flex: 1, padding: '5px 8px', fontSize: 13, border: '1px solid #e2e8f0', borderRadius: 6,
+                          outline: 'none', background: '#fff', color: '#0f172a' }}>
+                        <option value="">— Select SOP —</option>
+                        {sopOptions.map(sop => <option key={sop} value={sop}>{sop}</option>)}
+                        {localFields.sop_used && !sopOptions.includes(String(localFields.sop_used)) && (
+                          <option value={String(localFields.sop_used)}>{String(localFields.sop_used)} (not in Resources)</option>
+                        )}
+                      </select>
+                      {sopOptions.length === 0 && (
+                        <span style={{ fontSize: 11, color: '#94a3b8', flexShrink: 0 }}>No SOPs attached — add one in the project's Resources tab</span>
+                      )}
+                    </div>
+                  ) : (
+                    <EditField key={field} field={field} label={field.replace(/_/g,' ')}
+                      value={localFields[field]} isExtra={extrasFields.includes(field)}
+                      onSave={handleSaveField} />
+                  )
                 ))}
               </div>
             )
