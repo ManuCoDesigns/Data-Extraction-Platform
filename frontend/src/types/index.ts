@@ -98,7 +98,7 @@ export interface JobStateHistory {
 }
 
 // ─── Record ──────────────────────────────────────────────────────────────────
-export type ReviewStatus = 'pending' | 'approved' | 'rejected' | 'skipped' | 'quarantined' | 'escalated'
+export type ReviewStatus = 'pending' | 'approved' | 'rejected' | 'skipped' | 'quarantined' | 'escalated' | 'pending_admin_review'
 export type LLMVerdict = 'PASS' | 'REVIEW' | 'REJECT'
 export type ExtractionConfidence = 'high' | 'medium' | 'low' | 'flagged'
 
