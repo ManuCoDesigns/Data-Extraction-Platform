@@ -24,10 +24,12 @@ the platform-side bookkeeping needed to make it fit our existing model:
       reviewer rejection — it shows up in Escalations automatically,
       with no separate "external feedback" system needed.
 """
+import copy
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
+from sqlalchemy.orm.attributes import flag_modified
 from pydantic import BaseModel
 
 from app.db.session import get_db
@@ -56,6 +58,9 @@ def _create_sources_from_xtrium_items(items: list[dict], project_id: str, curren
     """
     created, skipped = [], []
     for item in items:
+        if item.get("id") is None:
+            skipped.append({"item_id": None, "name": item.get("name"), "reason": "missing id"})
+            continue
         item_id = str(item.get("id"))
         existing = db.query(Source).filter(
             Source.external_system == "xtrium_catalog_iq",
@@ -180,6 +185,12 @@ def import_xtrium_items(
 
 class SubmitToXtriumRequest(BaseModel):
     notes: str = ""
+    # Multi-file uploads produce one approved record per file, but Xtrium
+    # takes one JSON payload per item. consolidate=True bundles every approved
+    # record into that single payload, under `wrap_key` (or as a bare list if
+    # wrap_key is empty). Default False keeps the old single-record behaviour.
+    consolidate: bool = False
+    wrap_key: str = "records"
 
 
 @router.post("/sources/{source_id}/submit")
@@ -194,10 +205,10 @@ async def submit_source_to_xtrium(
     as raw_payload. Requires:
       - the source to have come from a pull (external_ref_id set)
       - the source to be fully APPROVED (our double-review is complete)
-      - exactly one approved record — Xtrium's model is one item = one
-        JSON payload, so multi-record sources need to be consolidated by
-        the extractor before submitting (same as they already would for
-        a nested-object schema like materials with a properties[] array).
+      - exactly one approved record, OR consolidate=true in the request body.
+        Xtrium's model is one item = one JSON payload, so a source with
+        several approved records (e.g. a multi-file upload) is bundled into
+        one payload: {wrap_key: [record, record, ...]}, in upload order.
     """
     source = db.query(Source).filter(Source.id == source_id).first()
     if not source:
@@ -213,19 +224,33 @@ async def submit_source_to_xtrium(
     approved_records = db.query(ExtractedRecord).filter(
         ExtractedRecord.job_id.in_(job_ids),
         ExtractedRecord.review_status == ReviewStatus.APPROVED,
-    ).all() if job_ids else []
+    ).order_by(ExtractedRecord.created_at).all() if job_ids else []
 
     if not approved_records:
         raise HTTPException(status_code=422, detail="No approved records found on this source.")
-    if len(approved_records) > 1:
+    if len(approved_records) > 1 and not payload.consolidate:
         raise HTTPException(
             status_code=422,
             detail=f"This source has {len(approved_records)} approved records, but Xtrium expects one JSON "
-                   f"payload per item. Consolidate into a single record before submitting.",
+                   f"payload per item. Re-send with consolidate=true to bundle them into a single payload.",
         )
 
-    record = approved_records[0]
-    raw_payload = {k: v for k, v in (record.extracted_fields or {}).items() if not k.startswith("_")}
+    def _clean(r: ExtractedRecord) -> dict:
+        # Drop internal bookkeeping keys such as _source_file.
+        return {k: v for k, v in (r.extracted_fields or {}).items() if not k.startswith("_")}
+
+    if payload.consolidate:
+        items = [_clean(r) for r in approved_records]
+        raw_payload = {payload.wrap_key: items} if payload.wrap_key else items
+    else:
+        raw_payload = _clean(approved_records[0])
+
+    # Records that are not approved (an admin can approve a source with some
+    # still pending) are NOT included, so log how many were left out.
+    not_approved = db.query(ExtractedRecord).filter(
+        ExtractedRecord.job_id.in_(job_ids),
+        ExtractedRecord.review_status != ReviewStatus.APPROVED,
+    ).count()
 
     try:
         result = await xtrium_client.submit_item(
@@ -238,7 +263,12 @@ async def submit_source_to_xtrium(
     db.add(AuditLog(
         user_id=current_user.id, project_id=source.project_id, source_id=source.id,
         action=AuditAction.SOURCE_STATUS_CHANGED,
-        after_value={"stage": "xtrium_submit", "response": result},
+        after_value={
+            "stage": "xtrium_submit", "response": result,
+            "records_submitted": len(approved_records),
+            "records_not_approved_excluded": not_approved,
+            "consolidated": payload.consolidate,
+        },
     ))
     db.commit()
 
@@ -285,22 +315,6 @@ async def report_source_failure(
 
 
 # ─── Check status / pull in rework feedback ──────────────────────────────────
-
-@router.get("/stats")
-async def get_xtrium_stats(current_user: User = Depends(get_current_user)):
-    """
-    Real-time workload metrics from Xtrium Catalog IQ's side — how many
-    items are assigned, in progress, awaiting their review, approved,
-    failed, rejected, or sent back for rework. Straight passthrough; a
-    natural candidate for a small widget on our own Team Workload page
-    later, once this integration is in regular use.
-    """
-    _require_admin(current_user)
-    try:
-        return await xtrium_client.get_stats()
-    except XtriumClientError as e:
-        raise HTTPException(status_code=502, detail=str(e))
-
 
 @router.get("/sources/{source_id}/status")
 async def check_source_xtrium_status(
@@ -362,12 +376,13 @@ async def check_source_xtrium_status(
             )
             if not already_applied:
                 now = datetime.now(timezone.utc)
-                fc = record.reviewer_field_comments or {}
+                fc = copy.deepcopy(record.reviewer_field_comments or {})
                 fc.setdefault("_general", []).append({
                     "comment": rework_notes, "user": "xtrium_catalog_iq",
                     "role": "admin", "type": "rejection", "ts": now.isoformat(),
                 })
                 record.reviewer_field_comments = fc
+                flag_modified(record, "reviewer_field_comments")
                 record.review_status = ReviewStatus.PENDING
                 record.correction_count = (record.correction_count or 0) + 1
 
