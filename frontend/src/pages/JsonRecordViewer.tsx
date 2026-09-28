@@ -479,7 +479,7 @@ export function JsonRecordViewer({
                           outline: 'none', background: '#fff', color: '#0f172a' }}>
                         <option value="">— Select SOP —</option>
                         {sopOptions.map(sop => <option key={sop} value={sop}>{sop}</option>)}
-                        {localFields.sop_used && !sopOptions.includes(String(localFields.sop_used)) && (
+                        {Boolean(localFields.sop_used) && !sopOptions.includes(String(localFields.sop_used)) && (
                           <option value={String(localFields.sop_used)}>{String(localFields.sop_used)} (not in Resources)</option>
                         )}
                       </select>
