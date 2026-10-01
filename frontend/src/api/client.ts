@@ -376,6 +376,7 @@ export const xtriumApi = {
   checkStatus: (sourceId: string) =>
     api.get(`/integrations/xtrium/sources/${sourceId}/status`).then(r => r.data),
   stats: () => api.get('/integrations/xtrium/stats').then(r => r.data),
+  dashboard: () => api.get('/integrations/xtrium/dashboard').then(r => r.data),
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string) {

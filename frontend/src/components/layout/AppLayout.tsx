@@ -5,7 +5,7 @@ import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
   Menu, X, Shield, Activity, AlertTriangle,
-} from 'lucide-react'
+, Zap } from 'lucide-react'
 import { cn, ToastContainer, toast } from '@/components/ui'
 import { notificationsApi, sourcesApi } from '@/api/client'
 import { useCapability } from '@/lib/permissions'
@@ -101,6 +101,7 @@ export function AppLayout() {
     { to: '/',            icon: LayoutDashboard, label: 'Dashboard',    show: true },
     { to: '/sources',     icon: Database,        label: 'Sources',      show: true, forceActive: isSourcesPath },
     { to: '/escalations', icon: AlertTriangle,   label: 'Escalations',  show: true, badge: escalationCount },
+    { to: '/xtrium',      icon: Zap,             label: 'Xtrium Integration', show: isAdmin },
     { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true, forceActive: isProjectsPath },
     { to: '/workload',    icon: Activity,        label: 'Team Workload', show: true },
     { to: '/schemas',     icon: Layers,          label: 'Schemas',      show: isAdmin && canManageSchemas },

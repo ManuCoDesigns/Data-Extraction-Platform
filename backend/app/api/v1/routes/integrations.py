@@ -446,3 +446,112 @@ async def get_xtrium_items(
         return await xtrium_client.get_items(status=status, limit=limit)
     except XtriumClientError as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/dashboard")
+async def xtrium_dashboard(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Everything the Xtrium Integration dashboard page needs in one call:
+    status breakdown across all Xtrium-linked sources, the full source
+    list, recent Xtrium-related activity pulled from the audit log, and
+    live pull availability (best-effort — the dashboard still works if
+    Xtrium's own API is briefly unreachable).
+    """
+    _require_admin(current_user)
+
+    sources = (
+        db.query(Source)
+        .filter(Source.external_ref_id != None)
+        .order_by(Source.updated_at.desc())
+        .all()
+    )
+
+    by_status: dict = {}
+    submitted_count = 0
+    for s in sources:
+        by_status[s.status.value] = by_status.get(s.status.value, 0) + 1
+        if s.xtrium_submitted_at is not None:
+            submitted_count += 1
+
+    project_ids = {s.project_id for s in sources}
+    projects_by_id = {
+        p.id: p.name
+        for p in db.query(Project).filter(Project.id.in_(project_ids)).all()
+    } if project_ids else {}
+
+    source_list = [{
+        "id": s.id,
+        "name": s.name,
+        "project_id": s.project_id,
+        "project_name": projects_by_id.get(s.project_id),
+        "status": s.status.value,
+        "external_ref_id": s.external_ref_id,
+        "country": getattr(s, "country", None),
+        "type": getattr(s, "type", None),
+        "total_records": s.total_records or 0,
+        "approved_records": s.approved_records or 0,
+        "xtrium_submitted_at": s.xtrium_submitted_at.isoformat() if s.xtrium_submitted_at else None,
+        "external_synced_at": s.external_synced_at.isoformat() if s.external_synced_at else None,
+        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+    } for s in sources]
+
+    # Recent activity — only audit log entries tagged with a recognisable
+    # Xtrium stage/origin, across any of these sources.
+    source_ids = [s.id for s in sources]
+    sources_by_id = {s.id: s for s in sources}
+    xtrium_tags = {
+        "xtrium_catalog_iq_pull": "Pulled from Xtrium",
+        "xtrium_submit": "Submitted to Xtrium",
+        "xtrium_archived": "Archived by Xtrium",
+        "xtrium_rejected": "Rejected by Xtrium",
+        "escalated_no_data": "Escalated — no data found",
+    }
+
+    activity = []
+    if source_ids:
+        recent_logs = (
+            db.query(AuditLog)
+            .filter(AuditLog.source_id.in_(source_ids))
+            .order_by(AuditLog.created_at.desc())
+            .limit(150)
+            .all()
+        )
+        user_ids = {log.user_id for log in recent_logs if log.user_id}
+        users_by_id = {
+            u.id: u.full_name
+            for u in db.query(User).filter(User.id.in_(user_ids)).all()
+        } if user_ids else {}
+
+        for log in recent_logs:
+            av = log.after_value or {}
+            tag = av.get("origin") or av.get("stage")
+            if tag not in xtrium_tags:
+                continue
+            src = sources_by_id.get(log.source_id)
+            activity.append({
+                "id": log.id,
+                "source_id": log.source_id,
+                "source_name": src.name if src else None,
+                "label": xtrium_tags[tag],
+                "user_name": users_by_id.get(log.user_id) if log.user_id else None,
+                "created_at": log.created_at.isoformat() if log.created_at else None,
+            })
+            if len(activity) >= 30:
+                break
+
+    try:
+        live_availability = await xtrium_client.get_stats()
+    except XtriumClientError:
+        live_availability = None
+
+    return {
+        "by_status": by_status,
+        "total_linked": len(sources),
+        "submitted_count": submitted_count,
+        "sources": source_list,
+        "activity": activity,
+        "live_availability": live_availability,
+    }

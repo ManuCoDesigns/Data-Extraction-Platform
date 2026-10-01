@@ -6,6 +6,7 @@ import { DashboardPage } from '@/pages/Dashboard'
 import { ProjectsPage } from '@/pages/Projects'
 import { ProjectDetailPage } from '@/pages/ProjectDetail'
 import { SourcesPage } from '@/pages/Sources'
+import { XtriumDashboardPage } from '@/pages/XtriumDashboard'
 import { SourceDetailPage } from '@/pages/SourceDetail'
 import { HelpPage } from '@/pages/Help'
 import { NotificationsPage } from '@/pages/Notifications'
@@ -126,6 +127,11 @@ export function App() {
           <Route
             path="escalations"
             element={<EscalationsPage />}
+          />
+
+          <Route
+            path="xtrium"
+            element={<XtriumDashboardPage />}
           />
 
           <Route
