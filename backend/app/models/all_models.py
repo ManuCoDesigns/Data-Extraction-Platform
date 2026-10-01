@@ -359,6 +359,10 @@ class Source(Base):
     external_system = Column(String(50), nullable=True, index=True)
     external_ref_id = Column(String(100), nullable=True, index=True)
     external_synced_at = Column(DateTime(timezone=True), nullable=True)
+    # Distinct from external_synced_at (which status-checks also update) —
+    # this is set ONLY on a successful submit, so we can reliably tell
+    # whether a source has been submitted before, to warn on resubmission.
+    xtrium_submitted_at = Column(DateTime(timezone=True), nullable=True)
 
     project = relationship("Project", foreign_keys=[project_id])
     schema = relationship("Schema", foreign_keys=[schema_id])

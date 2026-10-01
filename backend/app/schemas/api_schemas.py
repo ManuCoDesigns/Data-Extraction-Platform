@@ -291,6 +291,7 @@ class SourceOut(BaseModel):
     type: Optional[str] = None
     external_ref_id: Optional[str] = None
     external_system: Optional[str] = None
+    xtrium_submitted_at: Optional[datetime] = None
     status: str
     assigned_extractor_id: Optional[str]
     assigned_extractor_name: Optional[str] = None

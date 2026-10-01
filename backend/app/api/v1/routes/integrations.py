@@ -185,6 +185,7 @@ def import_xtrium_items(
 
 class SubmitToXtriumRequest(BaseModel):
     notes: str = ""
+    confirm_resubmit: bool = False
 
 
 @router.post("/sources/{source_id}/submit")
@@ -227,6 +228,24 @@ async def submit_source_to_xtrium(
     if not approved_records:
         raise HTTPException(status_code=422, detail="No approved records found on this source.")
 
+    # Block rapid accidental double-clicks outright. A genuine, later
+    # resubmission (e.g. after Xtrium requested rework) is still allowed,
+    # but requires explicit confirm_resubmit=true rather than silently
+    # re-sending — the frontend prompts for this.
+    if source.xtrium_submitted_at:
+        seconds_since = (datetime.now(timezone.utc) - source.xtrium_submitted_at).total_seconds()
+        if seconds_since < 60:
+            raise HTTPException(
+                status_code=429,
+                detail="This source was just submitted moments ago. Please wait a moment before trying again.",
+            )
+        if not payload.confirm_resubmit:
+            raise HTTPException(
+                status_code=409,
+                detail=f"This source was already submitted to Xtrium on {source.xtrium_submitted_at.isoformat()}. "
+                       f"Re-send with confirm_resubmit=true if you intend to submit it again.",
+            )
+
     def _clean(r: ExtractedRecord) -> dict:
         # Drop internal bookkeeping keys such as _source_file.
         return {k: v for k, v in (r.extracted_fields or {}).items() if not k.startswith("_")}
@@ -263,6 +282,7 @@ async def submit_source_to_xtrium(
     ))
     db.commit()
 
+    source.xtrium_submitted_at = datetime.now(timezone.utc)
     return {**result, "records_submitted": len(approved_records), "bundled": len(approved_records) > 1}
 
 
