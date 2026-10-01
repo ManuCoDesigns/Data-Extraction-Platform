@@ -185,12 +185,6 @@ def import_xtrium_items(
 
 class SubmitToXtriumRequest(BaseModel):
     notes: str = ""
-    # Multi-file uploads produce one approved record per file, but Xtrium
-    # takes one JSON payload per item. consolidate=True bundles every approved
-    # record into that single payload, under `wrap_key` (or as a bare list if
-    # wrap_key is empty). Default False keeps the old single-record behaviour.
-    consolidate: bool = False
-    wrap_key: str = "records"
 
 
 @router.post("/sources/{source_id}/submit")
@@ -202,13 +196,17 @@ async def submit_source_to_xtrium(
 ):
     """
     Pushes an approved source's extracted data back to Xtrium Catalog IQ
-    as raw_payload. Requires:
+    as a single submission. Requires:
       - the source to have come from a pull (external_ref_id set)
       - the source to be fully APPROVED (our double-review is complete)
-      - exactly one approved record, OR consolidate=true in the request body.
-        Xtrium's model is one item = one JSON payload, so a source with
-        several approved records (e.g. a multi-file upload) is bundled into
-        one payload: {wrap_key: [record, record, ...]}, in upload order.
+
+    Xtrium's model is one item = one JSON payload. A source with exactly
+    one approved record sends that record as-is. A source with several
+    approved records (e.g. a multi-file upload) automatically bundles all
+    of them into one payload — {"records": [record, record, ...]}, in
+    upload order — so the whole thing is still a single submission call,
+    just carrying every record inside it. No flag or extra step needed;
+    this is the only behaviour, so Submit stays genuinely one-click.
     """
     source = db.query(Source).filter(Source.id == source_id).first()
     if not source:
@@ -228,20 +226,13 @@ async def submit_source_to_xtrium(
 
     if not approved_records:
         raise HTTPException(status_code=422, detail="No approved records found on this source.")
-    if len(approved_records) > 1 and not payload.consolidate:
-        raise HTTPException(
-            status_code=422,
-            detail=f"This source has {len(approved_records)} approved records, but Xtrium expects one JSON "
-                   f"payload per item. Re-send with consolidate=true to bundle them into a single payload.",
-        )
 
     def _clean(r: ExtractedRecord) -> dict:
         # Drop internal bookkeeping keys such as _source_file.
         return {k: v for k, v in (r.extracted_fields or {}).items() if not k.startswith("_")}
 
-    if payload.consolidate:
-        items = [_clean(r) for r in approved_records]
-        raw_payload = {payload.wrap_key: items} if payload.wrap_key else items
+    if len(approved_records) > 1:
+        raw_payload = {"records": [_clean(r) for r in approved_records]}
     else:
         raw_payload = _clean(approved_records[0])
 
@@ -267,12 +258,12 @@ async def submit_source_to_xtrium(
             "stage": "xtrium_submit", "response": result,
             "records_submitted": len(approved_records),
             "records_not_approved_excluded": not_approved,
-            "consolidated": payload.consolidate,
+            "bundled": len(approved_records) > 1,
         },
     ))
     db.commit()
 
-    return result
+    return {**result, "records_submitted": len(approved_records), "bundled": len(approved_records) > 1}
 
 
 # ─── Report a scrape failure ─────────────────────────────────────────────────
