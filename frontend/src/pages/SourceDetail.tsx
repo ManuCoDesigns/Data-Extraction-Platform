@@ -219,7 +219,8 @@ export function SourceDetailPage() {
     setSubmittingToXtrium(true)
     try {
       const result = await xtriumApi.submit(sourceId)
-      toast.success(`Submitted to Xtrium Catalog IQ — item #${result.item_id} now "${result.item_status}"`)
+      const bundleNote = result.bundled ? ` (${result.records_submitted} records bundled into one payload)` : ''
+      toast.success(`Submitted to Xtrium Catalog IQ — item #${result.item_id} now "${result.item_status}"${bundleNote}`)
       load()
     } catch (err: any) {
       toast.error(err?.response?.data?.detail || 'Submit to Xtrium failed')
