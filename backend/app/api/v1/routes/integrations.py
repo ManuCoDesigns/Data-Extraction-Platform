@@ -482,8 +482,27 @@ async def xtrium_dashboard(
         for p in db.query(Project).filter(Project.id.in_(project_ids)).all()
     } if project_ids else {}
 
+    # Live item records straight from Xtrium (read-only /items — never claims
+    # or changes anything), so the dashboard can show each item exactly as it
+    # appears in Xtrium's own tool. Best-effort: the dashboard still loads if
+    # Xtrium is unreachable. Tries the broadest status filter first, then
+    # falls back, since the accepted status wording can differ between
+    # versions of their API.
+    xtrium_by_id: dict = {}
+    xtrium_items_error = None
+    for _status in ("all", "Queued,In Progress,Scraped,Ingested,Failed,Archived", "In Progress"):
+        try:
+            _items = await xtrium_client.get_items(status=_status, limit=100)
+        except Exception as e:
+            xtrium_items_error = str(e)
+            continue
+        if isinstance(_items, list) and _items:
+            xtrium_by_id = {str(i.get("id")): i for i in _items if isinstance(i, dict)}
+            xtrium_items_error = None
+            break
     source_list = [{
         "id": s.id,
+        "xtrium": xtrium_by_id.get(str(s.external_ref_id)),
         "name": s.name,
         "project_id": s.project_id,
         "project_name": projects_by_id.get(s.project_id),
@@ -554,4 +573,5 @@ async def xtrium_dashboard(
         "sources": source_list,
         "activity": activity,
         "live_availability": live_availability,
+        "xtrium_items_error": xtrium_items_error,
     }
