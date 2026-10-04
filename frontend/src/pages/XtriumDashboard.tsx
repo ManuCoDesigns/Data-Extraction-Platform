@@ -36,13 +36,23 @@ function xtriumStatusColor(status?: string): string {
   return '#64748b'
 }
 
-const xtriumStatusOf = (s: any): string => String(s.xtrium?.status ?? '')
+const xtriumStatusOf = (s: any): string => String(s.xtrium?.status ?? s._verified_status ?? '')
+
+// Our backend passes Xtrium's error text through (e.g. "Status check failed for
+// item 70: 404 — {"detail":"Catalog item #70 not found."}"), usually wrapped in
+// a 502, so recognise it from the text rather than the HTTP status.
+function isItemNotFound(detail: unknown): boolean {
+  const t = String(detail ?? '')
+  return /\b404\b/.test(t) && /not found/i.test(t)
+}
 
 // ── Derived per-source state ─────────────────────────────────────────────────
 const isReady = (s: any): boolean => s.status === 'approved' && !s.xtrium_submitted_at
 const isSubmitted = (s: any): boolean => !!s.xtrium_submitted_at
 
 function needsAttention(s: any): boolean {
+  if (s._missing) return true
+  if (s._rework) return true
   if (ATTENTION_STATUSES.includes(s.status)) return true
   const xs = xtriumStatusOf(s).toLowerCase()
   if (xs.includes('fail') || xs.includes('reject')) return true
@@ -64,7 +74,7 @@ function stageSummary(s: any) {
   ]
   const idx = done.indexOf(false)
   const attention = needsAttention(s)
-  const text = attention ? 'Needs attention' : idx === -1 ? 'Complete' : WAITING_ON[idx]
+  const text = s._missing ? 'Not on Xtrium' : s._rework ? 'Rework requested' : attention ? 'Needs attention' : idx === -1 ? 'Complete' : WAITING_ON[idx]
   return { done, idx, attention, text }
 }
 
@@ -273,7 +283,10 @@ function renderXtriumValue(key: string, value: any) {
 }
 
 // ── Detail drawer ────────────────────────────────────────────────────────────
-function DetailDrawer({ source, onClose, onChanged }: { source: any; onClose: () => void; onChanged: () => void }) {
+function DetailDrawer({ source, onClose, onChanged, onMissing, onFound }: {
+  source: any; onClose: () => void; onChanged: () => void
+  onMissing: (id: string) => void; onFound: (id: string) => void
+}) {
   const [busy, setBusy] = useState<'status' | 'submit' | null>(null)
   const [statusResult, setStatusResult] = useState<any>(null)
   const [showPreview, setShowPreview] = useState(false)
@@ -293,16 +306,39 @@ function DetailDrawer({ source, onClose, onChanged }: { source: any; onClose: ()
   const canSubmit = source.status === 'approved'
   const alreadySubmitted = isSubmitted(source)
 
+  // Xtrium answering "not found" is a distinct, explainable situation — say so
+  // plainly instead of surfacing their raw JSON, and flag the row.
+  const reportError = (err: any, fallback: string) => {
+    const detail = err?.response?.data?.detail
+    if (isItemNotFound(detail)) {
+      onMissing(source.id)
+      toast.error(`Xtrium no longer has item #${source.external_ref_id} (404 not found) — it may have expired or been released. See the notice at the top of this panel.`)
+    } else {
+      toast.error(detail || fallback)
+    }
+  }
+
+  const copyMissingMessage = async () => {
+    const msg = `Hi — our status check for Xtrium catalog item #${source.external_ref_id} ("${item?.name ?? source.name}") returns 404 "Catalog item #${source.external_ref_id} not found". Could you confirm whether this item still exists and is assigned to our API key, and re-assign it or tell us how to handle finished work for items that have lapsed?`
+    try {
+      await navigator.clipboard.writeText(msg)
+      toast.success('Message copied')
+    } catch {
+      toast.error("Couldn't copy — select the text manually")
+    }
+  }
+
   const checkStatus = async () => {
     setBusy('status')
     try {
       const r = await xtriumApi.checkStatus(source.id)
+      onFound(source.id)
       setStatusResult(r)
       if (r?.rework_applied_to_source) toast.success('Xtrium requested rework — the source was sent back to the extractor')
       else toast.success('Status checked')
       onChanged()
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Status check failed')
+      reportError(err, 'Status check failed')
     } finally {
       setBusy(null)
     }
@@ -313,6 +349,7 @@ function DetailDrawer({ source, onClose, onChanged }: { source: any; onClose: ()
     let retryConfirmed = false
     try {
       const r = await xtriumApi.submitWithConfirm(source.id, confirmResubmit)
+      onFound(source.id)
       const bundleNote = r?.bundled ? ` (${r.records_submitted} records bundled into one payload)` : ''
       toast.success(`Submitted to Xtrium Catalog IQ — item #${r?.item_id} now "${r?.item_status}"${bundleNote}`)
       onChanged()
@@ -322,7 +359,7 @@ function DetailDrawer({ source, onClose, onChanged }: { source: any; onClose: ()
       if (status === 409 && window.confirm(`${detail}\n\nSubmit again anyway?`)) {
         retryConfirmed = true
       } else if (status !== 409) {
-        toast.error(detail || 'Submit to Xtrium failed')
+        reportError(err, 'Submit to Xtrium failed')
       }
     } finally {
       setBusy(null)
@@ -378,6 +415,22 @@ function DetailDrawer({ source, onClose, onChanged }: { source: any; onClose: ()
         </div>
 
         <div className="px-6 py-5 space-y-5">
+          {/* Xtrium answered "not found" for this item */}
+          {source._missing && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-5 py-4">
+              <p className="text-sm font-bold text-red-700 m-0">Xtrium no longer has this item</p>
+              <p className="text-xs text-red-700/80 mt-1.5 m-0">
+                Xtrium reports item #{source.external_ref_id} as not found. It may have expired or been released from our
+                API key. Checking status or submitting will keep failing until Xtrium re-assigns it — so finished work
+                here can't be delivered yet. Ask Xtrium whether the item still exists and is assigned to us.
+              </p>
+              <button onClick={copyMissingMessage}
+                className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-red-700 px-3 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-100 transition">
+                <Copy className="w-3.5 h-3.5" /> Copy message for Xtrium
+              </button>
+            </div>
+          )}
+
           {/* Pipeline stage */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-card px-5 py-4">
             <div className="flex items-center justify-between mb-4">
@@ -550,6 +603,12 @@ export function XtriumDashboardPage() {
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<FilterKey>('all')
   const [sort, setSort] = useState<SortKey>('recent')
+  // Items Xtrium has actually answered "not found" for (this session only).
+  const [missingIds, setMissingIds] = useState<Set<string>>(new Set())
+  // Results of the last "Verify with Xtrium" run (this session only).
+  const [verifying, setVerifying] = useState(false)
+  const [verifyInfo, setVerifyInfo] = useState<Record<string, any>>({})
+  const [verifySummary, setVerifySummary] = useState<any>(null)
 
   const load = (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true)
@@ -579,7 +638,15 @@ export function XtriumDashboardPage() {
   }
 
   const byStatus = data.by_status ?? {}
-  const sources: any[] = data.sources ?? []
+  const sources: any[] = (data.sources ?? []).map((s: any) => {
+    const v = verifyInfo[s.id]
+    return {
+      ...s,
+      _missing: missingIds.has(s.id) || undefined,
+      _verified_status: v?.state === 'found' ? v.xtrium_status : undefined,
+      _rework: v?.state === 'found' ? v.rework_pending : undefined,
+    }
+  })
   const activity = data.activity ?? []
   const live = data.live_availability
   // Derived on every render so an open drawer stays current when data refreshes.
@@ -606,6 +673,60 @@ export function XtriumDashboardPage() {
   )
   const rows = sortRows(filtered, sort)
   const clearFilters = () => { setSearch(''); setFilter('all') }
+  const runVerify = async () => {
+    setVerifying(true)
+    try {
+      const r = await xtriumApi.verify()
+      const results: any[] = r?.results ?? []
+      const info: Record<string, any> = {}
+      results.forEach(x => { info[x.source_id] = x })
+      setVerifyInfo(info)
+      setMissingIds(prev => {
+        const next = new Set(prev)
+        results.forEach(x => {
+          if (x.state === 'not_found') next.add(x.source_id)
+          else if (x.state === 'found') next.delete(x.source_id)
+        })
+        return next
+      })
+      const byId: Record<string, any> = {}
+      ;(data.sources ?? []).forEach((src: any) => { byId[src.id] = src })
+      setVerifySummary({
+        at: new Date().toLocaleTimeString(),
+        checked: r?.checked ?? results.length,
+        found: r?.found ?? 0,
+        errors: r?.errors ?? 0,
+        lapsed: results.filter(x => x.state === 'not_found').map(x => ({
+          ref: x.external_ref_id,
+          name: byId[x.source_id]?.xtrium?.name ?? byId[x.source_id]?.name ?? `Item #${x.external_ref_id}`,
+        })),
+      })
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Couldn't verify with Xtrium — try again")
+    } finally {
+      setVerifying(false)
+    }
+  }
+
+  const copyLapsedList = async () => {
+    if (!verifySummary) return
+    const lines = verifySummary.lapsed.map((l: any) => `• #${l.ref} — ${l.name}`).join('\n')
+    const msg = `Hi — a status check on these Xtrium catalog items returns 404 "not found". Could you confirm whether they still exist and are assigned to our API key, and re-assign them or tell us how to handle finished work for items that have lapsed?\n\n${lines}`
+    try {
+      await navigator.clipboard.writeText(msg)
+      toast.success('Message copied')
+    } catch {
+      toast.error("Couldn't copy — select the text manually")
+    }
+  }
+
+  const markMissing = (id: string) => setMissingIds(prev => new Set(prev).add(id))
+  const markFound = (id: string) => setMissingIds(prev => {
+    if (!prev.has(id)) return prev
+    const next = new Set(prev)
+    next.delete(id)
+    return next
+  })
   const toggleFilter = (f: FilterKey) => setFilter(cur => (cur === f ? 'all' : f))
 
   return (
@@ -621,11 +742,60 @@ export function XtriumDashboardPage() {
             <p className="text-xs text-gray-400 mt-0.5">Live progress across the Xtrium Catalog IQ pipeline</p>
           </div>
         </div>
-        <button onClick={() => load({ silent: true })} disabled={refreshing}
-          className="flex items-center gap-2 text-xs font-semibold text-gray-500 hover:text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-50 transition">
-          <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={runVerify} disabled={verifying}
+            title="Asks Xtrium about every unsubmitted item. Read-only — changes nothing."
+            className="flex items-center gap-2 text-xs font-semibold text-brand-700 px-3 py-2 rounded-lg border border-brand-200 bg-brand-50 hover:bg-brand-100 disabled:opacity-60 transition">
+            <CheckCircle className={cn('w-3.5 h-3.5', verifying && 'animate-pulse')} />
+            {verifying ? 'Verifying…' : 'Verify with Xtrium'}
+          </button>
+          <button onClick={() => load({ silent: true })} disabled={refreshing}
+            className="flex items-center gap-2 text-xs font-semibold text-gray-500 hover:text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-50 transition">
+            <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} /> Refresh
+          </button>
+        </div>
       </div>
+
+      {/* Result of the last Verify run */}
+      {verifySummary && (
+        <div className={cn(
+          'rounded-2xl border px-5 py-4 mb-5',
+          verifySummary.lapsed.length > 0 ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200',
+        )}>
+          <div className="flex items-start justify-between gap-4">
+            <div className="min-w-0">
+              <p className={cn('text-sm font-bold m-0', verifySummary.lapsed.length > 0 ? 'text-red-700' : 'text-emerald-700')}>
+                Verified {verifySummary.checked} item{verifySummary.checked !== 1 ? 's' : ''} with Xtrium · {verifySummary.at}
+              </p>
+              <p className="text-xs text-gray-600 mt-1 m-0">
+                {verifySummary.found} still on Xtrium · {verifySummary.lapsed.length} not on Xtrium
+                {verifySummary.errors > 0 ? ` · ${verifySummary.errors} couldn't be checked` : ''}
+                {' · '}only items not yet submitted are checked
+              </p>
+              {verifySummary.lapsed.length > 0 && (
+                <>
+                  <ul className="text-xs text-red-700 mt-2.5 mb-0 pl-4 list-disc space-y-0.5">
+                    {verifySummary.lapsed.map((l: any) => <li key={l.ref}>#{l.ref} — {l.name}</li>)}
+                  </ul>
+                  <button onClick={copyLapsedList}
+                    className="mt-3 inline-flex items-center gap-1.5 text-xs font-semibold text-red-700 px-3 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-100 transition">
+                    <Copy className="w-3.5 h-3.5" /> Copy list for Xtrium
+                  </button>
+                </>
+              )}
+              {verifySummary.errors > 0 && (
+                <p className="text-xs text-gray-500 mt-2.5 m-0">
+                  Items that couldn't be checked weren't flagged — Xtrium didn't give a clear answer. Try again in a moment.
+                </p>
+              )}
+            </div>
+            <button onClick={() => setVerifySummary(null)} aria-label="Dismiss"
+              className="p-1.5 rounded-lg hover:bg-white/70 text-gray-400 hover:text-gray-600 transition shrink-0">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Live availability banner */}
       {live && (
@@ -730,9 +900,11 @@ export function XtriumDashboardPage() {
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">#{s.external_ref_id}</td>
                     <td className="px-4 py-3"><StageBar s={s} /></td>
                     <td className="px-4 py-3">
-                      {xStatus
-                        ? <Pill label={xStatus} color={xtriumStatusColor(xStatus)} />
-                        : <span className="text-xs text-gray-300">—</span>}
+                      {s._missing
+                        ? <Pill label="Not on Xtrium" color="#dc2626" />
+                        : xStatus
+                          ? <Pill label={xStatus} color={xtriumStatusColor(xStatus)} />
+                          : <span className="text-xs text-gray-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
                       {isSubmitted(s)
@@ -791,7 +963,8 @@ export function XtriumDashboardPage() {
 
       {selected && (
         <DetailDrawer key={selected.id} source={selected}
-          onClose={() => setSelectedId(null)} onChanged={() => load({ silent: true })} />
+          onClose={() => setSelectedId(null)} onChanged={() => load({ silent: true })}
+          onMissing={markMissing} onFound={markFound} />
       )}
     </div>
   )

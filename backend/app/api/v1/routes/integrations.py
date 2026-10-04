@@ -648,3 +648,60 @@ async def preview_submit_payload(
         "not_approved_excluded": not_approved,
         "payload": payload,
     }
+
+
+@router.post("/verify")
+async def verify_xtrium_items(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Read-only check of every Xtrium-linked source that hasn't been submitted:
+    asks Xtrium about each item and reports which ones it no longer has
+    (expired, released, or re-assigned elsewhere). Changes nothing — no rework
+    is applied, no status is touched, nothing is written.
+    """
+    import asyncio
+
+    _require_admin(current_user)
+
+    sources = (
+        db.query(Source)
+        .filter(Source.external_ref_id != None, Source.xtrium_submitted_at == None)
+        .order_by(Source.updated_at.desc())
+        .limit(100)
+        .all()
+    )
+    # Plain values only, so the concurrent tasks never touch the DB session.
+    targets = [(s.id, s.external_ref_id) for s in sources]
+
+    sem = asyncio.Semaphore(4)  # be gentle with Xtrium
+
+    async def _check(source_id: str, ref_id: str) -> dict:
+        async with sem:
+            try:
+                r = await xtrium_client.get_item_status(item_id=ref_id)
+            except XtriumClientError as e:
+                msg = str(e)
+                low = msg.lower()
+                # Only a *missing catalog item* counts as not-found; a bare 404
+                # (wrong route/URL) must not mass-flag every item.
+                state = "not_found" if ("404" in msg and "catalog item" in low and "not found" in low) else "error"
+                return {"source_id": source_id, "external_ref_id": ref_id, "state": state, "detail": msg}
+            except Exception as e:  # network hiccup etc. — one item never fails the whole run
+                return {"source_id": source_id, "external_ref_id": ref_id, "state": "error", "detail": str(e)}
+        status = r.get("status") if isinstance(r, dict) else None
+        rework = bool(isinstance(r, dict) and status == "Queued" and r.get("rework_notes"))
+        return {
+            "source_id": source_id, "external_ref_id": ref_id, "state": "found",
+            "xtrium_status": status, "rework_pending": rework,
+        }
+
+    results = list(await asyncio.gather(*[_check(sid, ref) for sid, ref in targets]))
+    return {
+        "checked": len(results),
+        "found": sum(1 for r in results if r["state"] == "found"),
+        "not_found": sum(1 for r in results if r["state"] == "not_found"),
+        "errors": sum(1 for r in results if r["state"] == "error"),
+        "results": results,
+    }
