@@ -377,6 +377,10 @@ export const xtriumApi = {
     api.get(`/integrations/xtrium/sources/${sourceId}/status`).then(r => r.data),
   stats: () => api.get('/integrations/xtrium/stats').then(r => r.data),
   dashboard: () => api.get('/integrations/xtrium/dashboard').then(r => r.data),
+  submitWithConfirm: (sourceId: string, confirmResubmit = false) =>
+    api.post(`/integrations/xtrium/sources/${sourceId}/submit`, { notes: '', confirm_resubmit: confirmResubmit }).then(r => r.data),
+  payloadPreview: (sourceId: string) =>
+    api.get(`/integrations/xtrium/sources/${sourceId}/payload-preview`).then(r => r.data),
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string) {

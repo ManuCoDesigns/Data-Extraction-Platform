@@ -3,9 +3,10 @@ import { Link } from 'react-router-dom'
 import {
   Zap, Database, Clock, CheckCircle, Send, RefreshCw, ArrowUpRight,
   Globe, Archive, AlertTriangle, Inbox, X, ExternalLink,
+  Search, Check, ChevronDown, ChevronUp, Copy,
 } from 'lucide-react'
 import { xtriumApi } from '@/api/client'
-import { cn } from '@/components/ui'
+import { cn, toast } from '@/components/ui'
 
 // ── Our own internal statuses ────────────────────────────────────────────────
 const STATUS_META: Record<string, { label: string; color: string }> = {
@@ -19,6 +20,10 @@ const STATUS_META: Record<string, { label: string; color: string }> = {
   approved:           { label: 'Approved',          color: '#059669' },
 }
 
+const IN_PROGRESS_STATUSES = ['extracting', 'needs_fixes', 'ready_for_review', 'in_review', 'changes_requested', 'llm_verification']
+const REVIEW_REACHED = ['in_review', 'llm_verification', 'changes_requested', 'approved']
+const ATTENTION_STATUSES = ['needs_fixes', 'changes_requested']
+
 // ── Xtrium's own status wording, shown verbatim (colour is just a hint) ──────
 function xtriumStatusColor(status?: string): string {
   const s = (status ?? '').toLowerCase()
@@ -31,6 +36,73 @@ function xtriumStatusColor(status?: string): string {
   return '#64748b'
 }
 
+const xtriumStatusOf = (s: any): string => String(s.xtrium?.status ?? '')
+
+// ── Derived per-source state ─────────────────────────────────────────────────
+const isReady = (s: any): boolean => s.status === 'approved' && !s.xtrium_submitted_at
+const isSubmitted = (s: any): boolean => !!s.xtrium_submitted_at
+
+function needsAttention(s: any): boolean {
+  if (ATTENTION_STATUSES.includes(s.status)) return true
+  const xs = xtriumStatusOf(s).toLowerCase()
+  if (xs.includes('fail') || xs.includes('reject')) return true
+  return /rework/i.test(String(s.xtrium?.notes ?? ''))
+}
+
+const STAGE_NAMES = ['Pulled', 'Extracted', 'In review', 'Approved', 'Submitted', 'Ingested']
+const WAITING_ON = ['', 'Needs extraction', 'Awaiting review', 'Awaiting approval', 'Ready to submit', 'Awaiting Xtrium']
+
+function stageSummary(s: any) {
+  const xs = xtriumStatusOf(s).toLowerCase()
+  const done: boolean[] = [
+    true,
+    (s.total_records ?? 0) > 0,
+    REVIEW_REACHED.includes(s.status),
+    s.status === 'approved',
+    isSubmitted(s),
+    xs.includes('ingest') || xs.includes('approved'),
+  ]
+  const idx = done.indexOf(false)
+  const attention = needsAttention(s)
+  const text = attention ? 'Needs attention' : idx === -1 ? 'Complete' : WAITING_ON[idx]
+  return { done, idx, attention, text }
+}
+
+type FilterKey = 'all' | 'inprogress' | 'ready' | 'submitted' | 'attention'
+type SortKey = 'recent' | 'name' | 'item' | 'submitted'
+
+const FILTERS: [FilterKey, string][] = [
+  ['all', 'All'],
+  ['inprogress', 'In progress'],
+  ['ready', 'Ready to submit'],
+  ['submitted', 'Submitted'],
+  ['attention', 'Needs attention'],
+]
+
+function matchesFilter(s: any, f: FilterKey): boolean {
+  switch (f) {
+    case 'inprogress': return IN_PROGRESS_STATUSES.includes(s.status)
+    case 'ready': return isReady(s)
+    case 'submitted': return isSubmitted(s)
+    case 'attention': return needsAttention(s)
+    default: return true
+  }
+}
+
+function sortRows(rows: any[], key: SortKey): any[] {
+  const copy = [...rows]
+  if (key === 'name') {
+    copy.sort((a, b) => String(a.name).localeCompare(String(b.name)))
+  } else if (key === 'item') {
+    copy.sort((a, b) => (Number(a.external_ref_id) || 0) - (Number(b.external_ref_id) || 0))
+  } else if (key === 'submitted') {
+    const t = (s: any) => (s.xtrium_submitted_at ? Date.parse(s.xtrium_submitted_at) : 0)
+    copy.sort((a, b) => t(b) - t(a))
+  }
+  return copy // 'recent' keeps the server's most-recently-updated-first order
+}
+
+// ── Small UI pieces ──────────────────────────────────────────────────────────
 function Pill({ label, color }: { label: string; color: string }) {
   return (
     <span className="text-[11px] font-semibold px-2 py-1 rounded-full whitespace-nowrap"
@@ -40,9 +112,18 @@ function Pill({ label, color }: { label: string; color: string }) {
   )
 }
 
-function StatCard({ label, value, icon: Icon, grad }: any) {
+function StatCard({ label, value, icon: Icon, grad, onClick, active }: any) {
+  const clickable = !!onClick
   return (
-    <div className="relative bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden p-4">
+    <div onClick={onClick}
+      role={clickable ? 'button' : undefined}
+      tabIndex={clickable ? 0 : undefined}
+      onKeyDown={clickable ? (e) => { if (e.key === 'Enter') onClick() } : undefined}
+      className={cn(
+        'relative bg-white rounded-2xl border shadow-card overflow-hidden p-4 transition',
+        active ? 'border-brand-300 ring-2 ring-brand-100' : 'border-gray-100',
+        clickable && 'cursor-pointer hover:shadow-float',
+      )}>
       <div className={cn('absolute top-0 left-0 right-0 h-1 bg-gradient-to-r', grad)} />
       <div className="flex items-center gap-3">
         <div className={cn('w-10 h-10 rounded-xl flex items-center justify-center shrink-0 bg-gradient-to-br shadow-sm', grad)}>
@@ -53,6 +134,65 @@ function StatCard({ label, value, icon: Icon, grad }: any) {
           <p className="text-xs text-gray-400 mt-1">{label}</p>
         </div>
       </div>
+    </div>
+  )
+}
+
+function StageBar({ s }: { s: any }) {
+  const { done, idx, attention, text } = stageSummary(s)
+  return (
+    <div className="min-w-[132px]">
+      <div className="flex gap-1">
+        {done.map((d, i) => (
+          <div key={i} title={STAGE_NAMES[i]}
+            className={cn(
+              'h-1.5 flex-1 rounded-full',
+              d ? 'bg-emerald-500' : i === idx ? (attention ? 'bg-red-500' : 'bg-amber-400') : 'bg-gray-200',
+            )} />
+        ))}
+      </div>
+      <p className={cn(
+        'text-[11px] mt-1 font-semibold',
+        attention ? 'text-red-600' : idx === -1 ? 'text-emerald-600' : 'text-gray-500',
+      )}>{text}</p>
+    </div>
+  )
+}
+
+function StageStepper({ s }: { s: any }) {
+  const { done, idx, attention } = stageSummary(s)
+  return (
+    <div className="flex items-start">
+      {STAGE_NAMES.map((name, i) => {
+        const isDone = done[i]
+        const isCurrent = i === idx
+        return (
+          <div key={name} className="flex-1 flex flex-col items-center relative">
+            {i > 0 && (
+              <div className={cn(
+                'absolute top-3 right-1/2 w-full h-0.5',
+                done[i - 1] && isDone ? 'bg-emerald-500' : 'bg-gray-200',
+              )} />
+            )}
+            <div className={cn(
+              'relative z-10 w-6 h-6 rounded-full flex items-center justify-center border-2',
+              isDone ? 'bg-emerald-500 border-emerald-500'
+                : isCurrent ? (attention ? 'bg-white border-red-500' : 'bg-white border-amber-400')
+                : 'bg-white border-gray-200',
+            )}>
+              {isDone
+                ? <Check className="w-3.5 h-3.5 text-white" />
+                : isCurrent
+                  ? <span className={cn('w-2 h-2 rounded-full', attention ? 'bg-red-500' : 'bg-amber-400')} />
+                  : null}
+            </div>
+            <p className={cn(
+              'text-[10px] mt-1.5 text-center font-semibold',
+              isDone ? 'text-emerald-700' : isCurrent ? (attention ? 'text-red-600' : 'text-amber-600') : 'text-gray-300',
+            )}>{name}</p>
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -132,7 +272,15 @@ function renderXtriumValue(key: string, value: any) {
   return <span className="whitespace-pre-wrap">{String(value)}</span>
 }
 
-function DetailDrawer({ source, onClose }: { source: any; onClose: () => void }) {
+// ── Detail drawer ────────────────────────────────────────────────────────────
+function DetailDrawer({ source, onClose, onChanged }: { source: any; onClose: () => void; onChanged: () => void }) {
+  const [busy, setBusy] = useState<'status' | 'submit' | null>(null)
+  const [statusResult, setStatusResult] = useState<any>(null)
+  const [showPreview, setShowPreview] = useState(false)
+  const [preview, setPreview] = useState<any>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState<string | null>(null)
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
@@ -142,11 +290,77 @@ function DetailDrawer({ source, onClose }: { source: any; onClose: () => void })
   const item = source.xtrium
   const ours = STATUS_META[source.status] ?? { label: source.status, color: '#64748b' }
   const extras = item ? Object.keys(item).filter(k => !KNOWN_KEYS.has(k)) : []
+  const canSubmit = source.status === 'approved'
+  const alreadySubmitted = isSubmitted(source)
+
+  const checkStatus = async () => {
+    setBusy('status')
+    try {
+      const r = await xtriumApi.checkStatus(source.id)
+      setStatusResult(r)
+      if (r?.rework_applied_to_source) toast.success('Xtrium requested rework — the source was sent back to the extractor')
+      else toast.success('Status checked')
+      onChanged()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Status check failed')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const submit = async (confirmResubmit = false): Promise<void> => {
+    setBusy('submit')
+    let retryConfirmed = false
+    try {
+      const r = await xtriumApi.submitWithConfirm(source.id, confirmResubmit)
+      const bundleNote = r?.bundled ? ` (${r.records_submitted} records bundled into one payload)` : ''
+      toast.success(`Submitted to Xtrium Catalog IQ — item #${r?.item_id} now "${r?.item_status}"${bundleNote}`)
+      onChanged()
+    } catch (err: any) {
+      const status = err?.response?.status
+      const detail = err?.response?.data?.detail
+      if (status === 409 && window.confirm(`${detail}\n\nSubmit again anyway?`)) {
+        retryConfirmed = true
+      } else if (status !== 409) {
+        toast.error(detail || 'Submit to Xtrium failed')
+      }
+    } finally {
+      setBusy(null)
+    }
+    // Retried outside try/finally so the busy state isn't clobbered.
+    if (retryConfirmed) await submit(true)
+  }
+
+  const togglePreview = async () => {
+    const next = !showPreview
+    setShowPreview(next)
+    if (next && !preview && !previewLoading) {
+      setPreviewLoading(true)
+      setPreviewError(null)
+      try {
+        setPreview(await xtriumApi.payloadPreview(source.id))
+      } catch (err: any) {
+        setPreviewError(err?.response?.data?.detail || "Couldn't build the payload preview")
+      } finally {
+        setPreviewLoading(false)
+      }
+    }
+  }
+
+  const payloadText = preview?.payload != null ? JSON.stringify(preview.payload, null, 2) : ''
+  const copyPayload = async () => {
+    try {
+      await navigator.clipboard.writeText(payloadText)
+      toast.success('Payload copied')
+    } catch {
+      toast.error("Couldn't copy — select the text manually")
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
-      <div className="relative w-full max-w-[540px] bg-white h-full shadow-float overflow-y-auto scrollbar-thin">
+      <div className="relative w-full max-w-[600px] bg-white h-full shadow-float overflow-y-auto scrollbar-thin">
         {/* Header */}
         <div className="sticky top-0 bg-white z-10 px-6 py-4 border-b border-gray-100 flex items-start justify-between gap-3">
           <div className="min-w-0">
@@ -164,6 +378,58 @@ function DetailDrawer({ source, onClose }: { source: any; onClose: () => void })
         </div>
 
         <div className="px-6 py-5 space-y-5">
+          {/* Pipeline stage */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-card px-5 py-4">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-bold text-gray-900 m-0">Pipeline stage</h3>
+              <p className={cn('text-xs font-semibold m-0', stageSummary(source).attention ? 'text-red-600' : 'text-gray-500')}>
+                {stageSummary(source).text}
+              </p>
+            </div>
+            <StageStepper s={source} />
+          </div>
+
+          {/* Actions */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-card px-5 py-4">
+            <h3 className="text-sm font-bold text-gray-900 m-0 mb-3">Actions</h3>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={checkStatus} disabled={busy !== null}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold border border-gray-200 text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition">
+                <RefreshCw className={cn('w-3.5 h-3.5', busy === 'status' && 'animate-spin')} />
+                {busy === 'status' ? 'Checking…' : 'Check Xtrium status'}
+              </button>
+              <button onClick={() => submit(false)} disabled={busy !== null || !canSubmit}
+                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-br from-brand-500 to-brand-700 shadow-lg shadow-brand-500/25 hover:opacity-95 disabled:opacity-40 disabled:shadow-none transition">
+                <Send className="w-3.5 h-3.5" />
+                {busy === 'submit' ? 'Submitting…' : alreadySubmitted ? 'Submit again' : 'Submit to Xtrium'}
+              </button>
+            </div>
+            {!canSubmit && (
+              <p className="text-xs text-gray-400 mt-2.5 m-0">Only fully approved sources can be submitted.</p>
+            )}
+            {canSubmit && alreadySubmitted && (
+              <p className="text-xs text-gray-400 mt-2.5 m-0">
+                Already submitted {timeAgo(source.xtrium_submitted_at)} — submitting again asks you to confirm first.
+              </p>
+            )}
+            {statusResult && (
+              <div className="mt-3 rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 text-xs text-gray-600 space-y-1.5">
+                <p className="m-0 flex items-center gap-2">
+                  <span className="font-semibold text-gray-800">Xtrium says:</span>
+                  {statusResult.status
+                    ? <Pill label={String(statusResult.status)} color={xtriumStatusColor(String(statusResult.status))} />
+                    : <span className="text-gray-400">no status returned</span>}
+                </p>
+                {statusResult.rework_notes && (
+                  <p className="m-0"><span className="font-semibold text-gray-800">Rework notes:</span> {String(statusResult.rework_notes)}</p>
+                )}
+                {statusResult.rework_applied_to_source && (
+                  <p className="m-0 font-semibold text-amber-700">Rework was applied — the source went back to the extractor.</p>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* As shown in Xtrium */}
           <div className="relative bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-brand-500 to-brand-700" />
@@ -218,6 +484,53 @@ function DetailDrawer({ source, onClose }: { source: any; onClose: () => void })
             </div>
           </div>
 
+          {/* Payload preview */}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden">
+            <button onClick={togglePreview}
+              className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-gray-50/60 transition">
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 m-0">Submitted payload preview</h3>
+                <p className="text-xs text-gray-400 mt-0.5 m-0">The exact JSON Submit sends to Xtrium — nothing is sent from here</p>
+              </div>
+              {showPreview ? <ChevronUp className="w-4 h-4 text-gray-400" /> : <ChevronDown className="w-4 h-4 text-gray-400" />}
+            </button>
+            {showPreview && (
+              <div className="px-5 pb-5 border-t border-gray-50">
+                {previewLoading && <p className="text-sm text-gray-400 py-4 m-0">Building preview…</p>}
+                {previewError && <p className="text-sm text-red-600 py-4 m-0">{previewError}</p>}
+                {preview && !previewLoading && (
+                  preview.payload == null ? (
+                    <p className="text-sm text-gray-400 py-4 m-0">
+                      No approved records yet, so there's nothing to send.
+                      {preview.not_approved_excluded > 0 && ` (${preview.not_approved_excluded} record(s) are still awaiting approval.)`}
+                    </p>
+                  ) : (
+                    <>
+                      <div className="flex items-center justify-between gap-3 py-3">
+                        <p className="text-xs text-gray-500 m-0">
+                          {preview.record_count} approved record{preview.record_count !== 1 ? 's' : ''}
+                          {preview.bundled ? ' bundled into one payload' : ' sent as-is'}
+                          {' · '}{payloadText.length.toLocaleString()} characters
+                          {preview.not_approved_excluded > 0 && ` · ${preview.not_approved_excluded} not-yet-approved excluded`}
+                        </p>
+                        <button onClick={copyPayload}
+                          className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-700 px-2.5 py-1.5 rounded-lg hover:bg-gray-100 transition shrink-0">
+                          <Copy className="w-3.5 h-3.5" /> Copy
+                        </button>
+                      </div>
+                      <pre className="bg-gray-50 border border-gray-100 rounded-xl p-4 text-xs text-gray-700 overflow-auto m-0"
+                        style={{ maxHeight: 360 }}>{payloadText}</pre>
+                      <p className="text-[11px] text-gray-400 mt-2.5 m-0">
+                        Built from the currently approved records. If records changed after this source was submitted,
+                        this can differ from what was originally sent.
+                      </p>
+                    </>
+                  )
+                )}
+              </div>
+            )}
+          </div>
+
           <Link to={`/projects/${source.project_id}/sources/${source.id}`}
             className="flex items-center justify-center gap-2 w-full py-2.5 rounded-xl text-sm font-semibold text-white bg-gradient-to-br from-brand-500 to-brand-700 shadow-lg shadow-brand-500/25 hover:opacity-95 transition">
             Open this source <ArrowUpRight className="w-4 h-4" />
@@ -228,11 +541,15 @@ function DetailDrawer({ source, onClose }: { source: any; onClose: () => void })
   )
 }
 
+// ── Page ─────────────────────────────────────────────────────────────────────
 export function XtriumDashboardPage() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [filter, setFilter] = useState<FilterKey>('all')
+  const [sort, setSort] = useState<SortKey>('recent')
 
   const load = (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true)
@@ -262,14 +579,34 @@ export function XtriumDashboardPage() {
   }
 
   const byStatus = data.by_status ?? {}
-  const sources = data.sources ?? []
+  const sources: any[] = data.sources ?? []
   const activity = data.activity ?? []
   const live = data.live_availability
   // Derived on every render so an open drawer stays current when data refreshes.
   const selected = selectedId ? sources.find((s: any) => s.id === selectedId) : null
 
-  const inProgress = ['extracting', 'needs_fixes', 'ready_for_review', 'in_review', 'changes_requested', 'llm_verification']
-    .reduce((a, k) => a + (byStatus[k] ?? 0), 0)
+  const inProgress = IN_PROGRESS_STATUSES.reduce((a, k) => a + (byStatus[k] ?? 0), 0)
+  const readyCount = sources.filter(isReady).length
+
+  const counts: Record<FilterKey, number> = {
+    all: sources.length,
+    inprogress: sources.filter(s => matchesFilter(s, 'inprogress')).length,
+    ready: readyCount,
+    submitted: sources.filter(s => matchesFilter(s, 'submitted')).length,
+    attention: sources.filter(s => matchesFilter(s, 'attention')).length,
+  }
+
+  const q = search.trim().toLowerCase()
+  const filtered = sources.filter(s => matchesFilter(s, filter)).filter(s =>
+    !q
+    || String(s.name ?? '').toLowerCase().includes(q)
+    || String(s.external_ref_id ?? '').toLowerCase().includes(q)
+    || String(s.project_name ?? '').toLowerCase().includes(q)
+    || xtriumStatusOf(s).toLowerCase().includes(q),
+  )
+  const rows = sortRows(filtered, sort)
+  const clearFilters = () => { setSearch(''); setFilter('all') }
+  const toggleFilter = (f: FilterKey) => setFilter(cur => (cur === f ? 'all' : f))
 
   return (
     <div className="px-7 py-6 max-w-[1200px] mx-auto">
@@ -312,24 +649,59 @@ export function XtriumDashboardPage() {
       )}
 
       {/* Stat cards */}
-      <div className="grid grid-cols-4 gap-3 mb-6">
-        <StatCard label="Total Linked" value={data.total_linked ?? 0} icon={Database} grad="from-blue-500 to-blue-600" />
-        <StatCard label="In Progress" value={inProgress} icon={Clock} grad="from-amber-500 to-orange-600" />
+      <div className="grid grid-cols-5 gap-3 mb-6">
+        <StatCard label="Total Linked" value={data.total_linked ?? 0} icon={Database} grad="from-blue-500 to-blue-600"
+          onClick={() => setFilter('all')} active={filter === 'all'} />
+        <StatCard label="In Progress" value={inProgress} icon={Clock} grad="from-purple-500 to-purple-600"
+          onClick={() => toggleFilter('inprogress')} active={filter === 'inprogress'} />
         <StatCard label="Approved" value={byStatus['approved'] ?? 0} icon={CheckCircle} grad="from-emerald-500 to-emerald-600" />
-        <StatCard label="Submitted" value={data.submitted_count ?? 0} icon={Send} grad="from-purple-500 to-purple-600" />
+        <StatCard label="Ready to Submit" value={readyCount} icon={Send} grad="from-amber-500 to-orange-600"
+          onClick={() => toggleFilter('ready')} active={filter === 'ready'} />
+        <StatCard label="Submitted" value={data.submitted_count ?? 0} icon={Check} grad="from-brand-500 to-brand-700"
+          onClick={() => toggleFilter('submitted')} active={filter === 'submitted'} />
       </div>
 
       {/* Sources table — full width */}
       <div className="bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden mb-6">
-        <div className="px-5 py-4 border-b border-gray-50 flex items-center justify-between">
-          <h2 className="text-sm font-bold text-gray-900 m-0">Xtrium-Linked Sources</h2>
-          <p className="text-xs text-gray-400 m-0">Click a row to see it exactly as Xtrium shows it</p>
+        <div className="px-5 py-4 border-b border-gray-50 space-y-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-bold text-gray-900 m-0">Xtrium-Linked Sources</h2>
+            <p className="text-xs text-gray-400 m-0">
+              Showing {rows.length} of {sources.length} · click a row to see it as Xtrium shows it
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Search name, item #, project, status…"
+                className="w-[270px] pl-8 pr-3 py-2 text-xs rounded-xl border border-gray-200 outline-none focus:border-brand-400 transition" />
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {FILTERS.map(([key, label]) => (
+                <button key={key} onClick={() => setFilter(key)}
+                  className={cn(
+                    'px-3 py-1.5 rounded-full text-xs font-semibold transition',
+                    filter === key ? 'bg-brand-600 text-white' : 'bg-gray-50 text-gray-600 hover:bg-gray-100',
+                  )}>
+                  {label} <span className={cn('ml-1', filter === key ? 'text-white/70' : 'text-gray-400')}>{counts[key]}</span>
+                </button>
+              ))}
+            </div>
+            <select value={sort} onChange={e => setSort(e.target.value as SortKey)}
+              className="ml-auto text-xs font-semibold text-gray-600 rounded-xl border border-gray-200 px-3 py-2 outline-none bg-white">
+              <option value="recent">Recently updated</option>
+              <option value="name">Name (A–Z)</option>
+              <option value="item">Item # (low → high)</option>
+              <option value="submitted">Recently submitted</option>
+            </select>
+          </div>
         </div>
         <div className="overflow-x-auto scrollbar-thin" style={{ maxHeight: 520 }}>
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 sticky top-0">
-                {['Source', 'Item #', 'Xtrium Status', 'Our Status', 'Submitted', ''].map(h => (
+                {['Source', 'Item #', 'Stage', 'Xtrium Status', 'Submitted', ''].map(h => (
                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -339,25 +711,35 @@ export function XtriumDashboardPage() {
             <tbody>
               {sources.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">No Xtrium-linked sources yet</td></tr>
-              ) : sources.map((s: any) => {
-                const meta = STATUS_META[s.status] ?? { label: s.status, color: '#64748b' }
-                const xStatus = s.xtrium?.status
+              ) : rows.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
+                    No sources match these filters.{' '}
+                    <button onClick={clearFilters} className="text-brand-600 font-semibold hover:text-brand-700">Clear filters</button>
+                  </td>
+                </tr>
+              ) : rows.map((s: any) => {
+                const xStatus = xtriumStatusOf(s)
                 return (
                   <tr key={s.id} onClick={() => setSelectedId(s.id)}
                     className="border-b border-gray-50 hover:bg-gray-50/60 transition cursor-pointer">
                     <td className="px-4 py-3">
-                      <p className="text-sm font-semibold text-gray-900 truncate max-w-[280px]">{s.name}</p>
-                      <p className="text-xs text-gray-400 truncate max-w-[280px]">{s.project_name ?? '—'}</p>
+                      <p className="text-sm font-semibold text-gray-900 truncate max-w-[260px]">{s.name}</p>
+                      <p className="text-xs text-gray-400 truncate max-w-[260px]">{s.project_name ?? '—'}</p>
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">#{s.external_ref_id}</td>
+                    <td className="px-4 py-3"><StageBar s={s} /></td>
                     <td className="px-4 py-3">
                       {xStatus
-                        ? <Pill label={String(xStatus)} color={xtriumStatusColor(String(xStatus))} />
+                        ? <Pill label={xStatus} color={xtriumStatusColor(xStatus)} />
                         : <span className="text-xs text-gray-300">—</span>}
                     </td>
-                    <td className="px-4 py-3"><Pill label={meta.label} color={meta.color} /></td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
-                      {s.xtrium_submitted_at ? timeAgo(s.xtrium_submitted_at) : '—'}
+                      {isSubmitted(s)
+                        ? timeAgo(s.xtrium_submitted_at)
+                        : isReady(s)
+                          ? <Pill label="Ready" color="#d97706" />
+                          : '—'}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link to={`/projects/${s.project_id}/sources/${s.id}`}
@@ -407,7 +789,10 @@ export function XtriumDashboardPage() {
         </div>
       </div>
 
-      {selected && <DetailDrawer source={selected} onClose={() => setSelectedId(null)} />}
+      {selected && (
+        <DetailDrawer key={selected.id} source={selected}
+          onClose={() => setSelectedId(null)} onChanged={() => load({ silent: true })} />
+      )}
     </div>
   )
 }

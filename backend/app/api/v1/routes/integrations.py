@@ -469,11 +469,35 @@ async def xtrium_dashboard(
         .all()
     )
 
+    # When each source was last submitted to Xtrium. Prefer the dedicated
+    # column, but fall back to the audit log so submissions made before that
+    # column existed still count as submitted (otherwise they would show as
+    # "ready to submit" forever).
+    submitted_at_by_source: dict = {}
+    for s in sources:
+        if s.xtrium_submitted_at is not None:
+            submitted_at_by_source[s.id] = s.xtrium_submitted_at
+    _missing_ids = [s.id for s in sources if s.id not in submitted_at_by_source]
+    if _missing_ids:
+        _submit_logs = (
+            db.query(AuditLog)
+            .filter(
+                AuditLog.source_id.in_(_missing_ids),
+                AuditLog.action == AuditAction.SOURCE_STATUS_CHANGED,
+            )
+            .order_by(AuditLog.timestamp.desc())
+            .all()
+        )
+        for _log in _submit_logs:
+            _av = _log.after_value or {}
+            if _av.get("stage") == "xtrium_submit" and _log.source_id not in submitted_at_by_source:
+                submitted_at_by_source[_log.source_id] = _log.timestamp
+
     by_status: dict = {}
     submitted_count = 0
     for s in sources:
         by_status[s.status.value] = by_status.get(s.status.value, 0) + 1
-        if s.xtrium_submitted_at is not None:
+        if s.id in submitted_at_by_source:
             submitted_count += 1
 
     project_ids = {s.project_id for s in sources}
@@ -512,7 +536,7 @@ async def xtrium_dashboard(
         "type": getattr(s, "type", None),
         "total_records": s.total_records or 0,
         "approved_records": s.approved_records or 0,
-        "xtrium_submitted_at": s.xtrium_submitted_at.isoformat() if s.xtrium_submitted_at else None,
+        "xtrium_submitted_at": submitted_at_by_source[s.id].isoformat() if s.id in submitted_at_by_source else None,
         "external_synced_at": s.external_synced_at.isoformat() if s.external_synced_at else None,
         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
     } for s in sources]
@@ -574,4 +598,53 @@ async def xtrium_dashboard(
         "activity": activity,
         "live_availability": live_availability,
         "xtrium_items_error": xtrium_items_error,
+    }
+
+
+@router.get("/sources/{source_id}/payload-preview")
+async def preview_submit_payload(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Shows the payload Submit would send for this source RIGHT NOW, without
+    sending anything. Mirrors submit_source_to_xtrium's logic exactly: a
+    single approved record is sent as-is; several are bundled into one
+    payload as {"records": [...]}, in upload order. Built from the currently
+    approved records, so for an already-submitted source it may differ from
+    what was originally sent if records changed afterwards.
+    """
+    _require_admin(current_user)
+    source = db.query(Source).filter(Source.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
+    approved_records = db.query(ExtractedRecord).filter(
+        ExtractedRecord.job_id.in_(job_ids),
+        ExtractedRecord.review_status == ReviewStatus.APPROVED,
+    ).order_by(ExtractedRecord.created_at).all() if job_ids else []
+    not_approved = db.query(ExtractedRecord).filter(
+        ExtractedRecord.job_id.in_(job_ids),
+        ExtractedRecord.review_status != ReviewStatus.APPROVED,
+    ).count() if job_ids else 0
+
+    def _clean(r: ExtractedRecord) -> dict:
+        # Drop internal bookkeeping keys such as _source_file (same as Submit).
+        return {k: v for k, v in (r.extracted_fields or {}).items() if not k.startswith("_")}
+
+    if not approved_records:
+        payload = None
+    elif len(approved_records) > 1:
+        payload = {"records": [_clean(r) for r in approved_records]}
+    else:
+        payload = _clean(approved_records[0])
+
+    return {
+        "external_ref_id": source.external_ref_id,
+        "record_count": len(approved_records),
+        "bundled": len(approved_records) > 1,
+        "not_approved_excluded": not_approved,
+        "payload": payload,
     }
