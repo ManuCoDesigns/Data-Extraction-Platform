@@ -515,7 +515,7 @@ async def xtrium_dashboard(
         recent_logs = (
             db.query(AuditLog)
             .filter(AuditLog.source_id.in_(source_ids))
-            .order_by(AuditLog.created_at.desc())
+            .order_by(AuditLog.timestamp.desc())
             .limit(150)
             .all()
         )
@@ -537,7 +537,7 @@ async def xtrium_dashboard(
                 "source_name": src.name if src else None,
                 "label": xtrium_tags[tag],
                 "user_name": users_by_id.get(log.user_id) if log.user_id else None,
-                "created_at": log.created_at.isoformat() if log.created_at else None,
+                "created_at": log.timestamp.isoformat() if log.timestamp else None,
             })
             if len(activity) >= 30:
                 break
