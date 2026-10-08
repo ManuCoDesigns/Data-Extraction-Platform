@@ -79,7 +79,7 @@ function stageSummary(s: any) {
 }
 
 type FilterKey = 'all' | 'inprogress' | 'ready' | 'submitted' | 'attention'
-type SortKey = 'recent' | 'name' | 'item' | 'submitted'
+type SortKey = 'recent' | 'name' | 'item' | 'submitted' | 'activity'
 
 const FILTERS: [FilterKey, string][] = [
   ['all', 'All'],
@@ -106,7 +106,11 @@ function sortRows(rows: any[], key: SortKey): any[] {
   } else if (key === 'item') {
     copy.sort((a, b) => (Number(a.external_ref_id) || 0) - (Number(b.external_ref_id) || 0))
   } else if (key === 'submitted') {
-    const t = (s: any) => (s.xtrium_submitted_at ? Date.parse(s.xtrium_submitted_at) : 0)
+    const t = (s: any) => (s.xtrium_submitted_at ? parseTs(s.xtrium_submitted_at).getTime() || 0 : 0)
+    copy.sort((a, b) => t(b) - t(a))
+  }
+  else if (key === 'activity') {
+    const t = (s: any) => (s.last_activity_at ? parseTs(s.last_activity_at).getTime() || 0 : 0)
     copy.sort((a, b) => t(b) - t(a))
   }
   return copy // 'recent' keeps the server's most-recently-updated-first order
@@ -215,9 +219,17 @@ const ACTIVITY_ICON: Record<string, any> = {
   'Escalated — no data found':  { icon: AlertTriangle, grad: 'from-amber-500 to-orange-600' },
 }
 
+// The server stores UTC. If a timestamp arrives without a timezone marker,
+// treat it as UTC (otherwise the browser reads it as local time and every
+// date is shifted by the viewer's UTC offset).
+function parseTs(iso: string): Date {
+  const hasZone = /(?:[zZ]|[+-]\d{2}:?\d{2})$/.test(iso)
+  return new Date(hasZone || !/T\d/.test(iso) ? iso : `${iso}Z`)
+}
+
 function timeAgo(iso: string | null) {
   if (!iso) return ''
-  const d = new Date(iso)
+  const d = parseTs(iso)
   const secs = Math.max(0, Math.floor((Date.now() - d.getTime()) / 1000))
   if (secs < 60) return 'just now'
   const mins = Math.floor(secs / 60)
@@ -230,8 +242,23 @@ function timeAgo(iso: string | null) {
 
 function formatDate(iso: string | null) {
   if (!iso) return null
-  const d = new Date(iso)
+  const d = parseTs(iso)
   return isNaN(d.getTime()) ? iso : d.toLocaleString()
+}
+
+function dayLabel(iso: string): string {
+  const d = parseTs(iso)
+  if (isNaN(d.getTime())) return 'Unknown date'
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diffDays = Math.round((startOf(new Date()) - startOf(d)) / 86400000)
+  if (diffDays === 0) return 'Today'
+  if (diffDays === 1) return 'Yesterday'
+  return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+function clockTime(iso: string): string {
+  const d = parseTs(iso)
+  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
 // ── Xtrium's fields, in the order and wording Xtrium uses ────────────────────
@@ -283,6 +310,109 @@ function renderXtriumValue(key: string, value: any) {
 }
 
 // ── Detail drawer ────────────────────────────────────────────────────────────
+// ── Status history: when each change was applied ────────────────────────────
+const CATEGORY_COLOR: Record<string, string> = { xtrium: '#7c3aed', status: '#2563eb', other: '#94a3b8' }
+
+const statusLabel = (v: string) => STATUS_META[v]?.label ?? humanize(v)
+
+function StatusHistory({ sourceId, reloadKey }: { sourceId: string; reloadKey: string }) {
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [showAll, setShowAll] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    xtriumApi.history(sourceId)
+      .then((r: any) => { if (!cancelled) setData(r) })
+      .catch((err: any) => {
+        if (!cancelled) setError(err?.response?.data?.detail || "Couldn't load the history")
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [sourceId, reloadKey, attempt])
+
+  const all: any[] = data?.entries ?? []
+  const key = all.filter(e => e.category !== 'other')
+  const shown = showAll ? all : key
+
+  // Group consecutive entries (already newest-first) by calendar day.
+  const groups: { day: string; items: any[] }[] = []
+  for (const e of shown) {
+    const day = e.at ? dayLabel(e.at) : 'Unknown date'
+    const last = groups[groups.length - 1]
+    if (last && last.day === day) last.items.push(e)
+    else groups.push({ day, items: [e] })
+  }
+
+  return (
+    <div className="bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden">
+      <div className="px-5 pt-5 pb-3 flex items-start justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-bold text-gray-900 m-0">Status history</h3>
+          <p className="text-xs text-gray-400 mt-0.5 m-0">When each change was applied, and by whom</p>
+        </div>
+        {all.length > key.length && (
+          <button onClick={() => setShowAll(v => !v)}
+            className="text-xs font-semibold text-brand-600 hover:text-brand-700 shrink-0">
+            {showAll ? 'Key events only' : `All activity (${all.length})`}
+          </button>
+        )}
+      </div>
+      <div className="px-5 pb-5">
+        {loading && !data && <p className="text-sm text-gray-400 py-3 m-0">Loading history…</p>}
+        {error && (
+          <p className="text-sm text-red-600 py-3 m-0">
+            {error}{' '}
+            <button onClick={() => setAttempt(a => a + 1)} className="font-semibold underline">Retry</button>
+          </p>
+        )}
+        {!error && data && shown.length === 0 && (
+          <p className="text-sm text-gray-400 py-3 m-0">
+            {all.length === 0
+              ? 'No activity recorded for this source yet. Changes made before activity was logged will not appear.'
+              : 'No status or Xtrium events yet.'}
+          </p>
+        )}
+        {groups.map(g => (
+          <div key={g.day} className="mt-2">
+            <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider m-0 mb-1.5">{g.day}</p>
+            <ul className="list-none m-0 p-0 border-l border-gray-100 ml-1.5">
+              {g.items.map((e: any) => (
+                <li key={e.id} className="relative pl-4 pb-3">
+                  <span className="absolute -left-[5px] top-1.5 w-2.5 h-2.5 rounded-full border-2 border-white"
+                    style={{ background: CATEGORY_COLOR[e.category] ?? CATEGORY_COLOR.other }} />
+                  <div className="flex items-baseline justify-between gap-3">
+                    <p className="text-sm font-semibold text-gray-800 m-0">{e.label}</p>
+                    <p className="text-xs text-gray-400 m-0 whitespace-nowrap" title={formatDate(e.at) ?? ''}>{e.at ? clockTime(e.at) : ''}</p>
+                  </div>
+                  {(e.from_status || e.to_status) && (
+                    <p className="m-0 mt-1 flex items-center gap-1.5 flex-wrap text-xs text-gray-500">
+                      {e.from_status && <Pill label={statusLabel(e.from_status)} color={STATUS_META[e.from_status]?.color ?? '#64748b'} />}
+                      {e.from_status && e.to_status && <span>→</span>}
+                      {e.to_status && <Pill label={statusLabel(e.to_status)} color={STATUS_META[e.to_status]?.color ?? xtriumStatusColor(e.to_status)} />}
+                    </p>
+                  )}
+                  {e.note && <p className="text-xs text-gray-500 mt-1 m-0">{e.note}</p>}
+                  {e.user_name && <p className="text-[11px] text-gray-400 mt-1 m-0">by {e.user_name}</p>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))}
+        {data?.truncated && (
+          <p className="text-[11px] text-gray-400 mt-1 m-0">
+            Showing the latest {all.length} of {data.total} entries.
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function DetailDrawer({ source, onClose, onChanged, onMissing, onFound }: {
   source: any; onClose: () => void; onChanged: () => void
   onMissing: (id: string) => void; onFound: (id: string) => void
@@ -529,6 +659,11 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound }: {
                   ? <span>{formatDate(source.xtrium_submitted_at)} <span className="text-gray-400">({timeAgo(source.xtrium_submitted_at)})</span></span>
                   : <span className="text-gray-400">Not submitted yet</span>}
               </FieldRow>
+              <FieldRow label="Last activity">
+                {source.last_activity_at
+                  ? <span>{formatDate(source.last_activity_at)} <span className="text-gray-400">({timeAgo(source.last_activity_at)})</span></span>
+                  : <span className="text-gray-300">—</span>}
+              </FieldRow>
               <FieldRow label="Last synced">
                 {source.external_synced_at
                   ? <span>{formatDate(source.external_synced_at)}</span>
@@ -536,6 +671,12 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound }: {
               </FieldRow>
             </div>
           </div>
+
+          {/* Status history */}
+          <StatusHistory
+            sourceId={source.id}
+            reloadKey={`${source.status}|${source.xtrium_submitted_at ?? ''}|${source.last_activity_at ?? ''}`}
+          />
 
           {/* Payload preview */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden">
@@ -863,6 +1004,7 @@ export function XtriumDashboardPage() {
               <option value="recent">Recently updated</option>
               <option value="name">Name (A–Z)</option>
               <option value="item">Item # (low → high)</option>
+              <option value="activity">Recent activity</option>
               <option value="submitted">Recently submitted</option>
             </select>
           </div>
@@ -871,7 +1013,7 @@ export function XtriumDashboardPage() {
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 sticky top-0">
-                {['Source', 'Item #', 'Stage', 'Xtrium Status', 'Submitted', ''].map(h => (
+                {['Source', 'Item #', 'Stage', 'Xtrium Status', 'Submitted', 'Last activity', ''].map(h => (
                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     {h}
                   </th>
@@ -880,10 +1022,10 @@ export function XtriumDashboardPage() {
             </thead>
             <tbody>
               {sources.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">No Xtrium-linked sources yet</td></tr>
+                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">No Xtrium-linked sources yet</td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-400">
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
                     No sources match these filters.{' '}
                     <button onClick={clearFilters} className="text-brand-600 font-semibold hover:text-brand-700">Clear filters</button>
                   </td>
@@ -908,10 +1050,25 @@ export function XtriumDashboardPage() {
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
                       {isSubmitted(s)
-                        ? timeAgo(s.xtrium_submitted_at)
+                        ? (
+                          <div title={formatDate(s.xtrium_submitted_at) ?? ''}>
+                            <p className="m-0 text-gray-700">{dayLabel(s.xtrium_submitted_at)}, {clockTime(s.xtrium_submitted_at)}</p>
+                            <p className="m-0 text-[11px] text-gray-400">{timeAgo(s.xtrium_submitted_at)}</p>
+                          </div>
+                        )
                         : isReady(s)
                           ? <Pill label="Ready" color="#d97706" />
                           : '—'}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+                      {s.last_activity_at
+                        ? (
+                          <div title={formatDate(s.last_activity_at) ?? ''}>
+                            <p className="m-0 text-gray-700">{dayLabel(s.last_activity_at)}, {clockTime(s.last_activity_at)}</p>
+                            <p className="m-0 text-[11px] text-gray-400">{timeAgo(s.last_activity_at)}</p>
+                          </div>
+                        )
+                        : <span className="text-gray-300">—</span>}
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link to={`/projects/${s.project_id}/sources/${s.id}`}
