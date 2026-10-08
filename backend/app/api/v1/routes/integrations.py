@@ -524,8 +524,22 @@ async def xtrium_dashboard(
             xtrium_by_id = {str(i.get("id")): i for i in _items if isinstance(i, dict)}
             xtrium_items_error = None
             break
+    # Latest audit-log entry per source = "last activity", so the dashboard can
+    # show WHEN things changed (not just when a source was submitted).
+    from sqlalchemy import func as _func
+    last_activity_by_source: dict = {}
+    if sources:
+        for _sid, _ts in (
+            db.query(AuditLog.source_id, _func.max(AuditLog.timestamp))
+            .filter(AuditLog.source_id.in_([s.id for s in sources]))
+            .group_by(AuditLog.source_id)
+            .all()
+        ):
+            last_activity_by_source[_sid] = _ts
+
     source_list = [{
         "id": s.id,
+        "last_activity_at": last_activity_by_source[s.id].isoformat() if s.id in last_activity_by_source else None,
         "xtrium": xtrium_by_id.get(str(s.external_ref_id)),
         "name": s.name,
         "project_id": s.project_id,
@@ -704,4 +718,91 @@ async def verify_xtrium_items(
         "not_found": sum(1 for r in results if r["state"] == "not_found"),
         "errors": sum(1 for r in results if r["state"] == "error"),
         "results": results,
+    }
+
+
+# Friendly names for the audit "stage"/"origin" tags our own code writes.
+_HISTORY_STAGE_LABELS = {
+    "xtrium_catalog_iq_pull": "Pulled from Xtrium",
+    "xtrium_submit": "Submitted to Xtrium",
+    "xtrium_fail_reported": "Failure reported to Xtrium",
+    "xtrium_rejected": "Rejected by Xtrium",
+    "xtrium_archived": "Archived by Xtrium",
+    "escalated_no_data": "Escalated — no data found",
+}
+
+
+@router.get("/sources/{source_id}/history")
+async def source_xtrium_history(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    A source's audit trail, newest first (latest 300 entries): what happened,
+    when, and who did it, with from→to status values when the entry recorded
+    them. Each entry is categorised as "xtrium" (pull/submit/rejection/
+    escalation tags), "status" (anything that is or records a status change)
+    or "other" (everything else), so the UI can default to the meaningful
+    ones. Read-only.
+    """
+    _require_admin(current_user)
+    source = db.query(Source).filter(Source.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    base = db.query(AuditLog).filter(AuditLog.source_id == source_id)
+    total = base.count()
+    logs = base.order_by(AuditLog.timestamp.desc()).limit(300).all()
+
+    user_ids = {l.user_id for l in logs if l.user_id}
+    users_by_id = {
+        u.id: u.full_name
+        for u in db.query(User).filter(User.id.in_(user_ids)).all()
+    } if user_ids else {}
+
+    def _first(d: dict, keys) -> str | None:
+        for k in keys:
+            v = d.get(k)
+            if v not in (None, ""):
+                return str(v)
+        return None
+
+    def _humanize(t) -> str:
+        t = str(t).replace("_", " ").strip().lower()
+        return t[:1].upper() + t[1:] if t else "Activity"
+
+    entries = []
+    for log in logs:
+        av = log.after_value if isinstance(log.after_value, dict) else {}
+        bv = log.before_value if isinstance(log.before_value, dict) else {}
+        action_name = getattr(log.action, "name", None) or str(log.action)
+        stage = av.get("stage") or av.get("origin")
+
+        to_status = _first(av, ("status", "new_status", "to_status", "to"))
+        from_status = _first(bv, ("status", "old_status", "from_status", "from"))
+
+        label = _HISTORY_STAGE_LABELS.get(stage) or (_humanize(stage) if stage else _humanize(action_name))
+        is_xtrium = bool(stage and (stage in _HISTORY_STAGE_LABELS or str(stage).startswith("xtrium"))) \
+            or "xtrium" in str(av.get("origin", "")).lower()
+        is_status = "STATUS" in action_name.upper() or bool(from_status or to_status)
+        category = "xtrium" if is_xtrium else ("status" if is_status else "other")
+
+        note = _first(av, ("reason", "failure_reason", "note", "notes", "comment"))
+        entries.append({
+            "id": log.id,
+            "at": log.timestamp.isoformat() if log.timestamp else None,
+            "label": label,
+            "category": category,
+            "user_name": users_by_id.get(log.user_id) if log.user_id else None,
+            "from_status": from_status,
+            "to_status": to_status,
+            "note": note[:240] if note else None,
+        })
+
+    return {
+        "source_id": source_id,
+        "total": total,
+        "truncated": total > len(entries),
+        "entries": entries,
     }
