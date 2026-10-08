@@ -806,3 +806,177 @@ async def source_xtrium_history(
         "truncated": total > len(entries),
         "entries": entries,
     }
+
+
+@router.get("/export")
+async def export_xtrium_sources(
+    project_id: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Excel export of the Xtrium-linked sources with everything Xtrium holds on
+    each item (live from Xtrium) beside our own data. Sheets: Sources,
+    Xtrium fields (every field, one per row) and Activity. Read-only.
+    """
+    import io
+    import json
+    from fastapi.responses import StreamingResponse
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+
+    _require_admin(current_user)
+
+    q = db.query(Source).filter(Source.external_ref_id != None)
+    if project_id:
+        q = q.filter(Source.project_id == project_id)
+    sources = q.order_by(Source.name.asc()).all()
+
+    projects_by_id = {
+        p.id: p.name
+        for p in db.query(Project).filter(Project.id.in_({s.project_id for s in sources})).all()
+    } if sources else {}
+    user_ids = {u for s in sources for u in (s.assigned_extractor_id, s.assigned_reviewer_id) if u}
+    users_by_id = {
+        u.id: u.full_name for u in db.query(User).filter(User.id.in_(user_ids)).all()
+    } if user_ids else {}
+
+    # Live Xtrium data (same best-effort lookup the dashboard uses).
+    xtrium_by_id: dict = {}
+    xtrium_error = None
+    for _status in ("all", "Queued,In Progress,Scraped,Ingested,Failed,Archived", "In Progress"):
+        try:
+            _items = await xtrium_client.get_items(status=_status, limit=100)
+        except Exception as e:
+            xtrium_error = str(e)
+            continue
+        if isinstance(_items, list) and _items:
+            xtrium_by_id = {str(i.get("id")): i for i in _items if isinstance(i, dict)}
+            xtrium_error = None
+            break
+
+    def cell(v):
+        """Excel-safe scalar: JSON for lists/dicts."""
+        if v is None:
+            return None
+        if isinstance(v, (dict, list)):
+            v = json.dumps(v, ensure_ascii=False)
+        if isinstance(v, bool):
+            return "Yes" if v else "No"
+        if isinstance(v, (int, float)):
+            return v
+        return str(v)
+
+    def when(dt):
+        return dt.strftime("%Y-%m-%d %H:%M UTC") if dt else None
+
+    XTRIUM_COLS = [
+        ("id", "Xtrium Item ID"), ("name", "Xtrium Name"), ("url", "URL"),
+        ("resolved_link", "Resolved Link"), ("category", "Category"), ("kg_node", "KG Node"),
+        ("type", "Xtrium Type"), ("sub_type", "Sub-type"), ("sub_products", "Sub-products"),
+        ("country_of_origin", "Country of Origin"), ("priority_rank", "Priority Rank"),
+        ("status", "Xtrium Status"), ("claimed_at", "Claimed At"), ("notes", "Xtrium Notes"),
+    ]
+    OUR_COLS = [
+        "Our Source", "Project", "Item #", "Xtrium data", "Our Status", "Website URL",
+        "Description", "Our Notes", "Records", "Approved Records", "Extractor", "Reviewer",
+        "Submitted to Xtrium", "Last Synced", "Source Created",
+    ]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Sources"
+    headers = OUR_COLS[:4] + [label for _, label in XTRIUM_COLS] + OUR_COLS[4:]
+    ws.append(headers)
+
+    raw = wb.create_sheet("Xtrium fields")
+    raw.append(["Item #", "Our Source", "Field", "Value"])
+
+    for s in sources:
+        item = xtrium_by_id.get(str(s.external_ref_id))
+        row = [
+            s.name, projects_by_id.get(s.project_id), s.external_ref_id,
+            "Live from Xtrium" if item else "Not returned by Xtrium (outside the latest 100 items, or no longer there)",
+        ]
+        row += [item.get(k) if item else None for k, _ in XTRIUM_COLS]
+        row += [
+            s.status.value if s.status else None, s.website_url, s.description, s.notes,
+            s.total_records or 0, s.approved_records or 0,
+            users_by_id.get(s.assigned_extractor_id), users_by_id.get(s.assigned_reviewer_id),
+            when(s.xtrium_submitted_at), when(s.external_synced_at), when(s.created_at),
+        ]
+        ws.append([cell(v) for v in row])
+        if item:
+            for k, v in item.items():
+                raw.append([cell(s.external_ref_id), cell(s.name), k, cell(v)])
+
+    act = wb.create_sheet("Activity")
+    act.append(["When", "Our Source", "Item #", "Event", "By", "From status", "To status", "Note"])
+    if sources:
+        by_id = {s.id: s for s in sources}
+        logs = (
+            db.query(AuditLog).filter(AuditLog.source_id.in_(list(by_id)))
+            .order_by(AuditLog.timestamp.desc()).limit(5000).all()
+        )
+        log_users = {l.user_id for l in logs if l.user_id}
+        names = {
+            u.id: u.full_name for u in db.query(User).filter(User.id.in_(log_users)).all()
+        } if log_users else {}
+        for l in logs:
+            av = l.after_value if isinstance(l.after_value, dict) else {}
+            bv = l.before_value if isinstance(l.before_value, dict) else {}
+            stage = av.get("stage") or av.get("origin")
+            action_name = getattr(l.action, "name", None) or str(l.action)
+            label = _HISTORY_STAGE_LABELS.get(stage) or str(stage or action_name).replace("_", " ").capitalize()
+
+            def first(d, keys):
+                for k in keys:
+                    if d.get(k) not in (None, ""):
+                        return d.get(k)
+                return None
+
+            src = by_id.get(l.source_id)
+            act.append([cell(v) for v in (
+                when(l.timestamp), src.name if src else None, src.external_ref_id if src else None,
+                label, names.get(l.user_id),
+                first(bv, ("status", "old_status", "from_status", "from")),
+                first(av, ("status", "new_status", "to_status", "to")),
+                first(av, ("reason", "failure_reason", "note", "notes", "comment")),
+            )])
+
+    # Readable formatting: bold coloured header, frozen, filters, sane widths.
+    for sheet in (ws, raw, act):
+        # Text that merely starts with "=" must stay text, never become a formula.
+        for r in sheet.iter_rows(min_row=2):
+            for c in r:
+                if isinstance(c.value, str) and c.value.startswith("="):
+                    c.data_type = "s"
+        for c in sheet[1]:
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = PatternFill("solid", fgColor="2563EB")
+            c.alignment = Alignment(vertical="center")
+        sheet.freeze_panes = "A2"
+        sheet.auto_filter.ref = sheet.dimensions
+        for idx in range(1, sheet.max_column + 1):
+            longest = max(
+                (len(str(r[idx - 1].value)) for r in sheet.iter_rows(min_row=1, max_row=min(sheet.max_row, 200))
+                 if r[idx - 1].value is not None),
+                default=8,
+            )
+            sheet.column_dimensions[get_column_letter(idx)].width = min(max(longest + 2, 10), 60)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d")
+    scope = projects_by_id.get(project_id, "project") if project_id else "all"
+    safe_scope = "".join(ch if ch.isalnum() else "_" for ch in str(scope))[:40]
+    return StreamingResponse(
+        buf,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="Xtrium_sources_{safe_scope}_{stamp}.xlsx"',
+        },
+    )

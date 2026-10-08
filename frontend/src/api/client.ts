@@ -377,6 +377,12 @@ export const xtriumApi = {
     api.get(`/integrations/xtrium/sources/${sourceId}/status`).then(r => r.data),
   stats: () => api.get('/integrations/xtrium/stats').then(r => r.data),
   dashboard: () => api.get('/integrations/xtrium/dashboard').then(r => r.data),
+  exportSources: (projectId?: string) =>
+    api.get('/integrations/xtrium/export', {
+      params: projectId ? { project_id: projectId } : {},
+      responseType: 'blob',
+      timeout: 120000,
+    }).then(r => r.data as Blob),
   history: (sourceId: string) =>
     api.get(`/integrations/xtrium/sources/${sourceId}/history`).then(r => r.data),
   verify: () =>

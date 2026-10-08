@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   Zap, Database, Clock, CheckCircle, Send, RefreshCw, ArrowUpRight,
   Globe, Archive, AlertTriangle, Inbox, X, ExternalLink,
-  Search, Check, ChevronDown, ChevronUp, Copy,
+  Search, Check, ChevronDown, ChevronUp, Copy, Download,
 } from 'lucide-react'
 import { xtriumApi } from '@/api/client'
 import { cn, toast } from '@/components/ui'
@@ -750,6 +750,34 @@ export function XtriumDashboardPage() {
   const [verifying, setVerifying] = useState(false)
   const [verifyInfo, setVerifyInfo] = useState<Record<string, any>>({})
   const [verifySummary, setVerifySummary] = useState<any>(null)
+  // "Export for Xtrium": which project to export ('' = all) and in-flight flag.
+  const [exportProject, setExportProject] = useState('')
+  const [exporting, setExporting] = useState(false)
+
+  const runExport = async () => {
+    setExporting(true)
+    try {
+      const blob: Blob = await xtriumApi.exportSources(exportProject || undefined)
+      const scope = exportProject
+        ? String((data?.sources ?? []).find((x: any) => x.project_id === exportProject)?.project_name ?? 'project')
+        : 'all'
+      const safe = scope.replace(/[^A-Za-z0-9]+/g, '_').slice(0, 40)
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, '')
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `Xtrium_sources_${safe}_${stamp}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      toast.success('Export downloaded')
+    } catch (err: any) {
+      toast.error(err?.response?.status === 403 ? 'Only admins can export' : "Couldn't build the export — try again")
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const load = (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true)
@@ -814,6 +842,9 @@ export function XtriumDashboardPage() {
   )
   const rows = sortRows(filtered, sort)
   const clearFilters = () => { setSearch(''); setFilter('all') }
+  const exportProjects: [string, string][] = Array.from(
+    new Map(sources.filter(x => x.project_id).map(x => [x.project_id as string, String(x.project_name ?? x.project_id)] as [string, string])),
+  )
   const runVerify = async () => {
     setVerifying(true)
     try {
@@ -884,6 +915,20 @@ export function XtriumDashboardPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {exportProjects.length > 1 && (
+            <select value={exportProject} onChange={e => setExportProject(e.target.value)}
+              aria-label="Project to export"
+              className="text-xs text-gray-600 border border-gray-200 rounded-lg px-2 py-2 bg-white">
+              <option value="">All projects</option>
+              {exportProjects.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            </select>
+          )}
+          <button onClick={runExport} disabled={exporting || sources.length === 0}
+            title="Excel file with each source and everything Xtrium holds on its item (URL, category, KG node, notes…), ready to share with Xtrium."
+            className="flex items-center gap-2 text-xs font-semibold text-gray-700 px-3 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 transition">
+            <Download className={cn('w-3.5 h-3.5', exporting && 'animate-pulse')} />
+            {exporting ? 'Preparing…' : 'Export for Xtrium'}
+          </button>
           <button onClick={runVerify} disabled={verifying}
             title="Asks Xtrium about every unsubmitted item. Read-only — changes nothing."
             className="flex items-center gap-2 text-xs font-semibold text-brand-700 px-3 py-2 rounded-lg border border-brand-200 bg-brand-50 hover:bg-brand-100 disabled:opacity-60 transition">
