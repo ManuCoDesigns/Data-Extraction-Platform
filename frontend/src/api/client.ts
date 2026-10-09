@@ -377,6 +377,8 @@ export const xtriumApi = {
     api.get(`/integrations/xtrium/sources/${sourceId}/status`).then(r => r.data),
   stats: () => api.get('/integrations/xtrium/stats').then(r => r.data),
   dashboard: () => api.get('/integrations/xtrium/dashboard').then(r => r.data),
+  syncSources: (sourceIds: string[]) =>
+    api.post('/integrations/xtrium/sync', { source_ids: sourceIds }, { timeout: 60000 }).then(r => r.data),
   notices: (sourceId: string) =>
     api.get(`/integrations/xtrium/sources/${sourceId}/notices`).then(r => r.data),
   exportSources: (projectId?: string) =>

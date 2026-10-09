@@ -516,7 +516,7 @@ async def xtrium_dashboard(
     xtrium_items_error = None
     for _status in ("all", "Queued,In Progress,Scraped,Ingested,Failed,Archived", "In Progress"):
         try:
-            _items = await xtrium_client.get_items(status=_status, limit=100)
+            _items = await _cached_get_items(_status, 100)
         except Exception as e:
             xtrium_items_error = str(e)
             continue
@@ -578,6 +578,7 @@ async def xtrium_dashboard(
         "id": s.id,
         "last_activity_at": last_activity_by_source[s.id].isoformat() if s.id in last_activity_by_source else None,
         "notice": notice_by_source.get(s.id),
+        "sync_changes": _sync_changes(s, xtrium_by_id.get(str(s.external_ref_id))),
         "xtrium": xtrium_by_id.get(str(s.external_ref_id)),
         "name": s.name,
         "project_id": s.project_id,
@@ -885,7 +886,7 @@ async def export_xtrium_sources(
     xtrium_error = None
     for _status in ("all", "Queued,In Progress,Scraped,Ingested,Failed,Archived", "In Progress"):
         try:
-            _items = await xtrium_client.get_items(status=_status, limit=100)
+            _items = await _cached_get_items(_status, 100)
         except Exception as e:
             xtrium_error = str(e)
             continue
@@ -1097,4 +1098,175 @@ async def source_xtrium_notices(
         "escalations": escalations,
         "failures": failures,
         "xtrium_feedback": xtrium_feedback,
+    }
+
+
+# ─── Sync from Xtrium ────────────────────────────────────────────────────────
+import asyncio as _asyncio
+import re as _re
+import time as _time
+
+_LIVE_ITEMS_TTL_SECONDS = 45
+_LIVE_ITEMS_COOLDOWN_SECONDS = 60
+_live_items_cache: dict = {}
+_live_items_lock = _asyncio.Lock()
+
+
+async def _cached_get_items(status: str, limit: int, force: bool = False):
+    """
+    xtrium_client.get_items with a short shared cache. Xtrium's gateway locks a
+    key out after bursts of calls, and the dashboard polls every 30s per open
+    tab, so identical reads within 45s reuse one response (and concurrent
+    callers share one in-flight request). Failed responses are not cached, but
+    one failure pauses further calls for a minute (see below).
+    """
+    key = (status, limit)
+    async with _live_items_lock:
+        now = _time.monotonic()
+        hit = _live_items_cache.get(key)
+        if hit and not force and (now - hit[0]) < _LIVE_ITEMS_TTL_SECONDS:
+            return hit[1]
+        # After a failure (e.g. their 403 circuit breaker) stop hammering for a
+        # minute — repeated attempts are what keep a key locked out.
+        failed = _live_items_cache.get("_failed")
+        if failed and not force and (now - failed[0]) < _LIVE_ITEMS_COOLDOWN_SECONDS:
+            raise XtriumClientError(f"Xtrium refused the last request ({failed[1]}); not retrying for a minute")
+        try:
+            items = await xtrium_client.get_items(status=status, limit=limit)
+        except Exception as e:
+            _live_items_cache["_failed"] = (now, str(e)[:160])
+            raise
+        _live_items_cache.pop("_failed", None)
+        if isinstance(items, list):
+            _live_items_cache[key] = (_time.monotonic(), items)
+        return items
+
+
+_SYNC_LABELS = {
+    "name": "Name", "website_url": "Website link", "category": "Category",
+    "country": "Country", "type": "Type", "description": "Description",
+}
+
+
+def _xtrium_description(item: dict) -> str:
+    """Same text the pull writes (kept in step with _create_sources_from_xtrium_items)."""
+    parts = []
+    if item.get("kg_node"):
+        parts.append(f"KG Node: {item['kg_node']}")
+    if item.get("type"):
+        parts.append(f"Type: {item['type']}")
+    if item.get("sub_type"):
+        parts.append(f"Sub-type: {item['sub_type']}")
+    if item.get("sub_products"):
+        parts.append(f"Sub-products: {item['sub_products']}")
+    if item.get("country_of_origin"):
+        parts.append(f"Country of origin: {item['country_of_origin']}")
+    if item.get("notes"):
+        parts.append(f"Notes: {item['notes']}")
+    parts.append(f"Xtrium item #{item.get('id')}, priority {item.get('priority_rank', '—')}")
+    return " | ".join(parts)
+
+
+def _sync_changes(source, item) -> list:
+    """Where our saved copy of `source` differs from Xtrium's live `item`."""
+    if not isinstance(item, dict):
+        return []
+    wanted = {
+        "name": item.get("name"),
+        "website_url": item.get("resolved_link") or item.get("url"),
+        "category": item.get("category") or item.get("kg_node"),
+        "country": item.get("country_of_origin"),
+        "type": item.get("type"),
+    }
+    # Only refresh the description while it is still the auto-generated one.
+    if source.description and _re.search(r"Xtrium item #\d+, priority", source.description):
+        wanted["description"] = _xtrium_description(item)
+    changes = []
+    for field, new in wanted.items():
+        if new is None or str(new).strip() == "":
+            continue  # never blank out our copy because Xtrium omitted a value
+        old = getattr(source, field, None)
+        if (str(old).strip() if old is not None else "") != str(new).strip():
+            changes.append({
+                "field": field, "label": _SYNC_LABELS[field],
+                "old": old, "new": str(new).strip(),
+            })
+    return changes
+
+
+_HISTORY_STAGE_LABELS["xtrium_synced"] = "Updated from Xtrium"
+
+
+class SyncRequest(BaseModel):
+    source_ids: list[str]
+
+
+@router.post("/sync")
+async def sync_sources_from_xtrium(
+    payload: SyncRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Applies Xtrium's current values to the chosen sources' saved copy.
+    Re-fetches live data and recomputes the differences here, so only what
+    Xtrium really says right now is written. Each change is logged (old → new).
+    """
+    _require_admin(current_user)
+    ids = list(dict.fromkeys(payload.source_ids))[:200]
+    if not ids:
+        raise HTTPException(status_code=422, detail="No sources selected")
+
+    live: dict = {}
+    last_error = None
+    for _status in ("all", "Queued,In Progress,Scraped,Ingested,Failed,Archived", "In Progress"):
+        try:
+            _items = await _cached_get_items(_status, 100, force=True)
+        except Exception as e:
+            last_error = str(e)
+            continue
+        if isinstance(_items, list) and _items:
+            live = {str(i.get("id")): i for i in _items if isinstance(i, dict)}
+            last_error = None
+            break
+    if not live:
+        raise HTTPException(status_code=502, detail=last_error or "Xtrium returned no items to sync from")
+
+    sources = db.query(Source).filter(Source.id.in_(ids), Source.external_ref_id != None).all()
+    results = []
+    now = datetime.now(timezone.utc)
+    for s in sources:
+        item = live.get(str(s.external_ref_id))
+        if item is None:
+            results.append({"source_id": s.id, "state": "not_in_xtrium_list", "changed": []})
+            continue
+        changes = _sync_changes(s, item)
+        if not changes:
+            results.append({"source_id": s.id, "state": "up_to_date", "changed": []})
+            continue
+        for c in changes:
+            setattr(s, c["field"], c["new"])
+        s.external_synced_at = now
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=s.project_id, source_id=s.id,
+            action=AuditAction.SOURCE_STATUS_CHANGED,
+            before_value={c["field"]: (str(c["old"])[:300] if c["old"] is not None else None) for c in changes},
+            after_value={
+                "stage": "xtrium_synced", "origin": "xtrium_catalog_iq",
+                "reason": "Updated: " + ", ".join(c["label"] for c in changes),
+                "changes": {c["field"]: c["new"][:300] for c in changes},
+            },
+        ))
+        results.append({"source_id": s.id, "state": "updated", "changed": [c["label"] for c in changes]})
+    db.commit()
+
+    found = {s.id for s in sources}
+    for sid in ids:
+        if sid not in found:
+            results.append({"source_id": sid, "state": "not_found", "changed": []})
+    return {
+        "updated": sum(1 for r in results if r["state"] == "updated"),
+        "up_to_date": sum(1 for r in results if r["state"] == "up_to_date"),
+        "skipped": sum(1 for r in results if r["state"] in ("not_in_xtrium_list", "not_found")),
+        "results": results,
     }

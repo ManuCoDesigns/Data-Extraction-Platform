@@ -331,6 +331,87 @@ function renderXtriumValue(key: string, value: any) {
 }
 
 // ── Detail drawer ────────────────────────────────────────────────────────────
+// ── Sync from Xtrium: where our saved copy differs from Xtrium's current values ──
+const shorten = (v: any, n = 90) => {
+  const t = String(v ?? '').trim()
+  return t.length > n ? `${t.slice(0, n)}…` : t
+}
+
+function SyncChanges({ changes }: { changes: any[] }) {
+  return (
+    <ul className="list-none m-0 p-0 space-y-2">
+      {changes.map((c: any) => (
+        <li key={c.field} className="text-xs">
+          <p className="m-0 font-semibold text-gray-700">{c.label}</p>
+          <p className="m-0 mt-0.5 text-gray-400 line-through break-all">{c.old ? shorten(c.old) : '(empty)'}</p>
+          <p className="m-0 text-gray-800 break-all">{shorten(c.new)}</p>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+function SyncModal({ items, selected, onToggle, onToggleAll, onApply, onClose, applying }: {
+  items: any[]; selected: Set<string>; onToggle: (id: string) => void
+  onToggleAll: () => void; onApply: () => void; onClose: () => void; applying: boolean
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const allOn = items.length > 0 && items.every(s => selected.has(s.id))
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Sync from Xtrium">
+      <div className="absolute inset-0 bg-black/40" onClick={onClose} />
+      <div className="relative bg-white rounded-2xl shadow-float w-full max-w-2xl max-h-[85vh] flex flex-col">
+        <div className="px-6 pt-5 pb-3 border-b border-gray-100">
+          <h2 className="text-base font-bold text-gray-900 m-0">Sync from Xtrium</h2>
+          <p className="text-xs text-gray-500 mt-1 m-0">
+            Xtrium has updated {items.length} item{items.length !== 1 ? 's' : ''} since we saved our copy. Choose which to update — the old values are
+            kept in each source's history.
+          </p>
+        </div>
+        <div className="px-6 py-3 overflow-y-auto scrollbar-thin flex-1">
+          {items.length === 0 ? (
+            <p className="text-sm text-gray-400 py-6 text-center m-0">Everything matches Xtrium right now.</p>
+          ) : (
+            <>
+              <label className="flex items-center gap-2 text-xs font-semibold text-gray-600 py-2 cursor-pointer">
+                <input type="checkbox" checked={allOn} onChange={onToggleAll} /> Select all ({items.length})
+              </label>
+              <ul className="list-none m-0 p-0 space-y-3">
+                {items.map(src => (
+                  <li key={src.id} className="rounded-xl border border-gray-100 px-4 py-3">
+                    <label className="flex items-start gap-3 cursor-pointer">
+                      <input type="checkbox" className="mt-1" checked={selected.has(src.id)} onChange={() => onToggle(src.id)}
+                        aria-label={`Update ${src.name}`} />
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-gray-900 m-0 truncate">{src.name}</p>
+                        <p className="text-xs text-gray-400 m-0 mb-2">Item #{src.external_ref_id} · {src.project_name ?? '—'}</p>
+                        <SyncChanges changes={src.sync_changes ?? []} />
+                      </div>
+                    </label>
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="px-3.5 py-2 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50">Cancel</button>
+          <button onClick={onApply} disabled={applying || selected.size === 0}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-br from-brand-500 to-brand-700 disabled:opacity-40 transition">
+            <RefreshCw className={cn('w-3.5 h-3.5', applying && 'animate-spin')} />
+            {applying ? 'Updating…' : `Update ${selected.size} source${selected.size !== 1 ? 's' : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Notices: what was raised on this source, and what Xtrium said back ─────
 function NoticesCard({ sourceId, reloadKey, xtriumNote }: { sourceId: string; reloadKey: string; xtriumNote: string }) {
   const [data, setData] = useState<any>(null)
@@ -522,9 +603,10 @@ function StatusHistory({ sourceId, reloadKey }: { sourceId: string; reloadKey: s
   )
 }
 
-function DetailDrawer({ source, onClose, onChanged, onMissing, onFound }: {
+function DetailDrawer({ source, onClose, onChanged, onMissing, onFound, onSync, syncing }: {
   source: any; onClose: () => void; onChanged: () => void
   onMissing: (id: string) => void; onFound: (id: string) => void
+  onSync: (id: string) => void; syncing: boolean
 }) {
   const [busy, setBusy] = useState<'status' | 'submit' | null>(null)
   const [statusResult, setStatusResult] = useState<any>(null)
@@ -680,6 +762,22 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound }: {
             </div>
             <StageStepper s={source} />
           </div>
+
+          {/* Xtrium updated this item */}
+          {(source.sync_changes ?? []).length > 0 && (
+            <div className="rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4">
+              <h3 className="text-sm font-bold text-sky-900 m-0">Xtrium has updated this item</h3>
+              <p className="text-xs text-sky-800/80 mt-1 mb-3 m-0">
+                Our saved copy differs from what Xtrium has now. Extractors work from our copy until you update it.
+              </p>
+              <SyncChanges changes={source.sync_changes} />
+              <button onClick={() => onSync(source.id)} disabled={syncing}
+                className="mt-3 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-br from-brand-500 to-brand-700 disabled:opacity-50 transition">
+                <RefreshCw className={cn('w-3.5 h-3.5', syncing && 'animate-spin')} />
+                {syncing ? 'Updating…' : 'Update from Xtrium'}
+              </button>
+            </div>
+          )}
 
           {/* Notices */}
           <NoticesCard
@@ -869,6 +967,10 @@ export function XtriumDashboardPage() {
   // "Export for Xtrium": which project to export ('' = all) and in-flight flag.
   const [exportProject, setExportProject] = useState('')
   const [exporting, setExporting] = useState(false)
+  // "Sync from Xtrium": modal visibility, chosen sources, in-flight flag.
+  const [syncOpen, setSyncOpen] = useState(false)
+  const [syncSelected, setSyncSelected] = useState<Set<string>>(new Set())
+  const [syncing, setSyncing] = useState(false)
 
   const runExport = async () => {
     setExporting(true)
@@ -959,6 +1061,27 @@ export function XtriumDashboardPage() {
   )
   const rows = sortRows(filtered, sort)
   const clearFilters = () => { setSearch(''); setFilter('all') }
+  const driftSources = sources.filter(x => (x.sync_changes ?? []).length > 0)
+  const runSync = async (ids: string[]) => {
+    setSyncing(true)
+    try {
+      const r = await xtriumApi.syncSources(ids)
+      const bits = [`${r.updated} updated`]
+      if (r.up_to_date) bits.push(`${r.up_to_date} already up to date`)
+      if (r.skipped) bits.push(`${r.skipped} skipped`)
+      toast.success(`Synced from Xtrium — ${bits.join(', ')}`)
+      setSyncOpen(false)
+      load({ silent: true })
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Couldn't sync from Xtrium — try again")
+    } finally {
+      setSyncing(false)
+    }
+  }
+  const openSync = () => {
+    setSyncSelected(new Set(driftSources.map(x => x.id)))
+    setSyncOpen(true)
+  }
   const exportProjects: [string, string][] = Array.from(
     new Map(sources.filter(x => x.project_id).map(x => [x.project_id as string, String(x.project_name ?? x.project_id)] as [string, string])),
   )
@@ -1032,6 +1155,19 @@ export function XtriumDashboardPage() {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button onClick={openSync} disabled={driftSources.length === 0}
+            title={driftSources.length === 0
+              ? 'Everything matches Xtrium right now'
+              : 'Xtrium changed some items (e.g. links) since we saved them — review and update'}
+            className={cn(
+              'flex items-center gap-2 text-xs font-semibold px-3 py-2 rounded-lg border transition disabled:opacity-50',
+              driftSources.length > 0
+                ? 'text-sky-800 border-sky-200 bg-sky-50 hover:bg-sky-100'
+                : 'text-gray-500 border-gray-200 bg-white',
+            )}>
+            <RefreshCw className="w-3.5 h-3.5" />
+            Sync from Xtrium{driftSources.length > 0 ? ` (${driftSources.length})` : ''}
+          </button>
           {exportProjects.length > 1 && (
             <select value={exportProject} onChange={e => setExportProject(e.target.value)}
               aria-label="Project to export"
@@ -1058,6 +1194,23 @@ export function XtriumDashboardPage() {
           </button>
         </div>
       </div>
+
+      {syncOpen && (
+        <SyncModal
+          items={driftSources} selected={syncSelected} applying={syncing}
+          onToggle={id => setSyncSelected(prev => {
+            const next = new Set(prev)
+            if (next.has(id)) next.delete(id)
+            else next.add(id)
+            return next
+          })}
+          onToggleAll={() => setSyncSelected(prev => (
+            driftSources.every(x => prev.has(x.id)) ? new Set() : new Set(driftSources.map(x => x.id))
+          ))}
+          onApply={() => runSync(Array.from(syncSelected))}
+          onClose={() => setSyncOpen(false)}
+        />
+      )}
 
       {/* Result of the last Verify run */}
       {verifySummary && (
@@ -1200,6 +1353,12 @@ export function XtriumDashboardPage() {
                     <td className="px-4 py-3">
                       <p className="text-sm font-semibold text-gray-900 truncate max-w-[260px]">{s.name}</p>
                       <p className="text-xs text-gray-400 truncate max-w-[260px]">{s.project_name ?? '—'}</p>
+                      {(s.sync_changes ?? []).length > 0 && (
+                        <span title={`Xtrium changed: ${(s.sync_changes as any[]).map(c => c.label).join(', ')}`}
+                          className="inline-flex items-center gap-1 mt-1 mr-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-sky-50 text-sky-700">
+                          <RefreshCw className="w-3 h-3 shrink-0" /> Updated on Xtrium
+                        </span>
+                      )}
                       {(() => {
                         const n = noticeOf(s)
                         return n ? (
@@ -1297,7 +1456,8 @@ export function XtriumDashboardPage() {
       {selected && (
         <DetailDrawer key={selected.id} source={selected}
           onClose={() => setSelectedId(null)} onChanged={() => load({ silent: true })}
-          onMissing={markMissing} onFound={markFound} />
+          onMissing={markMissing} onFound={markFound}
+          onSync={id => runSync([id])} syncing={syncing} />
       )}
     </div>
   )
