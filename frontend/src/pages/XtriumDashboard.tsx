@@ -50,6 +50,25 @@ function isItemNotFound(detail: unknown): boolean {
 const isReady = (s: any): boolean => s.status === 'approved' && !s.xtrium_submitted_at
 const isSubmitted = (s: any): boolean => !!s.xtrium_submitted_at
 
+// The notice to surface for a source: one WE raised (an escalation such as
+// "Link inaccessible", or a failure report sent to Xtrium), else a note Xtrium
+// itself holds on the item.
+function noticeOf(s: any): { label: string; detail: string; tone: 'amber' | 'red' | 'slate' } | null {
+  const n = s.notice
+  if (n) {
+    const label = String(n.reason || (n.kind === 'failure' ? 'Failure reported' : 'Escalated'))
+    const what = n.kind === 'failure' ? 'Failure reported to Xtrium' : 'Escalated — no data found'
+    return {
+      label,
+      detail: [what, n.reason, n.note].filter(Boolean).join(' · '),
+      tone: n.kind === 'failure' ? 'red' : 'amber',
+    }
+  }
+  const xn = String(s.xtrium?.notes ?? '').trim()
+  if (xn) return { label: `Xtrium: ${xn.length > 36 ? `${xn.slice(0, 36)}…` : xn}`, detail: `Xtrium note: ${xn}`, tone: 'slate' }
+  return null
+}
+
 function needsAttention(s: any): boolean {
   if (s._missing) return true
   if (s._rework) return true
@@ -78,7 +97,7 @@ function stageSummary(s: any) {
   return { done, idx, attention, text }
 }
 
-type FilterKey = 'all' | 'inprogress' | 'ready' | 'submitted' | 'attention'
+type FilterKey = 'all' | 'inprogress' | 'ready' | 'submitted' | 'attention' | 'notice'
 type SortKey = 'recent' | 'name' | 'item' | 'submitted' | 'activity'
 
 const FILTERS: [FilterKey, string][] = [
@@ -87,6 +106,7 @@ const FILTERS: [FilterKey, string][] = [
   ['ready', 'Ready to submit'],
   ['submitted', 'Submitted'],
   ['attention', 'Needs attention'],
+  ['notice', 'Has notice'],
 ]
 
 function matchesFilter(s: any, f: FilterKey): boolean {
@@ -95,6 +115,7 @@ function matchesFilter(s: any, f: FilterKey): boolean {
     case 'ready': return isReady(s)
     case 'submitted': return isSubmitted(s)
     case 'attention': return needsAttention(s)
+    case 'notice': return noticeOf(s) !== null
     default: return true
   }
 }
@@ -310,6 +331,94 @@ function renderXtriumValue(key: string, value: any) {
 }
 
 // ── Detail drawer ────────────────────────────────────────────────────────────
+// ── Notices: what was raised on this source, and what Xtrium said back ─────
+function NoticesCard({ sourceId, reloadKey, xtriumNote }: { sourceId: string; reloadKey: string; xtriumNote: string }) {
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    xtriumApi.notices(sourceId)
+      .then((r: any) => { if (!cancelled) setData(r) })
+      .catch((err: any) => {
+        if (!cancelled) setError(err?.response?.data?.detail || "Couldn't load the notices")
+      })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [sourceId, reloadKey, attempt])
+
+  const escalations: any[] = data?.escalations ?? []
+  const failures: any[] = data?.failures ?? []
+  const feedback: any[] = data?.xtrium_feedback ?? []
+  const nothing = !xtriumNote && escalations.length + failures.length + feedback.length === 0
+
+  const Stamp = ({ at, by }: { at?: string | null; by?: string | null }) => (
+    <p className="text-[11px] text-gray-400 mt-1 m-0">
+      {[by ? `by ${by}` : null, at ? `${formatDate(at)} (${timeAgo(at)})` : null].filter(Boolean).join(' · ')}
+    </p>
+  )
+
+  return (
+    <div className="relative bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden">
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-amber-400 to-orange-500" />
+      <div className="px-5 pt-5 pb-1">
+        <h3 className="text-sm font-bold text-gray-900 m-0">Notices</h3>
+        <p className="text-xs text-gray-400 mt-0.5 m-0">Escalations and failure reports raised on this item, and notes from Xtrium</p>
+      </div>
+      <div className="px-5 pb-4 space-y-3">
+        {loading && !data && <p className="text-sm text-gray-400 pt-3 m-0">Loading notices…</p>}
+        {error && (
+          <p className="text-sm text-red-600 pt-3 m-0">
+            {error}{' '}
+            <button onClick={() => setAttempt(a => a + 1)} className="font-semibold underline">Retry</button>
+          </p>
+        )}
+        {!error && data && nothing && <p className="text-sm text-gray-400 pt-3 m-0">No notices on this item.</p>}
+
+        {xtriumNote && (
+          <div className="rounded-xl bg-slate-50 border border-slate-100 px-3.5 py-3 mt-3">
+            <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wider m-0">Xtrium note</p>
+            <p className="text-sm text-gray-700 m-0 mt-1" style={{ whiteSpace: 'pre-wrap' }}>{xtriumNote}</p>
+          </div>
+        )}
+
+        {escalations.map((e: any) => (
+          <div key={e.id} className="rounded-xl bg-amber-50/70 border border-amber-100 px-3.5 py-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-[11px] font-bold text-amber-700 uppercase tracking-wider m-0">Escalated — no data found</p>
+              {e.review_status && <Pill label={humanize(String(e.review_status))} color="#d97706" />}
+            </div>
+            {e.reason && <p className="text-sm font-semibold text-gray-900 m-0 mt-1">{e.reason}</p>}
+            {e.note && <p className="text-sm text-gray-600 m-0 mt-1" style={{ whiteSpace: 'pre-wrap' }}>{e.note}</p>}
+            <Stamp at={e.at} by={e.by} />
+          </div>
+        ))}
+
+        {failures.map((f: any, i: number) => (
+          <div key={`${f.at}-${i}`} className="rounded-xl bg-red-50/70 border border-red-100 px-3.5 py-3">
+            <p className="text-[11px] font-bold text-red-700 uppercase tracking-wider m-0">Failure reported to Xtrium</p>
+            {f.reason && <p className="text-sm font-semibold text-gray-900 m-0 mt-1">{f.reason}</p>}
+            {f.xtrium_reply && <p className="text-sm text-gray-600 m-0 mt-1">Xtrium replied: {f.xtrium_reply}</p>}
+            <Stamp at={f.at} by={f.by} />
+          </div>
+        ))}
+
+        {feedback.map((f: any, i: number) => (
+          <div key={`${f.at}-${i}`} className="rounded-xl bg-violet-50/70 border border-violet-100 px-3.5 py-3">
+            <p className="text-[11px] font-bold text-violet-700 uppercase tracking-wider m-0">Sent back by Xtrium</p>
+            <p className="text-sm text-gray-700 m-0 mt-1" style={{ whiteSpace: 'pre-wrap' }}>{f.comment}</p>
+            <Stamp at={f.at} />
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Status history: when each change was applied ────────────────────────────
 const CATEGORY_COLOR: Record<string, string> = { xtrium: '#7c3aed', status: '#2563eb', other: '#94a3b8' }
 
@@ -572,6 +681,13 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound }: {
             <StageStepper s={source} />
           </div>
 
+          {/* Notices */}
+          <NoticesCard
+            sourceId={source.id}
+            reloadKey={`${source.status}|${source.xtrium_submitted_at ?? ''}|${source.last_activity_at ?? ''}|${source.notice?.at ?? ''}`}
+            xtriumNote={String(source.xtrium?.notes ?? '').trim()}
+          />
+
           {/* Actions */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-card px-5 py-4">
             <h3 className="text-sm font-bold text-gray-900 m-0 mb-3">Actions</h3>
@@ -830,6 +946,7 @@ export function XtriumDashboardPage() {
     ready: readyCount,
     submitted: sources.filter(s => matchesFilter(s, 'submitted')).length,
     attention: sources.filter(s => matchesFilter(s, 'attention')).length,
+    notice: sources.filter(s => matchesFilter(s, 'notice')).length,
   }
 
   const q = search.trim().toLowerCase()
@@ -1083,6 +1200,20 @@ export function XtriumDashboardPage() {
                     <td className="px-4 py-3">
                       <p className="text-sm font-semibold text-gray-900 truncate max-w-[260px]">{s.name}</p>
                       <p className="text-xs text-gray-400 truncate max-w-[260px]">{s.project_name ?? '—'}</p>
+                      {(() => {
+                        const n = noticeOf(s)
+                        return n ? (
+                          <span title={n.detail}
+                            className={cn(
+                              'inline-flex items-center gap-1 mt-1 max-w-[260px] truncate text-[10px] font-semibold px-1.5 py-0.5 rounded-md',
+                              n.tone === 'red' && 'bg-red-50 text-red-700',
+                              n.tone === 'amber' && 'bg-amber-50 text-amber-700',
+                              n.tone === 'slate' && 'bg-slate-100 text-slate-600',
+                            )}>
+                            <AlertTriangle className="w-3 h-3 shrink-0" /> <span className="truncate">{n.label}</span>
+                          </span>
+                        ) : null
+                      })()}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">#{s.external_ref_id}</td>
                     <td className="px-4 py-3"><StageBar s={s} /></td>

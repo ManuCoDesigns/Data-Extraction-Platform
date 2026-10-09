@@ -537,9 +537,47 @@ async def xtrium_dashboard(
         ):
             last_activity_by_source[_sid] = _ts
 
+    # Most recent notice of ours per source: an escalation (e.g. "Link
+    # inaccessible") or a failure report sent to Xtrium. Shown as a chip.
+    notice_by_source: dict = {}
+    if sources:
+        _nids = [s.id for s in sources]
+        for _rec, _sid in (
+            db.query(ExtractedRecord, ExtractionJob.source_id)
+            .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+            .filter(ExtractionJob.source_id.in_(_nids), ExtractedRecord.is_escalation_only == True)
+            .order_by(ExtractedRecord.created_at.asc())
+            .all()
+        ):
+            notice_by_source[_sid] = {
+                "kind": "escalation",
+                "reason": _rec.escalation_reason,
+                "note": (_rec.raw_text or "")[:240] or None,
+                "review_status": _rec.review_status.value if _rec.review_status else None,
+                "at": _rec.created_at.isoformat() if _rec.created_at else None,
+            }
+        for _log in (
+            db.query(AuditLog)
+            .filter(AuditLog.source_id.in_(_nids), AuditLog.action == AuditAction.SOURCE_STATUS_CHANGED)
+            .order_by(AuditLog.timestamp.asc())
+            .limit(3000)
+            .all()
+        ):
+            _av = _log.after_value if isinstance(_log.after_value, dict) else {}
+            if _av.get("stage") != "xtrium_fail_reported":
+                continue
+            _prev = notice_by_source.get(_log.source_id)
+            _at = _log.timestamp.isoformat() if _log.timestamp else None
+            if _prev is None or (_at and (_prev.get("at") or "") <= _at):
+                notice_by_source[_log.source_id] = {
+                    "kind": "failure", "reason": _av.get("reason"), "note": None,
+                    "review_status": None, "at": _at,
+                }
+
     source_list = [{
         "id": s.id,
         "last_activity_at": last_activity_by_source[s.id].isoformat() if s.id in last_activity_by_source else None,
+        "notice": notice_by_source.get(s.id),
         "xtrium": xtrium_by_id.get(str(s.external_ref_id)),
         "name": s.name,
         "project_id": s.project_id,
@@ -980,3 +1018,83 @@ async def export_xtrium_sources(
             "Content-Disposition": f'attachment; filename="Xtrium_sources_{safe_scope}_{stamp}.xlsx"',
         },
     )
+
+
+@router.get("/sources/{source_id}/notices")
+async def source_xtrium_notices(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Every notice tied to one source, newest first: escalations raised on it
+    ("Escalate — No Data Found": reason + note), failure reports sent to
+    Xtrium, and rework notes Xtrium sent back. Read-only.
+    """
+    _require_admin(current_user)
+    source = db.query(Source).filter(Source.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+
+    rows = (
+        db.query(ExtractedRecord, ExtractionJob.created_by)
+        .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+        .filter(ExtractionJob.source_id == source_id)
+        .order_by(ExtractedRecord.created_at.desc())
+        .all()
+    )
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.source_id == source_id, AuditLog.action == AuditAction.SOURCE_STATUS_CHANGED)
+        .order_by(AuditLog.timestamp.desc())
+        .limit(500)
+        .all()
+    )
+
+    user_ids = {uid for _, uid in rows if uid} | {l.user_id for l in logs if l.user_id}
+    names = {
+        u.id: u.full_name for u in db.query(User).filter(User.id.in_(user_ids)).all()
+    } if user_ids else {}
+
+    escalations = []
+    xtrium_feedback = []
+    for rec, creator_id in rows:
+        if rec.is_escalation_only:
+            escalations.append({
+                "id": rec.id,
+                "reason": rec.escalation_reason,
+                "note": rec.raw_text or None,
+                "review_status": rec.review_status.value if rec.review_status else None,
+                "by": names.get(creator_id),
+                "at": rec.created_at.isoformat() if rec.created_at else None,
+            })
+        comments = rec.reviewer_field_comments if isinstance(rec.reviewer_field_comments, dict) else {}
+        for entry in comments.get("_general", []) or []:
+            if isinstance(entry, dict) and entry.get("user") == "xtrium_catalog_iq" and entry.get("comment"):
+                xtrium_feedback.append({
+                    "comment": str(entry.get("comment"))[:1000],
+                    "at": entry.get("ts"),
+                })
+    xtrium_feedback.sort(key=lambda e: e.get("at") or "", reverse=True)
+
+    failures = []
+    for l in logs:
+        av = l.after_value if isinstance(l.after_value, dict) else {}
+        if av.get("stage") != "xtrium_fail_reported":
+            continue
+        resp = av.get("response")
+        if isinstance(resp, dict):
+            resp = resp.get("message") or resp.get("detail") or resp.get("status")
+        failures.append({
+            "reason": av.get("reason"),
+            "xtrium_reply": str(resp)[:240] if resp else None,
+            "by": names.get(l.user_id) if l.user_id else None,
+            "at": l.timestamp.isoformat() if l.timestamp else None,
+        })
+
+    return {
+        "source_id": source_id,
+        "escalations": escalations,
+        "failures": failures,
+        "xtrium_feedback": xtrium_feedback,
+    }
