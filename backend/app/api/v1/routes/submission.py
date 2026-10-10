@@ -406,6 +406,7 @@ def sources_summary(
         "my_reviewing":  [_src(s) for s in my_reviewing[:5]],
         "recent":        [_src(s) for s in recent],
         "per_project":   _per_project(sources),
-        "pending_admin_review": pending_admin_sources[:20],
+        # final approval is an admin job: extractors/reviewers are never shown it
+        "pending_admin_review": pending_admin_sources[:20] if user_roles & {"org_admin", "project_admin", "qa_lead"} else [],
     }
 

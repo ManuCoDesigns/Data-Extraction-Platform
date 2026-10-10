@@ -7,6 +7,7 @@ import {
 import { statsApi, projectsApi } from '@/api/client'
 import { Card, Badge, Avatar, Button, Skeleton as UiSkeleton, safeFromNow, cn } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
+import { WorkDashboard } from './WorkDashboard'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -768,7 +769,7 @@ export function DashboardPage() {
   const isReviewer  = roles.has('reviewer')
   const isExtractor = roles.has('pipeline_operator')
   if (isAdmin)                        return <AdminDashboard />
-  if (isReviewer && isExtractor)      return <AdminDashboard />
+  if (isReviewer && isExtractor)      return <WorkDashboard />
   if (isReviewer)                     return <ReviewerDashboard />
   return <ExtractorDashboard />
 }

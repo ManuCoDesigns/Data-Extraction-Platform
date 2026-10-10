@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   Plus, Globe, Database, LayoutGrid, Table as TableIcon,
-  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2, Zap
+  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2, Zap, ListChecks
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, xtriumApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
 import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
+import { MyQueue } from '@/components/MyQueue'
 
 const STATUS_META: Record<SourceStatus, { label: string; color: 'gray' | 'amber' | 'red' | 'blue' | 'purple' | 'green' | 'indigo' }> = {
   not_started:       { label: 'Not Started',       color: 'gray' },
@@ -63,7 +64,7 @@ export function SourcesPage() {
     ]).catch(() => {}).finally(() => setSchemasLoading(false))
   }
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<'simple' | 'kanban' | 'table'>('simple')
+  const [view, setView] = useState<'queue' | 'simple' | 'kanban' | 'table'>(canManage ? 'simple' : 'queue')
   const [search, setSearch] = useState('')
   const [projectFilter, setProjectFilter] = useState(projectId ?? '')
   const [mineOnly, setMineOnly] = useState(false)
@@ -191,7 +192,7 @@ export function SourcesPage() {
           )}
           <h1 className="text-2xl font-bold text-gray-900">{isGlobal ? 'Sources' : 'Sources'}</h1>
           <p className="text-sm text-gray-500 mt-1">
-            {isGlobal ? 'Every dataset you have access to, in one place.' : `${sources.length} tracked dataset${sources.length !== 1 ? 's' : ''}`}
+            {isGlobal ? (canManage ? 'Every dataset you have access to, in one place.' : 'Your assigned sources, in the order to do them.') : `${sources.length} tracked dataset${sources.length !== 1 ? 's' : ''}`}
           </p>
         </div>
         {canManage && (
@@ -235,15 +236,15 @@ export function SourcesPage() {
       {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center bg-gray-100 rounded-xl p-1">
-          {(['simple', 'kanban', 'table'] as const).map(v => (
+          {((canManage ? ['simple', 'kanban', 'table'] : ['queue', 'simple', 'kanban', 'table']) as ('queue' | 'simple' | 'kanban' | 'table')[]).map(v => (
             <button
               key={v}
               onClick={() => setView(v)}
               className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition',
                 view === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}
             >
-              {v === 'simple' ? <Sparkles className="w-3.5 h-3.5" /> : v === 'kanban' ? <LayoutGrid className="w-3.5 h-3.5" /> : <TableIcon className="w-3.5 h-3.5" />}
-              {v === 'simple' ? 'Simple' : v === 'kanban' ? 'Full Kanban' : 'Table'}
+              {v === 'queue' ? <ListChecks className="w-3.5 h-3.5" /> : v === 'simple' ? <Sparkles className="w-3.5 h-3.5" /> : v === 'kanban' ? <LayoutGrid className="w-3.5 h-3.5" /> : <TableIcon className="w-3.5 h-3.5" />}
+              {v === 'queue' ? 'My queue' : v === 'simple' ? 'Simple' : v === 'kanban' ? 'Full Kanban' : 'Table'}
             </button>
           ))}
         </div>
@@ -284,6 +285,8 @@ export function SourcesPage() {
         ) : (
           <EmptyState title="No sources assigned yet" description="An admin will assign you to a source when there's data to extract or review." />
         )
+      ) : view === 'queue' ? (
+        <MyQueue sources={filtered} userId={user?.id} projectNames={isGlobal ? projectMap : undefined} />
       ) : view === 'simple' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {SIMPLE_STEPS.map(step => {
