@@ -936,7 +936,10 @@ async def export_xtrium_sources(
         item = xtrium_by_id.get(str(s.external_ref_id))
         row = [
             s.name, projects_by_id.get(s.project_id), s.external_ref_id,
-            "Live from Xtrium" if item else "Not returned by Xtrium (outside the latest 100 items, or no longer there)",
+            "Live from Xtrium" if item else (
+                f"Xtrium could not be reached ({str(xtrium_error)[:80]})" if xtrium_error
+                else "Not returned by Xtrium (outside the latest 100 items, or no longer there)"
+            ),
         ]
         row += [item.get(k) if item else None for k, _ in XTRIUM_COLS]
         row += [
@@ -1133,6 +1136,8 @@ async def _cached_get_items(status: str, limit: int, force: bool = False):
             raise XtriumClientError(f"Xtrium refused the last request ({failed[1]}); not retrying for a minute")
         try:
             items = await xtrium_client.get_items(status=status, limit=limit)
+            if status == "all" and isinstance(items, list):
+                items = await _merge_in_progress(items, limit)
         except Exception as e:
             _live_items_cache["_failed"] = (now, str(e)[:160])
             raise
@@ -1270,3 +1275,22 @@ async def sync_sources_from_xtrium(
         "skipped": sum(1 for r in results if r["state"] in ("not_in_xtrium_list", "not_found")),
         "results": results,
     }
+
+
+async def _merge_in_progress(items: list, limit: int) -> list:
+    """
+    Items we have claimed are "In Progress" on Xtrium and may not be among the
+    latest `limit` of "all". Add them, de-duplicated by id. A failure here never
+    breaks the main result.
+    """
+    try:
+        extra = await xtrium_client.get_items(status="In Progress", limit=limit)
+    except Exception:
+        return items
+    if not isinstance(extra, list):
+        return items
+    seen = {str(i.get("id")) for i in items if isinstance(i, dict)}
+    return items + [
+        i for i in extra
+        if isinstance(i, dict) and str(i.get("id")) not in seen
+    ]
