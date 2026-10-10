@@ -217,19 +217,29 @@ export function SourceDetailPage() {
   const [submittingToXtrium, setSubmittingToXtrium] = useState(false)
   const [checkingXtriumStatus, setCheckingXtriumStatus] = useState(false)
 
-  const handleSubmitToXtrium = async () => {
+  const handleSubmitToXtrium = async (confirmResubmit = false, confirmIncomplete = false): Promise<void> => {
     if (!sourceId) return
     setSubmittingToXtrium(true)
+    let retry: [boolean, boolean] | null = null
     try {
-      const result = await xtriumApi.submit(sourceId)
+      const result = await xtriumApi.submitWithConfirm(sourceId, confirmResubmit, confirmIncomplete)
       const bundleNote = result.bundled ? ` (${result.records_submitted} records bundled into one payload)` : ''
       toast.success(`Submitted to Xtrium Catalog IQ — item #${result.item_id} now "${result.item_status}"${bundleNote}`)
       load()
     } catch (err: any) {
-      toast.error(err?.response?.data?.detail || 'Submit to Xtrium failed')
+      const detail = err?.response?.data?.detail
+      if (err?.response?.status === 409) {
+        const incomplete = String(detail).startsWith('Incomplete')
+        if (window.confirm(incomplete ? String(detail) : `${detail}\n\nSubmit again anyway?`)) {
+          retry = incomplete ? [confirmResubmit, true] : [true, confirmIncomplete]
+        }
+      } else {
+        toast.error(detail || 'Submit to Xtrium failed')
+      }
     } finally {
       setSubmittingToXtrium(false)
     }
+    if (retry) await handleSubmitToXtrium(retry[0], retry[1])
   }
 
   const handleReportFailure = async () => {
@@ -942,7 +952,7 @@ export function SourceDetailPage() {
             </Link>
           )}
           {isFromXtrium && isAdmin && source.status === 'approved' && (
-            <Button size="sm" loading={submittingToXtrium} onClick={handleSubmitToXtrium}
+            <Button size="sm" loading={submittingToXtrium} onClick={() => handleSubmitToXtrium()}
               style={{ background: '#2563eb', border: 'none', color: '#fff' }}>
               <Zap className="w-3.5 h-3.5" /> Submit to Xtrium
             </Button>

@@ -395,8 +395,14 @@ export const xtriumApi = {
     api.get(`/integrations/xtrium/sources/${sourceId}/history`).then(r => r.data),
   verify: () =>
     api.post('/integrations/xtrium/verify', {}, { timeout: 120000 }).then(r => r.data),
-  submitWithConfirm: (sourceId: string, confirmResubmit = false) =>
-    api.post(`/integrations/xtrium/sources/${sourceId}/submit`, { notes: '', confirm_resubmit: confirmResubmit }).then(r => r.data),
+  submitWithConfirm: (sourceId: string, confirmResubmit = false, confirmIncomplete = false) =>
+    api.post(`/integrations/xtrium/sources/${sourceId}/submit`, {
+      notes: '', confirm_resubmit: confirmResubmit, confirm_incomplete: confirmIncomplete,
+    }).then(r => r.data),
+  checkRework: (sourceIds?: string[]) =>
+    api.post('/integrations/xtrium/check-rework', { source_ids: sourceIds ?? null }, { timeout: 120000 }).then(r => r.data),
+  submitReady: (sourceIds: string[]) =>
+    api.post('/integrations/xtrium/submit-ready', { source_ids: sourceIds }, { timeout: 120000 }).then(r => r.data),
   payloadPreview: (sourceId: string) =>
     api.get(`/integrations/xtrium/sources/${sourceId}/payload-preview`).then(r => r.data),
 }

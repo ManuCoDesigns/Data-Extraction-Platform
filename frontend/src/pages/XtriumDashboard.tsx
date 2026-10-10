@@ -758,11 +758,11 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound, onSync, 
     }
   }
 
-  const submit = async (confirmResubmit = false): Promise<void> => {
+  const submit = async (confirmResubmit = false, confirmIncomplete = false): Promise<void> => {
     setBusy('submit')
-    let retryConfirmed = false
+    let retry: [boolean, boolean] | null = null
     try {
-      const r = await xtriumApi.submitWithConfirm(source.id, confirmResubmit)
+      const r = await xtriumApi.submitWithConfirm(source.id, confirmResubmit, confirmIncomplete)
       onFound(source.id)
       const bundleNote = r?.bundled ? ` (${r.records_submitted} records bundled into one payload)` : ''
       toast.success(`Submitted to Xtrium Catalog IQ — item #${r?.item_id} now "${r?.item_status}"${bundleNote}`)
@@ -770,16 +770,19 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound, onSync, 
     } catch (err: any) {
       const status = err?.response?.status
       const detail = err?.response?.data?.detail
-      if (status === 409 && window.confirm(`${detail}\n\nSubmit again anyway?`)) {
-        retryConfirmed = true
-      } else if (status !== 409) {
+      if (status === 409) {
+        const incomplete = String(detail).startsWith('Incomplete')
+        if (window.confirm(incomplete ? String(detail) : `${detail}\n\nSubmit again anyway?`)) {
+          retry = incomplete ? [confirmResubmit, true] : [true, confirmIncomplete]
+        }
+      } else {
         reportError(err, 'Submit to Xtrium failed')
       }
     } finally {
       setBusy(null)
     }
     // Retried outside try/finally so the busy state isn't clobbered.
-    if (retryConfirmed) await submit(true)
+    if (retry) await submit(retry[0], retry[1])
   }
 
   const togglePreview = async () => {
@@ -1054,6 +1057,23 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound, onSync, 
                           <Copy className="w-3.5 h-3.5" /> Copy
                         </button>
                       </div>
+                      {preview.checks?.checked && (
+                        <div className={cn('rounded-xl border px-4 py-3 mb-3 text-xs',
+                          preview.checks.ok ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : 'bg-red-50 border-red-200 text-red-800')}>
+                          <p className="font-bold m-0">
+                            {preview.checks.ok ? 'Has every field the SOP requires' : 'Missing fields the SOP requires'}
+                            {preview.checks.sop_code ? ` · ${preview.checks.sop_code}` : ''}
+                          </p>
+                          {(preview.checks.issues ?? []).map((x: any) => (
+                            <p key={x.record} className="m-0 mt-1">
+                              {preview.bundled ? `Record ${x.record}: ` : ''}
+                              {x.missing.length > 0 && <>missing <b>{x.missing.join(', ')}</b></>}
+                              {x.missing.length > 0 && x.unknown.length > 0 && ' · '}
+                              {x.unknown.length > 0 && <span className="opacity-80">not in the SOP template: {x.unknown.join(', ')}</span>}
+                            </p>
+                          ))}
+                        </div>
+                      )}
                       <pre className="bg-gray-50 border border-gray-100 rounded-xl p-4 text-xs text-gray-700 overflow-auto m-0"
                         style={{ maxHeight: 360 }}>{payloadText}</pre>
                       <p className="text-[11px] text-gray-400 mt-2.5 m-0">
@@ -1092,6 +1112,8 @@ export function XtriumDashboardPage() {
   const [verifying, setVerifying] = useState(false)
   const [verifyInfo, setVerifyInfo] = useState<Record<string, any>>({})
   const [verifySummary, setVerifySummary] = useState<any>(null)
+  const [reworkBusy, setReworkBusy] = useState(false)
+  const [bulkSubmitting, setBulkSubmitting] = useState(false)
   // "Export for Xtrium": which project to export ('' = all) and in-flight flag.
   const [exportProject, setExportProject] = useState('')
   const [exporting, setExporting] = useState(false)
@@ -1281,6 +1303,48 @@ export function XtriumDashboardPage() {
     }
   }
 
+  const runCheckRework = async () => {
+    setReworkBusy(true)
+    try {
+      const r = await xtriumApi.checkRework()
+      if (r?.checked === 0) toast.success('Nothing submitted is waiting on Xtrium')
+      else if (r?.rework_applied > 0) toast.success(`Xtrium asked for rework on ${r.rework_applied} source${r.rework_applied !== 1 ? 's' : ''} — sent back to the extractors`)
+      else toast.success(`Checked ${r?.checked} submitted source${r?.checked !== 1 ? 's' : ''} — no rework requested`)
+      if (r?.stopped) toast.error(r.stopped)
+      else if (r?.errors > 0) toast.error(`${r.errors} couldn't be checked`)
+      await load({ silent: true })
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Couldn't check for rework — try again")
+    } finally {
+      setReworkBusy(false)
+    }
+  }
+
+  const runSubmitReady = async () => {
+    const ready = sources.filter(isReady).slice(0, 10)
+    if (ready.length === 0) return
+    const more = sources.filter(isReady).length - ready.length
+    if (!window.confirm(
+      `Submit ${ready.length} approved source${ready.length !== 1 ? 's' : ''} to Xtrium now?\n\n` +
+      ready.map(x => `• #${x.external_ref_id} ${x.name}`).join('\n') +
+      (more > 0 ? `\n\n${more} more will wait for the next round.` : '') +
+      `\n\nSources missing fields the SOP requires are skipped.`,
+    )) return
+    setBulkSubmitting(true)
+    try {
+      const r = await xtriumApi.submitReady(ready.map(x => x.id))
+      if (r?.submitted > 0) toast.success(`Submitted ${r.submitted} to Xtrium`)
+      const skipped = (r?.results ?? []).filter((x: any) => x.state === 'skipped' || x.state === 'error')
+      if (skipped.length > 0) toast.error(`${skipped.length} not sent — ${skipped[0].name}: ${skipped[0].reason}`)
+      if (r?.stopped) toast.error(r.stopped)
+      await load({ silent: true })
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Bulk submit failed — try again')
+    } finally {
+      setBulkSubmitting(false)
+    }
+  }
+
   const copyLapsedList = async () => {
     if (!verifySummary) return
     const lines = verifySummary.lapsed.map((l: any) => `• #${l.ref} — ${l.name}`).join('\n')
@@ -1349,6 +1413,20 @@ export function XtriumDashboardPage() {
             <CheckCircle className={cn('w-3.5 h-3.5', verifying && 'animate-pulse')} />
             {verifying ? 'Verifying…' : 'Verify with Xtrium'}
           </button>
+          <button onClick={runCheckRework} disabled={reworkBusy}
+            title="Asks Xtrium whether any submitted item was sent back for rework, and returns those to the extractors."
+            className="flex items-center gap-2 text-xs font-semibold text-gray-700 px-3 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 transition">
+            <RefreshCw className={cn('w-3.5 h-3.5', reworkBusy && 'animate-spin')} />
+            {reworkBusy ? 'Checking…' : 'Check for rework'}
+          </button>
+          {readyCount > 0 && (
+            <button onClick={runSubmitReady} disabled={bulkSubmitting}
+              title="Sends up to 10 approved sources to Xtrium, one at a time. Sources missing SOP-required fields are skipped."
+              className="flex items-center gap-2 text-xs font-semibold text-white px-3 py-2 rounded-lg bg-gradient-to-br from-brand-500 to-brand-700 hover:opacity-95 disabled:opacity-50 transition">
+              <Send className={cn('w-3.5 h-3.5', bulkSubmitting && 'animate-pulse')} />
+              {bulkSubmitting ? 'Submitting…' : `Submit ${Math.min(readyCount, 10)} ready`}
+            </button>
+          )}
           <button onClick={() => load({ silent: true })} disabled={refreshing}
             className="flex items-center gap-2 text-xs font-semibold text-gray-500 hover:text-gray-700 px-3 py-2 rounded-lg hover:bg-gray-50 transition">
             <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} /> Refresh

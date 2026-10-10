@@ -49,6 +49,75 @@ def _require_admin(current_user: User):
         raise HTTPException(status_code=403, detail="Only admins can manage the Xtrium integration")
 
 
+def _parse_template(value):
+    """deliverable_template may arrive as a dict or as a JSON / Python-literal string."""
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        import json as _json, ast as _ast
+        for loader in (_json.loads, _ast.literal_eval):
+            try:
+                out = loader(value)
+                if isinstance(out, dict):
+                    return out
+            except Exception:
+                continue
+    return None
+
+
+def _sop_requirements(source) -> dict:
+    """What the saved Xtrium SOP says a deliverable must contain (empty if no SOP is saved)."""
+    saved = source.xtrium_sop if isinstance(getattr(source, "xtrium_sop", None), dict) else {}
+    sop = saved.get("sop") if isinstance(saved.get("sop"), dict) else {}
+    meta = saved.get("meta") if isinstance(saved.get("meta"), dict) else {}
+    required = sop.get("required_fields") or meta.get("required_fields") or []
+    required = [f for f in required if isinstance(f, str) and f.strip()]
+    template = _parse_template(sop.get("deliverable_template"))
+    derived = [f for f in (sop.get("derived_fields") or []) if isinstance(f, str)]
+    return {
+        "known": bool(sop or meta),
+        "sop_code": sop.get("sop_code") or meta.get("sop_code"),
+        "required": required,
+        "allowed": (set(template) | set(derived) | set(required)) if template else None,
+    }
+
+
+def _is_blank(v) -> bool:
+    return v is None or (isinstance(v, str) and not v.strip()) or (isinstance(v, (list, dict)) and not v)
+
+
+def _check_payload(source, payload) -> dict:
+    """
+    Compares what Submit would send with the SOP. Missing required fields are
+    blocking (needs an explicit confirm); keys the SOP doesn't list are only noted.
+    """
+    req = _sop_requirements(source)
+    if not req["known"] or not req["required"]:
+        return {
+            "checked": False, "ok": True, "sop_code": req["sop_code"], "required": [],
+            "issues": [], "message": "No SOP is saved for this source, so the payload couldn't be checked.",
+        }
+    records = payload["records"] if isinstance(payload, dict) and len(payload) == 1 and isinstance(payload.get("records"), list) else [payload]
+    issues = []
+    for i, rec in enumerate(records, start=1):
+        if not isinstance(rec, dict):
+            continue
+        missing = [f for f in req["required"] if _is_blank(rec.get(f))]
+        unknown = sorted(k for k in rec if req["allowed"] is not None and k not in req["allowed"] and not k.startswith("_"))
+        if missing or unknown:
+            issues.append({"record": i, "missing": missing, "unknown": unknown})
+    return {
+        "checked": True, "ok": not any(x["missing"] for x in issues), "sop_code": req["sop_code"],
+        "required": req["required"], "issues": issues, "message": None,
+    }
+
+
+def _incomplete_message(check: dict) -> str:
+    parts = [f"record {x['record']}: {', '.join(x['missing'])}" for x in check["issues"] if x["missing"]]
+    return ("Incomplete against the SOP — required fields are empty (" + "; ".join(parts) + "). "
+            "Xtrium may send this back.")
+
+
 def _create_sources_from_xtrium_items(items: list[dict], project_id: str, current_user: User, db: Session) -> dict:
     """
     Shared by both pull_xtrium_batch (fetched live from Xtrium) and
@@ -98,6 +167,9 @@ def _create_sources_from_xtrium_items(items: list[dict], project_id: str, curren
             external_ref_id=item_id,
             external_synced_at=datetime.now(timezone.utc),
         )
+        if _usable_sop(item.get("sop")):
+            source.xtrium_sop = {"sop": item["sop"], "meta": _sop_meta(item),
+                                 "saved_at": datetime.now(timezone.utc).isoformat()}
         db.add(source)
         db.flush()
         db.add(AuditLog(
@@ -186,6 +258,7 @@ def import_xtrium_items(
 class SubmitToXtriumRequest(BaseModel):
     notes: str = ""
     confirm_resubmit: bool = False
+    confirm_incomplete: bool = False
 
 
 @router.post("/sources/{source_id}/submit")
@@ -256,6 +329,10 @@ async def submit_source_to_xtrium(
     else:
         raw_payload = _clean(approved_records[0])
 
+    check = _check_payload(source, raw_payload)
+    if not check["ok"] and not payload.confirm_incomplete:
+        raise HTTPException(status_code=409, detail=_incomplete_message(check) + " Send anyway?")
+
     # Records that are not approved (an admin can approve a source with some
     # still pending) are NOT included, so log how many were left out.
     not_approved = db.query(ExtractedRecord).filter(
@@ -281,10 +358,8 @@ async def submit_source_to_xtrium(
             "bundled": len(approved_records) > 1,
         },
     ))
-    db.commit()
-
     source.xtrium_submitted_at = datetime.now(timezone.utc)
-    db.commit()  # persist the submit time (it used to be set after the commit and was lost)
+    db.commit()  # audit log + submit time are saved together
     return {**result, "records_submitted": len(approved_records), "bundled": len(approved_records) > 1}
 
 
@@ -358,59 +433,7 @@ async def check_source_xtrium_status(
     except XtriumClientError as e:
         raise HTTPException(status_code=502, detail=str(e))
 
-    rework_notes = result.get("rework_notes")
-    applied_rework = False
-    xtrium_status = result.get("status")
-
-    if xtrium_status == "Rejected":
-        # Terminal state per their status lifecycle guide — no further
-        # action expected on either side. Just record it so it's visible
-        # in this source's own activity history.
-        db.add(AuditLog(
-            user_id=current_user.id, project_id=source.project_id, source_id=source.id,
-            action=AuditAction.SOURCE_STATUS_CHANGED,
-            after_value={
-                "stage": "xtrium_rejected", "origin": "xtrium_catalog_iq",
-                "reason": result.get("failure_reason") or result.get("notes") or "",
-            },
-        ))
-
-    elif xtrium_status == "Queued" and rework_notes:
-        job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()]
-        record = (
-            db.query(ExtractedRecord)
-            .filter(ExtractedRecord.job_id.in_(job_ids), ExtractedRecord.review_status == ReviewStatus.APPROVED)
-            .first()
-        ) if job_ids else None
-
-        if record:
-            existing_comments = record.reviewer_field_comments or {}
-            already_applied = any(
-                e.get("comment") == rework_notes
-                for e in existing_comments.get("_general", [])
-            )
-            if not already_applied:
-                now = datetime.now(timezone.utc)
-                fc = copy.deepcopy(record.reviewer_field_comments or {})
-                fc.setdefault("_general", []).append({
-                    "comment": rework_notes, "user": "xtrium_catalog_iq",
-                    "role": "admin", "type": "rejection", "ts": now.isoformat(),
-                })
-                record.reviewer_field_comments = fc
-                flag_modified(record, "reviewer_field_comments")
-                record.review_status = ReviewStatus.PENDING
-                record.correction_count = (record.correction_count or 0) + 1
-
-                source.status = SourceStatus.CHANGES_REQUESTED
-
-                db.add(AuditLog(
-                    user_id=current_user.id, project_id=source.project_id,
-                    source_id=source.id, record_id=record.id,
-                    action=AuditAction.RECORD_RETURNED_FOR_CORRECTION,
-                    after_value={"note": rework_notes, "origin": "xtrium_catalog_iq", "correction_count": record.correction_count},
-                ))
-                applied_rework = True
-
+    applied_rework = _apply_rework(db, source, result, current_user)
     source.external_synced_at = datetime.now(timezone.utc)
     db.commit()
 
@@ -704,6 +727,7 @@ async def preview_submit_payload(
         "bundled": len(approved_records) > 1,
         "not_approved_excluded": not_approved,
         "payload": payload,
+        "checks": _check_payload(source, payload) if payload is not None else None,
     }
 
 
@@ -1394,7 +1418,7 @@ async def source_sop(
 
     # The list view may omit the SOP body; fall back to the item's own SOP URL
     # once, only when we have nothing saved (keeps calls to Xtrium low).
-    if item and not _usable_sop(sop) and not (saved and _usable_sop(saved.get("sop"))):
+    if (item or not live_error) and not _usable_sop(sop) and not (saved and _usable_sop(saved.get("sop"))):
         try:
             r = await xtrium_client._request(
                 "GET", f"/api/careerflow/batch/{source.external_ref_id}/sop",
@@ -1402,6 +1426,9 @@ async def source_sop(
             )
             if r.status_code == 200 and isinstance(r.json(), dict):
                 sop = r.json()
+                if meta is None:
+                    meta = {"sop_code": sop.get("sop_code"), "sop_id": sop.get("sop_id"),
+                            "target_entity": sop.get("entity"), "required_fields": sop.get("required_fields")}
         except Exception as e:
             live_error = live_error or str(e)
 
@@ -1506,3 +1533,189 @@ def clear_pulled_sources(
 
     db.commit()
     return {"cleared": len(cleared), "skipped": skipped, "items": cleared}
+
+
+# ─── Rework + bulk operations (added) ────────────────────────────────────────
+
+def _apply_rework(db: Session, source, result: dict, current_user: User) -> bool:
+    """
+    Applies Xtrium's verdict for one source. A "Queued" item with rework_notes sends
+    EVERY approved record back to Pending (a bundled submission is one item, so the whole
+    thing is redone). Idempotent: a note already recorded on a record is never re-applied.
+    A "Rejected" item is logged once.
+    """
+    status = result.get("status")
+    notes = result.get("rework_notes")
+    if status == "Rejected":
+        already = any(
+            isinstance(l.after_value, dict) and l.after_value.get("stage") == "xtrium_rejected"
+            for l in db.query(AuditLog).filter(AuditLog.source_id == source.id).all()
+        )
+        if not already:
+            db.add(AuditLog(
+                user_id=current_user.id, project_id=source.project_id, source_id=source.id,
+                action=AuditAction.SOURCE_STATUS_CHANGED,
+                after_value={"stage": "xtrium_rejected", "origin": "xtrium_catalog_iq",
+                             "reason": result.get("failure_reason") or result.get("notes") or ""},
+            ))
+        return False
+    if not (status == "Queued" and notes):
+        return False
+    job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == source.id).all()]
+    records = (
+        db.query(ExtractedRecord)
+        .filter(ExtractedRecord.job_id.in_(job_ids), ExtractedRecord.review_status == ReviewStatus.APPROVED)
+        .all()
+    ) if job_ids else []
+    applied = False
+    for record in records:
+        existing = record.reviewer_field_comments or {}
+        if any(e.get("comment") == notes for e in existing.get("_general", [])):
+            continue
+        fc = copy.deepcopy(existing)
+        fc.setdefault("_general", []).append({
+            "comment": notes, "user": "xtrium_catalog_iq", "role": "admin",
+            "type": "rejection", "ts": datetime.now(timezone.utc).isoformat(),
+        })
+        record.reviewer_field_comments = fc
+        flag_modified(record, "reviewer_field_comments")
+        record.review_status = ReviewStatus.PENDING
+        record.correction_count = (record.correction_count or 0) + 1
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id, source_id=source.id, record_id=record.id,
+            action=AuditAction.RECORD_RETURNED_FOR_CORRECTION,
+            after_value={"note": notes, "origin": "xtrium_catalog_iq", "correction_count": record.correction_count},
+        ))
+        applied = True
+    if applied:
+        source.status = SourceStatus.CHANGES_REQUESTED
+    return applied
+
+
+class CheckReworkRequest(BaseModel):
+    source_ids: list[str] | None = None
+
+
+@router.post("/check-rework")
+async def check_rework_bulk(
+    payload: CheckReworkRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Asks Xtrium about already-submitted sources (or the chosen ones) and applies any rework
+    request, one at a time with a short pause so Xtrium's rate limit isn't tripped. Stops at
+    the first refusal (403/429) and reports how far it got.
+    """
+    _require_admin(current_user)
+    q = db.query(Source).filter(Source.external_ref_id != None)
+    if payload.source_ids:
+        q = q.filter(Source.id.in_(list(dict.fromkeys(payload.source_ids))[:100]))
+    else:
+        q = q.filter(Source.xtrium_submitted_at != None, Source.status == SourceStatus.APPROVED)
+    targets = q.order_by(Source.xtrium_submitted_at.asc().nullsfirst()).limit(50).all()
+
+    results, stopped = [], None
+    for idx, s in enumerate(targets):
+        if idx:
+            await _asyncio.sleep(0.6)
+        try:
+            r = await xtrium_client.get_item_status(item_id=s.external_ref_id)
+        except XtriumClientError as e:
+            msg = str(e)
+            results.append({"source_id": s.id, "name": s.name, "state": "error", "detail": msg[:200]})
+            if " 403" in msg or "403 " in msg or " 429" in msg or "429 " in msg:
+                stopped = "Xtrium refused a request (rate limit). Stopped — try again in a few minutes."
+                break
+            continue
+        applied = _apply_rework(db, s, r, current_user)
+        s.external_synced_at = datetime.now(timezone.utc)
+        db.commit()
+        results.append({
+            "source_id": s.id, "name": s.name, "state": "rework" if applied else "ok",
+            "xtrium_status": r.get("status"),
+        })
+    return {
+        "checked": len(results),
+        "rework_applied": sum(1 for r in results if r["state"] == "rework"),
+        "errors": sum(1 for r in results if r["state"] == "error"),
+        "stopped": stopped,
+        "results": results,
+    }
+
+
+class SubmitReadyRequest(BaseModel):
+    source_ids: list[str]
+
+
+@router.post("/submit-ready")
+async def submit_ready_bulk(
+    payload: SubmitReadyRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Submits up to 10 fully approved, never-submitted sources, one at a time, 3 seconds apart.
+    Anything already submitted, not approved, or incomplete against its SOP is skipped (never
+    forced) — those still go through the single Submit, which asks for confirmation. Stops at
+    the first Xtrium refusal.
+    """
+    _require_admin(current_user)
+    ids = list(dict.fromkeys(payload.source_ids))[:10]
+    if not ids:
+        raise HTTPException(status_code=422, detail="No sources selected")
+    results, stopped = [], None
+    sent_any = False
+    for sid in ids:
+        s = db.query(Source).filter(Source.id == sid).first()
+        if not s:
+            results.append({"source_id": sid, "state": "skipped", "reason": "Source not found"})
+            continue
+        row = {"source_id": s.id, "name": s.name}
+        if not s.external_ref_id:
+            results.append({**row, "state": "skipped", "reason": "Not pulled from Xtrium"}); continue
+        if s.status != SourceStatus.APPROVED:
+            results.append({**row, "state": "skipped", "reason": f"Not approved yet ({s.status.value})"}); continue
+        if s.xtrium_submitted_at:
+            results.append({**row, "state": "skipped", "reason": "Already submitted"}); continue
+        job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == s.id).all()]
+        approved = db.query(ExtractedRecord).filter(
+            ExtractedRecord.job_id.in_(job_ids), ExtractedRecord.review_status == ReviewStatus.APPROVED,
+        ).order_by(ExtractedRecord.created_at).all() if job_ids else []
+        if not approved:
+            results.append({**row, "state": "skipped", "reason": "No approved records"}); continue
+        clean = [{k: v for k, v in (r.extracted_fields or {}).items() if not k.startswith("_")} for r in approved]
+        body = {"records": clean} if len(clean) > 1 else clean[0]
+        check = _check_payload(s, body)
+        if not check["ok"]:
+            results.append({**row, "state": "skipped", "reason": _incomplete_message(check)}); continue
+        if sent_any:
+            await _asyncio.sleep(3)
+        try:
+            result = await xtrium_client.submit_item(item_id=s.external_ref_id, raw_payload=body, notes="")
+        except XtriumClientError as e:
+            msg = str(e)
+            results.append({**row, "state": "error", "reason": msg[:200]})
+            if " 403" in msg or " 429" in msg:
+                stopped = "Xtrium refused a request (rate limit). Stopped — try again in a few minutes."
+                break
+            continue
+        sent_any = True
+        now = datetime.now(timezone.utc)
+        s.external_synced_at = now
+        s.xtrium_submitted_at = now
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=s.project_id, source_id=s.id,
+            action=AuditAction.SOURCE_STATUS_CHANGED,
+            after_value={"stage": "xtrium_submit", "response": result, "records_submitted": len(approved),
+                         "bundled": len(approved) > 1, "bulk": True},
+        ))
+        db.commit()
+        results.append({**row, "state": "submitted", "item_status": result.get("item_status") if isinstance(result, dict) else None})
+    return {
+        "submitted": sum(1 for r in results if r["state"] == "submitted"),
+        "skipped": sum(1 for r in results if r["state"] == "skipped"),
+        "errors": sum(1 for r in results if r["state"] == "error"),
+        "stopped": stopped,
+        "results": results,
+    }
