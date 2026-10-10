@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import math
 from app.db.session import get_db
 from app.core.security import get_current_user
+from app.core.source_access import assert_can_view_job, can_view_job, is_org_admin
 from app.models.all_models import (
     ExtractedRecord, ReviewStatus, User, AuditLog, AuditAction,
     ExtractionJob
@@ -11,6 +12,14 @@ from app.models.all_models import (
 from app.schemas.api_schemas import RecordOut, RecordReviewAction, RecordBulkAction, PaginatedResponse
 
 router = APIRouter(prefix="/records", tags=["records"])
+
+
+def _record_visible(r, user, db) -> bool:
+    """A record is visible with its job (and so with its source)."""
+    if is_org_admin(user):
+        return True
+    job = db.query(ExtractionJob).filter(ExtractionJob.id == r.job_id).first()
+    return bool(job) and can_view_job(user, job, db)
 
 
 def _serialize(r: ExtractedRecord) -> RecordOut:
@@ -50,6 +59,9 @@ def list_records(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    _job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).first()
+    if _job is not None:
+        assert_can_view_job(current_user, _job, db)
     q = db.query(ExtractedRecord).filter(ExtractedRecord.job_id == job_id)
     if review_status:
         try:
@@ -75,6 +87,8 @@ def get_record(record_id: str, db: Session = Depends(get_db), current_user: User
     r = db.query(ExtractedRecord).filter(ExtractedRecord.id == record_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Record not found")
+    if not _record_visible(r, current_user, db):
+        raise HTTPException(status_code=403, detail="This item isn't assigned to you.")
     return _serialize(r)
 
 
@@ -88,6 +102,8 @@ def review_record(
     r = db.query(ExtractedRecord).filter(ExtractedRecord.id == record_id).first()
     if not r:
         raise HTTPException(status_code=404, detail="Record not found")
+    if not _record_visible(r, current_user, db):
+        raise HTTPException(status_code=403, detail="This item isn't assigned to you.")
     if r.is_submitted:
         raise HTTPException(status_code=409, detail="Record already submitted — cannot modify")
 
@@ -165,6 +181,8 @@ def bulk_review(
         ExtractedRecord.id.in_(payload.record_ids),
         ExtractedRecord.is_submitted == False,
     ).all()
+
+    records = [r for r in records if _record_visible(r, current_user, db)]
 
     now = datetime.now(timezone.utc)
     updated = 0

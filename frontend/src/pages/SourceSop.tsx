@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { ArrowLeft, Globe, Printer, RefreshCw } from 'lucide-react'
+import { ArrowLeft, Globe, RefreshCw } from 'lucide-react'
 import { xtriumApi } from '@/api/client'
 import { SopViewer } from '@/components/SopViewer'
 
@@ -52,12 +52,6 @@ export function SourceSopPage() {
             )}
           </p>
         </div>
-        {data?.sop && (
-          <button onClick={() => window.print()}
-            className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 px-3 py-2 rounded-lg border border-gray-200 bg-white hover:bg-gray-50">
-            <Printer className="w-3.5 h-3.5" /> Print
-          </button>
-        )}
       </div>
 
       {loading && <p className="text-sm text-gray-400 m-0">Loading the SOP…</p>}

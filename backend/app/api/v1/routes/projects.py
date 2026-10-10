@@ -4,6 +4,7 @@ import math
 import re
 from app.db.session import get_db
 from app.core.security import get_current_user, require_roles
+from app.core.source_access import assert_project_export_access
 from app.models.all_models import (
     Project, ProjectMember, UserRole, User, AuditLog, AuditAction, ProjectStatus,
     Source, SourceStatus,
@@ -229,6 +230,7 @@ def export_preview(
     Returns approved records for preview in the UI before downloading.
     Groups records by source so the user can browse them.
     """
+    assert_project_export_access(current_user, project_id, db)
     from app.models.all_models import Source, ExtractionJob, ExtractedRecord, ReviewStatus, SourceStatus
 
     project = db.query(Project).filter(Project.id == project_id).first()
@@ -287,6 +289,7 @@ def export_debug(
     Debug endpoint — returns JSON showing exactly what the export query finds.
     Use this to verify data exists before trying to download the ZIP.
     """
+    assert_project_export_access(current_user, project_id, db)
     from app.models.all_models import Source, ExtractionJob, ExtractedRecord, ReviewStatus, SourceStatus
     project = db.query(Project).filter(Project.id == project_id).first()
     if not project:
@@ -337,6 +340,7 @@ def export_project(
       Records link to sources through ExtractionJob (not directly).
       Path: Source → ExtractionJob.source_id → ExtractedRecord.job_id
     """
+    assert_project_export_access(current_user, project_id, db)
     import io, zipfile, json as _json
     from datetime import datetime, timezone
     from fastapi.responses import StreamingResponse
@@ -488,6 +492,7 @@ def export_project_package(
 
     This is the single ZIP the client downloads to get everything at once.
     """
+    assert_project_export_access(current_user, project_id, db)
     import io, zipfile, json as _json
     from datetime import datetime, timezone
     from fastapi.responses import StreamingResponse

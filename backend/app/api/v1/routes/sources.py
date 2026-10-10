@@ -25,6 +25,7 @@ import pandas as pd
 
 from app.db.session import get_db
 from app.core.security import get_current_user
+from app.core.source_access import assert_can_view_source, restrict_sources_query
 from app.models.all_models import (
     Source, SourceStatus, Project, ProjectMember, User, Schema, SchemaVersion,
     ExtractionJob, ExtractedRecord, JobStatus, SourceType as FileSourceType,
@@ -275,10 +276,13 @@ def _serialize_record(r: ExtractedRecord) -> RecordOut:
     )
 
 
-def _get_source_or_404(source_id: str, db: Session) -> Source:
+def _get_source_or_404(source_id: str, db: Session, user: User | None = None) -> Source:
     source = db.query(Source).filter(Source.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
+    if user is not None:
+        # extractors/reviewers may only open the sources assigned to them
+        assert_can_view_source(user, source, db)
     return source
 
 
@@ -381,6 +385,8 @@ def list_sources(
         except ValueError:
             pass
 
+    q = restrict_sources_query(q, current_user, db)
+
     if assigned_to_me:
         q = q.filter(
             (Source.assigned_extractor_id == current_user.id) | (Source.assigned_reviewer_id == current_user.id)
@@ -446,6 +452,7 @@ def team_workload(
     had it, and where it's stuck. Powers the Team Workload page.
     """
     q = db.query(Source).filter(Source.status != SourceStatus.APPROVED)
+    q = restrict_sources_query(q, current_user, db)
     if project_id:
         q = q.filter(Source.project_id == project_id)
     sources = q.order_by(Source.updated_at.desc()).all()
@@ -585,10 +592,9 @@ def list_escalations(
 
     if project_id:
         q = q.filter(Source.project_id == project_id)
-    if mine_only and not is_admin:
+    if mine_only:
         q = q.filter(Source.assigned_extractor_id == current_user.id)
-    elif mine_only:
-        q = q.filter(Source.assigned_extractor_id == current_user.id)
+    q = restrict_sources_query(q, current_user, db)
 
     records = q.order_by(ExtractedRecord.updated_at.desc()).all()
 
@@ -656,7 +662,7 @@ def list_escalations(
 
 @router.get("/{source_id}", response_model=SourceOut)
 def get_source(source_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _can_access(current_user, source.project):
         raise HTTPException(status_code=403, detail="Access denied")
     _recompute_counts(source, db)
@@ -669,7 +675,7 @@ def update_source(
     source_id: str, payload: SourceUpdate,
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _can_manage_source(current_user, source):
         raise HTTPException(status_code=403, detail="Only project admins can edit sources")
 
@@ -741,7 +747,7 @@ async def upload_to_source(
       every record it can find. Runs synchronously — no Celery needed.
       Takes 10–30 seconds depending on document size.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
 
@@ -1010,7 +1016,7 @@ async def upload_multi_to_source(
     This is what stops a folder upload from silently ingesting an unrelated
     file (an index, a stray note, an old backup) as bogus data.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
 
@@ -1417,7 +1423,7 @@ def list_source_records(
     page: int = Query(1, ge=1), page_size: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
 
     user_roles = {r.role.value for r in current_user.roles}
     if "org_admin" not in user_roles:
@@ -1460,7 +1466,7 @@ def fix_record(
     source_id: str, record_id: str, payload: SourceRecordFix,
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can fix records")
 
@@ -1505,7 +1511,7 @@ def review_source_record(
     source_id: str, record_id: str, payload: SourceRecordReview,
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
 
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can review records")
@@ -1594,7 +1600,7 @@ def admin_review_record(
       action = "approve" -> record becomes fully APPROVED (delivered)
       action = "return"  -> record goes back to PENDING, correction_count += 1
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     user_roles = {r.role.value for r in current_user.roles}
     if "org_admin" not in user_roles and "project_admin" not in user_roles and "qa_lead" not in user_roles:
         raise HTTPException(status_code=403, detail="Only admins can do the final review")
@@ -1663,7 +1669,7 @@ def record_timeline(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     """Full audit history for a record, with time-between-steps calculated."""
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     record = (
         db.query(ExtractedRecord)
         .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
@@ -1713,7 +1719,7 @@ def approve_source(
     source_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     """Mark a source as fully approved. Warns if pending records remain but allows admins to override."""
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
 
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can approve a source")
@@ -1775,7 +1781,7 @@ def list_uploaded_files(
     its path and size, independent of what was parsed into records. This
     is the literal folder/ZIP contents as uploaded, not the extracted data.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _can_access(current_user, source.project):
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -1843,7 +1849,7 @@ def get_uploaded_file_content(
     returns a clear "can't preview this" response instead of garbled bytes,
     with Download Original as the fallback.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _can_access(current_user, source.project):
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -1900,7 +1906,7 @@ def review_uploaded_file(
     record review, for files that never become ExtractedRecords and so
     previously had no review step of their own at all.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can review files")
 
@@ -1940,7 +1946,7 @@ def download_uploaded_files(
     the same way downloading a ZIP from Google Drive returns exactly what
     was put in it.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _can_access(current_user, source.project):
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -1986,7 +1992,7 @@ def download_uploaded_files(
 
 @router.get("/{source_id}/export")
 def export_source(source_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_reviewer(current_user, source) and not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Access denied")
     if source.status != SourceStatus.APPROVED:
@@ -2090,6 +2096,7 @@ def export_timesheet(
     q = db.query(Source)
     if project_id:
         q = q.filter(Source.project_id == project_id)
+    q = restrict_sources_query(q, current_user, db)
     sources = q.order_by(Source.created_at.asc()).all()
 
     if not sources:
@@ -2398,7 +2405,7 @@ def delete_source_record(
     db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
 ):
     """Delete a single record from a source. Extractor or admin only."""
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor or admin can delete records")
     record = db.query(ExtractedRecord).join(ExtractionJob).filter(
@@ -2428,7 +2435,7 @@ async def scrape_source_website(
     This is the 'auto-scrape' capability — point the source at a URL and let
     Claude pull the structured records directly.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor or admin can scrape this source")
 
@@ -2535,7 +2542,7 @@ async def llm_verify_source(
       4. Stores per-record web_check_flags with specific field issues and suggested corrections
       5. Returns a summary of what passed, what was flagged, and what to fix
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -2732,7 +2739,7 @@ def get_source_schema(
     Returns the full schema definition for this source — used by the review UI
     to show field descriptions, types, and allowed values alongside each record.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     if not _can_access(current_user, source.project):
         raise HTTPException(status_code=403, detail="Access denied")
 
@@ -2785,7 +2792,7 @@ def reset_source(
     to make the clock look like it started fresh. The reset itself is
     logged with a reason so it's fully visible in the report.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
 
     user_roles = {r.role.value for r in current_user.roles}
     if "org_admin" not in user_roles:
@@ -2850,7 +2857,7 @@ def clear_source_records(
     Admin-only: Delete ALL records from a source without changing its status.
     Use this to wipe test data before a real extraction run.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
 
     if not _can_manage_source(current_user, source):
         raise HTTPException(status_code=403, detail="Only admins can clear records")
@@ -2896,7 +2903,7 @@ def unlock_source_records(
     corrected and re-submitted. Resets is_submitted, submitted_at, and
     moves the source status back to in_review.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
 
     if not _can_manage_source(current_user, source):
         raise HTTPException(status_code=403, detail="Only admins can unlock submitted records")
@@ -2953,6 +2960,7 @@ def dismiss_flag(
     The flag is removed permanently from the record — use when the LLM flagged
     something that is actually correct.
     """
+    _get_source_or_404(source_id, db, current_user)
     record = db.query(ExtractedRecord).join(
         ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id
     ).filter(
@@ -2997,7 +3005,7 @@ def escalate_no_data(
     sends it to Escalations automatically via the existing mechanism,
     same as any other returned-for-correction record.
     """
-    source = _get_source_or_404(source_id, db)
+    source = _get_source_or_404(source_id, db, current_user)
     user_roles = {r.role.value for r in current_user.roles}
     is_admin = "org_admin" in user_roles or "project_admin" in user_roles
     if not is_admin and source.assigned_extractor_id != current_user.id:

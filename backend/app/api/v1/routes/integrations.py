@@ -209,6 +209,7 @@ async def submit_source_to_xtrium(
     just carrying every record inside it. No flag or extra step needed;
     this is the only behaviour, so Submit stays genuinely one-click.
     """
+    _require_admin(current_user)
     source = db.query(Source).filter(Source.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -302,6 +303,7 @@ async def report_source_failure(
     current_user: User = Depends(get_current_user),
 ):
     """Reports that a link couldn't be scraped — 404, anti-bot, paywall, etc."""
+    _require_admin(current_user)
     source = db.query(Source).filter(Source.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -344,6 +346,7 @@ async def check_source_xtrium_status(
     Safe to call repeatedly — the same rework note is never applied twice
     (checked against the record's existing feedback history).
     """
+    _require_admin(current_user)
     source = db.query(Source).filter(Source.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
@@ -1359,17 +1362,12 @@ async def source_sop(
     the project (or the source's assigned extractor/reviewer). Uses Xtrium's live
     copy when available and saves it; otherwise serves the last saved copy.
     """
-    from app.api.v1.routes.sources import _can_access
+    from app.core.source_access import assert_can_view_source
 
     source = db.query(Source).filter(Source.id == source_id).first()
     if not source:
         raise HTTPException(status_code=404, detail="Source not found")
-    project = db.query(Project).filter(Project.id == source.project_id).first()
-    allowed = (project is not None and _can_access(current_user, project)) or current_user.id in (
-        source.assigned_extractor_id, source.assigned_reviewer_id,
-    )
-    if not allowed:
-        raise HTTPException(status_code=403, detail="You don't have access to this source")
+    assert_can_view_source(current_user, source, db)
     if not source.external_ref_id:
         raise HTTPException(status_code=422, detail="This source wasn't pulled from Xtrium Catalog IQ.")
 

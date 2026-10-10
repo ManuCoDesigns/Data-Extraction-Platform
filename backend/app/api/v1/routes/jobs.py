@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 import math, os
 from app.db.session import get_db
 from app.core.security import get_current_user
+from app.core.source_access import assert_can_view_job, restrict_jobs_query
 from app.services.storage import storage, new_storage_key
 from app.models.all_models import (
     ExtractionJob, JobStateHistory, JobStatus, SourceType, Project,
@@ -71,6 +72,7 @@ def list_jobs(
     q = db.query(ExtractionJob)
     if "org_admin" not in user_roles:
         q = q.join(Project).join(ProjectMember).filter(ProjectMember.user_id == current_user.id)
+        q = restrict_jobs_query(q, current_user, db)
     if project_id:
         q = q.filter(ExtractionJob.project_id == project_id)
     if status:
@@ -171,6 +173,7 @@ def retry_job(
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    assert_can_view_job(current_user, job, db)
     failed_states = {"parse_failed", "extraction_failed", "llm_failed", "queued"}
     if job.status.value not in failed_states:
         raise HTTPException(status_code=422, detail=f"Only failed or queued jobs can be retried (current status: {job.status.value})")
@@ -201,11 +204,15 @@ def get_job(job_id: str, db: Session = Depends(get_db), current_user: User = Dep
     job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    assert_can_view_job(current_user, job, db)
     return _serialize(job)
 
 
 @router.get("/{job_id}/history", response_model=list[JobStateHistoryOut])
 def get_job_history(job_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).first()
+    if _job is not None:
+        assert_can_view_job(current_user, _job, db)
     history = db.query(JobStateHistory).filter(
         JobStateHistory.job_id == job_id
     ).order_by(JobStateHistory.entered_at).all()
@@ -232,6 +239,7 @@ def delete_job(
     if "org_admin" not in user_roles:
         if not any(m.user_id == current_user.id for m in job.project.members):
             raise HTTPException(status_code=403, detail="Access denied")
+    assert_can_view_job(current_user, job, db)
     active = {"queued", "parsing", "extracting", "llm_review"}
     if job.status.value in active:
         raise HTTPException(status_code=422, detail=f"Cannot delete a job that is currently {job.status.value}")

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.db.session import get_db
 from app.core.security import get_current_user
+from app.core.source_access import assert_can_view_job, restrict_jobs_query, restrict_sources_query
 from app.models.all_models import (
     ExtractedRecord, ReviewStatus, SubmissionBatch, ExtractionJob,
     User, AuditLog, AuditAction, JobStatus, Project, ProjectMember
@@ -29,6 +30,7 @@ def submit_job(
     job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    assert_can_view_job(current_user, job, db)
 
     q = db.query(ExtractedRecord).filter(
         ExtractedRecord.job_id == job_id,
@@ -99,6 +101,9 @@ def submit_job(
 
 @router.get("/jobs/{job_id}/submissions", response_model=list[SubmissionBatchOut])
 def list_submissions(job_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    _job = db.query(ExtractionJob).filter(ExtractionJob.id == job_id).first()
+    if _job is not None:
+        assert_can_view_job(current_user, _job, db)
     batches = db.query(SubmissionBatch).filter(SubmissionBatch.job_id == job_id).all()
     return [SubmissionBatchOut(
         id=b.id, job_id=b.job_id, submitted_by=b.submitted_by,
@@ -121,6 +126,7 @@ def dashboard_stats(
     job_q = db.query(ExtractionJob)
     if not is_admin:
         job_q = job_q.join(Project).join(ProjectMember).filter(ProjectMember.user_id == current_user.id)
+        job_q = restrict_jobs_query(job_q, current_user, db)
 
     active_jobs = job_q.filter(ExtractionJob.status.in_([
         JobStatus.QUEUED, JobStatus.PARSING, JobStatus.EXTRACTING,
@@ -133,6 +139,7 @@ def dashboard_stats(
     record_q = db.query(ExtractedRecord).join(ExtractionJob)
     if not is_admin:
         record_q = record_q.join(Project).join(ProjectMember).filter(ProjectMember.user_id == current_user.id)
+        record_q = record_q.filter(ExtractionJob.id.in_(restrict_jobs_query(db.query(ExtractionJob.id), current_user, db).subquery()))
 
     pending_review = record_q.filter(ExtractedRecord.review_status == ReviewStatus.PENDING).count()
     total_records = record_q.count()
@@ -179,6 +186,8 @@ def productivity_stats(
     Per-person productivity metrics for admin dashboard.
     Shows extraction speed, review speed, quality rates, and fast-review flags.
     """
+    if not {r.role.value for r in current_user.roles} & {"org_admin", "project_admin", "qa_lead"}:
+        raise HTTPException(status_code=403, detail="Admin or QA access required")
     try:
         from app.models.all_models import (
             ExtractedRecord, ExtractionJob, Source, User as UserModel,
@@ -333,6 +342,7 @@ def sources_summary(
             return {"by_status": {}, "total": 0, "approved_this_week": 0, "recent": []}
         q = q.filter(Source.project_id.in_(accessible))
 
+    q = restrict_sources_query(q, current_user, db)
     sources = q.all()
     total = len(sources)
 
