@@ -956,6 +956,12 @@ export function SourceDetailPage() {
               <Send className="w-3.5 h-3.5" /> Submit Records
             </Button>
           )}
+          {isFromXtrium && (
+            <Link to={`/projects/${source.project_id}/sources/${source.id}/sop`}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-sm font-semibold border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 transition">
+              <FileIcon className="w-3.5 h-3.5" /> View SOP
+            </Link>
+          )}
           {isFromXtrium && isAdmin && source.status === 'approved' && (
             <Button size="sm" loading={submittingToXtrium} onClick={handleSubmitToXtrium}
               style={{ background: '#2563eb', border: 'none', color: '#fff' }}>

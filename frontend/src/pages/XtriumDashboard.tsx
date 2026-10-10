@@ -326,7 +326,22 @@ function renderXtriumValue(key: string, value: any) {
       </a>
     )
   }
-  if (typeof value === 'object') return <code className="text-xs">{JSON.stringify(value)}</code>
+  if (Array.isArray(value) && value.every(v => typeof v !== 'object' || v === null)) {
+    return (
+      <span className="flex flex-wrap gap-1.5">
+        {value.map((v, i) => (
+          <code key={i} className="px-1.5 py-0.5 rounded-md bg-gray-100 text-xs text-gray-800 break-all">{String(v)}</code>
+        ))}
+      </span>
+    )
+  }
+  if (typeof value === 'object') {
+    return (
+      <pre className="m-0 p-2.5 rounded-lg bg-gray-50 border border-gray-100 text-[11px] text-gray-700 overflow-auto" style={{ maxHeight: 180 }}>
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    )
+  }
   return <span className="whitespace-pre-wrap">{String(value)}</span>
 }
 
@@ -623,7 +638,8 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound, onSync, 
 
   const item = source.xtrium
   const ours = STATUS_META[source.status] ?? { label: source.status, color: '#64748b' }
-  const extras = item ? Object.keys(item).filter(k => !KNOWN_KEYS.has(k)) : []
+  // The full SOP has its own card and page, so its summary object isn't repeated in the field list.
+  const extras = item ? Object.keys(item).filter(k => !KNOWN_KEYS.has(k) && k !== 'sop') : []
   const canSubmit = source.status === 'approved'
   const alreadySubmitted = isSubmitted(source)
 
@@ -785,6 +801,41 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound, onSync, 
             reloadKey={`${source.status}|${source.xtrium_submitted_at ?? ''}|${source.last_activity_at ?? ''}|${source.notice?.at ?? ''}`}
             xtriumNote={String(source.xtrium?.notes ?? '').trim()}
           />
+
+          {/* SOP */}
+          {item && (item.sop_code || item.sop) && (
+            <div className="relative bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-violet-500 to-indigo-600" />
+              <div className="px-5 pt-5 pb-4">
+                <h3 className="text-sm font-bold text-gray-900 m-0">Standard operating procedure</h3>
+                <p className="text-xs text-gray-400 mt-0.5 mb-3">What Xtrium requires for this item — shared with the extractors</p>
+                <p className="text-sm font-semibold text-gray-900 m-0">{item.sop?.title ?? item.sop_code}</p>
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {(item.sop_code ?? item.sop?.sop_code) && (
+                    <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-gray-900 text-white font-mono">{item.sop_code ?? item.sop?.sop_code}</span>
+                  )}
+                  {(item.target_entity ?? item.sop?.entity) && (
+                    <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-violet-50 text-violet-700">Entity: {item.target_entity ?? item.sop?.entity}</span>
+                  )}
+                  {item.sop?.spec_version && (
+                    <span className="text-[11px] font-semibold px-2 py-1 rounded-full bg-blue-50 text-blue-700">Spec v{item.sop.spec_version}</span>
+                  )}
+                </div>
+                {Array.isArray(item.required_fields) && item.required_fields.length > 0 && (
+                  <p className="text-xs text-gray-500 mt-3 mb-0">
+                    Required fields:{' '}
+                    {item.required_fields.map((f: string) => (
+                      <code key={f} className="ml-1 px-1.5 py-0.5 rounded-md bg-emerald-50 text-emerald-800 font-semibold">{f}</code>
+                    ))}
+                  </p>
+                )}
+                <Link to={`/projects/${source.project_id}/sources/${source.id}/sop`}
+                  className="mt-4 inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-br from-brand-500 to-brand-700 shadow-lg shadow-brand-500/25 hover:opacity-95 transition">
+                  Open the full SOP <ArrowUpRight className="w-4 h-4" />
+                </Link>
+              </div>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-card px-5 py-4">

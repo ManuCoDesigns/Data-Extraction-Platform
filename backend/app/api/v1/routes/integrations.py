@@ -579,7 +579,7 @@ async def xtrium_dashboard(
         "last_activity_at": last_activity_by_source[s.id].isoformat() if s.id in last_activity_by_source else None,
         "notice": notice_by_source.get(s.id),
         "sync_changes": _sync_changes(s, xtrium_by_id.get(str(s.external_ref_id))),
-        "xtrium": xtrium_by_id.get(str(s.external_ref_id)),
+        "xtrium": _slim_xtrium_item(xtrium_by_id.get(str(s.external_ref_id))),
         "name": s.name,
         "project_id": s.project_id,
         "project_name": projects_by_id.get(s.project_id),
@@ -905,7 +905,8 @@ async def export_xtrium_sources(
             return "Yes" if v else "No"
         if isinstance(v, (int, float)):
             return v
-        return str(v)
+        v = str(v)
+        return v if len(v) <= 32000 else v[:32000] + "… [truncated]"
 
     def when(dt):
         return dt.strftime("%Y-%m-%d %H:%M UTC") if dt else None
@@ -951,6 +952,8 @@ async def export_xtrium_sources(
         ws.append([cell(v) for v in row])
         if item:
             for k, v in item.items():
+                if k == "sop":
+                    continue  # the full SOP has its own sheet
                 raw.append([cell(s.external_ref_id), cell(s.name), k, cell(v)])
 
     act = wb.create_sheet("Activity")
@@ -987,8 +990,27 @@ async def export_xtrium_sources(
                 first(av, ("reason", "failure_reason", "note", "notes", "comment")),
             )])
 
+    sops = wb.create_sheet("SOPs")
+    sops.append([
+        "Item #", "Our Source", "SOP code", "Title", "Entity", "Spec version",
+        "Required fields", "Where it came from", "SOP guide (markdown)",
+    ])
+    for s in sources:
+        live_item = xtrium_by_id.get(str(s.external_ref_id)) or {}
+        sop = live_item.get("sop") if isinstance(live_item.get("sop"), dict) else None
+        origin = "Live from Xtrium"
+        if not sop and isinstance(s.xtrium_sop, dict):
+            sop, origin = s.xtrium_sop.get("sop"), "Saved copy"
+        if not isinstance(sop, dict):
+            continue
+        sops.append([cell(v) for v in (
+            s.external_ref_id, s.name, sop.get("sop_code"), sop.get("title"), sop.get("entity"),
+            sop.get("spec_version"), live_item.get("required_fields") or sop.get("required_fields"),
+            origin, sop.get("markdown"),
+        )])
+
     # Readable formatting: bold coloured header, frozen, filters, sane widths.
-    for sheet in (ws, raw, act):
+    for sheet in (ws, raw, act, sops):
         # Text that merely starts with "=" must stay text, never become a formula.
         for r in sheet.iter_rows(min_row=2):
             for c in r:
@@ -1294,3 +1316,125 @@ async def _merge_in_progress(items: list, limit: int) -> list:
         i for i in extra
         if isinstance(i, dict) and str(i.get("id")) not in seen
     ]
+
+
+# ─── Xtrium SOP ──────────────────────────────────────────────────────────────
+def _slim_xtrium_item(item):
+    """Dashboard copy of an Xtrium item: the SOP text/schema (tens of KB per item)
+    is replaced by a small summary; the full SOP is served by /sources/{id}/sop."""
+    if not isinstance(item, dict):
+        return item
+    slim = dict(item)
+    sop = item.get("sop")
+    if isinstance(sop, dict):
+        slim["sop"] = {
+            k: sop.get(k)
+            for k in ("sop_code", "title", "entity", "spec_version", "template_id", "usage_count")
+            if sop.get(k) is not None
+        }
+    return slim
+
+
+def _sop_meta(item: dict) -> dict:
+    return {
+        "sop_code": item.get("sop_code"), "sop_id": item.get("sop_id"),
+        "target_entity": item.get("target_entity"), "required_fields": item.get("required_fields"),
+        "priority_score": item.get("priority_score"), "sop_url": item.get("sop_url"),
+    }
+
+
+def _usable_sop(value) -> bool:
+    return isinstance(value, dict) and bool(value.get("markdown"))
+
+
+@router.get("/sources/{source_id}/sop")
+async def source_sop(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    The SOP Xtrium provides for this source's item. Open to anyone with access to
+    the project (or the source's assigned extractor/reviewer). Uses Xtrium's live
+    copy when available and saves it; otherwise serves the last saved copy.
+    """
+    from app.api.v1.routes.sources import _can_access
+
+    source = db.query(Source).filter(Source.id == source_id).first()
+    if not source:
+        raise HTTPException(status_code=404, detail="Source not found")
+    project = db.query(Project).filter(Project.id == source.project_id).first()
+    allowed = (project is not None and _can_access(current_user, project)) or current_user.id in (
+        source.assigned_extractor_id, source.assigned_reviewer_id,
+    )
+    if not allowed:
+        raise HTTPException(status_code=403, detail="You don't have access to this source")
+    if not source.external_ref_id:
+        raise HTTPException(status_code=422, detail="This source wasn't pulled from Xtrium Catalog IQ.")
+
+    item = None
+    live_error = None
+    for _status in ("all", "In Progress"):
+        try:
+            _items = await _cached_get_items(_status, 100)
+        except Exception as e:
+            live_error = str(e)
+            break
+        found = next(
+            (i for i in _items if isinstance(i, dict) and str(i.get("id")) == str(source.external_ref_id)),
+            None,
+        ) if isinstance(_items, list) else None
+        if found is not None:
+            item = found
+            live_error = None
+            break
+
+    saved = source.xtrium_sop if isinstance(source.xtrium_sop, dict) else None
+    sop = item.get("sop") if item else None
+    meta = _sop_meta(item) if item else None
+
+    # The list view may omit the SOP body; fall back to the item's own SOP URL
+    # once, only when we have nothing saved (keeps calls to Xtrium low).
+    if item and not _usable_sop(sop) and not (saved and _usable_sop(saved.get("sop"))):
+        try:
+            r = await xtrium_client._request(
+                "GET", f"/api/careerflow/batch/{source.external_ref_id}/sop",
+                headers=xtrium_client._headers(),
+            )
+            if r.status_code == 200 and isinstance(r.json(), dict):
+                sop = r.json()
+        except Exception as e:
+            live_error = live_error or str(e)
+
+    origin = "none"
+    saved_at = saved.get("saved_at") if saved else None
+    if _usable_sop(sop):
+        origin = "live"
+        old = saved.get("sop") if saved else None
+        if not (isinstance(old, dict) and old.get("fingerprint") == sop.get("fingerprint")
+                and old.get("markdown") == sop.get("markdown")):
+            saved_at = datetime.now(timezone.utc).isoformat()
+            source.xtrium_sop = {"sop": sop, "meta": meta, "saved_at": saved_at}
+            try:
+                db.commit()
+            except Exception:
+                db.rollback()  # a read must never fail because the save did
+    elif saved and _usable_sop(saved.get("sop")):
+        origin = "saved"
+        sop = saved.get("sop")
+        meta = saved.get("meta") or meta
+    else:
+        sop = None
+
+    return {
+        "source_id": source.id,
+        "source_name": source.name,
+        "project_id": source.project_id,
+        "item_id": source.external_ref_id,
+        "website_url": source.website_url,
+        "origin": origin,
+        "saved_at": saved_at,
+        "live_error": live_error,
+        "meta": meta,
+        "sop": sop,
+    }

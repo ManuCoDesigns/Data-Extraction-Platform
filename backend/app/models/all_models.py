@@ -363,6 +363,8 @@ class Source(Base):
     # this is set ONLY on a successful submit, so we can reliably tell
     # whether a source has been submitted before, to warn on resubmission.
     xtrium_submitted_at = Column(DateTime(timezone=True), nullable=True)
+    # Xtrium's SOP for this item, saved so extractors can read it even when Xtrium is unreachable
+    xtrium_sop = Column(JSON, nullable=True)
 
     project = relationship("Project", foreign_keys=[project_id])
     schema = relationship("Schema", foreign_keys=[schema_id])

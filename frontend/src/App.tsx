@@ -8,6 +8,7 @@ import { ProjectDetailPage } from '@/pages/ProjectDetail'
 import { SourcesPage } from '@/pages/Sources'
 import { XtriumDashboardPage } from '@/pages/XtriumDashboard'
 import { SourceDetailPage } from '@/pages/SourceDetail'
+import { SourceSopPage } from '@/pages/SourceSop'
 import { HelpPage } from '@/pages/Help'
 import { NotificationsPage } from '@/pages/Notifications'
 import { JobsPage } from '@/pages/Jobs'
@@ -117,6 +118,11 @@ export function App() {
           <Route
             path="projects/:projectId/sources/:sourceId"
             element={<SourceDetailPage />}
+          />
+
+          <Route
+            path="projects/:projectId/sources/:sourceId/sop"
+            element={<SourceSopPage />}
           />
 
           <Route
