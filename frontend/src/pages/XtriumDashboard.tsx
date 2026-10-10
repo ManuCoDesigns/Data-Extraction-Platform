@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   Zap, Database, Clock, CheckCircle, Send, RefreshCw, ArrowUpRight,
   Globe, Archive, AlertTriangle, Inbox, X, ExternalLink,
-  Search, Check, ChevronDown, ChevronUp, Copy, Download,
+  Search, Check, ChevronDown, ChevronUp, Copy, Download, Trash2,
 } from 'lucide-react'
 import { xtriumApi } from '@/api/client'
 import { cn, toast } from '@/components/ui'
@@ -420,6 +420,83 @@ function SyncModal({ items, selected, onToggle, onToggleAll, onApply, onClose, a
             className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold text-white bg-gradient-to-br from-brand-500 to-brand-700 disabled:opacity-40 transition">
             <RefreshCw className={cn('w-3.5 h-3.5', applying && 'animate-spin')} />
             {applying ? 'Updating…' : `Update ${selected.size} source${selected.size !== 1 ? 's' : ''}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── Clear from our queue: remove pulled sources at any stage ────────────────
+function ClearModal({ items, onApply, onClose, applying }: {
+  items: any[]; onApply: () => void; onClose: () => void; applying: boolean
+}) {
+  const [ack, setAck] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !applying) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose, applying])
+
+  const submitted = items.filter(isSubmitted).length
+  const withWork = items.filter(s => (s.total_records ?? 0) > 0 && !isSubmitted(s)).length
+  const records = items.reduce((a, s) => a + (s.total_records ?? 0), 0)
+  const untouched = items.length - submitted - withWork
+  const n = items.length
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Clear from queue">
+      <div className="absolute inset-0 bg-black/40" onClick={() => !applying && onClose()} />
+      <div className="relative bg-white rounded-2xl shadow-float w-full max-w-xl max-h-[85vh] flex flex-col">
+        <div className="px-6 pt-5 pb-3 border-b border-gray-100">
+          <h2 className="text-base font-bold text-gray-900 m-0">Remove {n} source{n !== 1 ? 's' : ''} from the queue?</h2>
+          <p className="text-xs text-gray-500 mt-1 m-0">
+            This deletes the source{n !== 1 ? 's' : ''} and {records} extracted record{records !== 1 ? 's' : ''} from our platform. It cannot be undone.
+          </p>
+        </div>
+        <div className="px-6 py-4 overflow-y-auto scrollbar-thin flex-1 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            {untouched > 0 && <Pill label={`${untouched} not worked on`} color="#64748b" />}
+            {withWork > 0 && <Pill label={`${withWork} with extraction work`} color="#d97706" />}
+            {submitted > 0 && <Pill label={`${submitted} already submitted`} color="#2563eb" />}
+          </div>
+          {withWork > 0 && (
+            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-100 rounded-xl px-3 py-2 m-0">
+              {withWork} of these {withWork !== 1 ? 'have' : 'has'} extracted records that will be lost.
+            </p>
+          )}
+          {submitted > 0 && (
+            <p className="text-xs text-blue-800 bg-blue-50 border border-blue-100 rounded-xl px-3 py-2 m-0">
+              {submitted} {submitted !== 1 ? 'were' : 'was'} already submitted. Xtrium keeps what it received — only our copy is removed.
+            </p>
+          )}
+          <p className="text-xs text-gray-500 m-0">
+            Nothing is sent to Xtrium. Items you clear stay claimed on Xtrium's side; if they should go back to their queue,
+            report them to Xtrium first.
+          </p>
+          <ul className="list-none m-0 p-0 divide-y divide-gray-50 border border-gray-100 rounded-xl" style={{ maxHeight: 220, overflowY: 'auto' }}>
+            {items.map(s => (
+              <li key={s.id} className="px-3 py-2 flex items-center justify-between gap-3">
+                <span className="min-w-0">
+                  <span className="block text-sm font-semibold text-gray-900 truncate">{s.name}</span>
+                  <span className="block text-[11px] text-gray-400">Item #{s.external_ref_id} · {s.project_name ?? '—'}</span>
+                </span>
+                <span className="text-[11px] font-semibold text-gray-500 whitespace-nowrap">
+                  {isSubmitted(s) ? 'Submitted' : statusLabel(s.status)}{(s.total_records ?? 0) > 0 ? ` · ${s.total_records} rec.` : ''}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
+            <input type="checkbox" checked={ack} onChange={e => setAck(e.target.checked)} />
+            I understand this can't be undone
+          </label>
+        </div>
+        <div className="px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2">
+          <button onClick={onClose} disabled={applying} className="px-3.5 py-2 rounded-xl text-sm font-semibold text-gray-600 hover:bg-gray-50 disabled:opacity-50">Cancel</button>
+          <button onClick={onApply} disabled={!ack || applying}
+            className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 disabled:opacity-40 transition">
+            <Trash2 className="w-3.5 h-3.5" />
+            {applying ? 'Removing…' : `Remove ${n} source${n !== 1 ? 's' : ''}`}
           </button>
         </div>
       </div>
@@ -1022,6 +1099,10 @@ export function XtriumDashboardPage() {
   const [syncOpen, setSyncOpen] = useState(false)
   const [syncSelected, setSyncSelected] = useState<Set<string>>(new Set())
   const [syncing, setSyncing] = useState(false)
+  // "Clear from queue": chosen sources, modal visibility, in-flight flag.
+  const [clearSel, setClearSel] = useState<Set<string>>(new Set())
+  const [clearOpen, setClearOpen] = useState(false)
+  const [clearing, setClearing] = useState(false)
 
   const runExport = async () => {
     setExporting(true)
@@ -1113,6 +1194,35 @@ export function XtriumDashboardPage() {
   const rows = sortRows(filtered, sort)
   const clearFilters = () => { setSearch(''); setFilter('all') }
   const driftSources = sources.filter(x => (x.sync_changes ?? []).length > 0)
+  // Only sources that still exist count, so a refresh never leaves a stale selection.
+  const picked = sources.filter(x => clearSel.has(x.id))
+  const untouched = rows.filter(x => x.status === 'not_started' && !isSubmitted(x) && (x.total_records ?? 0) === 0)
+  const allShownPicked = rows.length > 0 && rows.every(x => clearSel.has(x.id))
+  const toggleClear = (id: string) => setClearSel(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
+  const runClear = async () => {
+    const ids = picked.map(x => x.id)
+    if (ids.length === 0) return
+    setClearing(true)
+    try {
+      const r = await xtriumApi.clearSources(ids)
+      const bits = [`${r.cleared} removed`]
+      if ((r.skipped ?? []).length) bits.push(`${r.skipped.length} skipped`)
+      toast.success(`Cleared from the queue — ${bits.join(', ')}`)
+      setClearOpen(false)
+      setClearSel(new Set())
+      setSelectedId(null)
+      load({ silent: true })
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Couldn't clear the sources — try again")
+    } finally {
+      setClearing(false)
+    }
+  }
   const runSync = async (ids: string[]) => {
     setSyncing(true)
     try {
@@ -1263,6 +1373,10 @@ export function XtriumDashboardPage() {
         />
       )}
 
+      {clearOpen && (
+        <ClearModal items={picked} applying={clearing} onApply={runClear} onClose={() => setClearOpen(false)} />
+      )}
+
       {/* Result of the last Verify run */}
       {verifySummary && (
         <div className={cn(
@@ -1375,10 +1489,36 @@ export function XtriumDashboardPage() {
             </select>
           </div>
         </div>
+        {(picked.length > 0 || untouched.length > 0) && (
+          <div className="px-5 py-2.5 border-b border-gray-50 bg-gray-50/60 flex flex-wrap items-center gap-3 text-xs">
+            {picked.length > 0 ? (
+              <>
+                <span className="font-semibold text-gray-700">{picked.length} selected</span>
+                <button onClick={() => setClearOpen(true)}
+                  className="inline-flex items-center gap-1.5 font-semibold text-red-700 px-3 py-1.5 rounded-lg border border-red-200 bg-white hover:bg-red-50">
+                  <Trash2 className="w-3.5 h-3.5" /> Clear from queue
+                </button>
+                <button onClick={() => setClearSel(new Set())} className="font-semibold text-gray-500 hover:text-gray-800">Deselect all</button>
+              </>
+            ) : (
+              <span className="text-gray-500">Tick sources to remove them from the queue.</span>
+            )}
+            {untouched.length > 0 && !untouched.every(x => clearSel.has(x.id)) && (
+              <button onClick={() => setClearSel(prev => new Set([...prev, ...untouched.map(x => x.id)]))}
+                className="font-semibold text-brand-700 hover:text-brand-800">
+                Select all not worked on ({untouched.length})
+              </button>
+            )}
+          </div>
+        )}
         <div className="overflow-x-auto scrollbar-thin" style={{ maxHeight: 520 }}>
           <table className="w-full border-collapse">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-100 sticky top-0">
+                <th className="pl-4 pr-0 py-2.5 w-8">
+                  <input type="checkbox" aria-label="Select all shown" checked={allShownPicked}
+                    onChange={() => setClearSel(prev => (rows.every(x => prev.has(x.id)) ? new Set() : new Set(rows.map(x => x.id))))} />
+                </th>
                 {['Source', 'Item #', 'Stage', 'Xtrium Status', 'Submitted', 'Last activity', ''].map(h => (
                   <th key={h} className="px-4 py-2.5 text-left text-[10px] font-bold text-gray-400 uppercase tracking-wider whitespace-nowrap">
                     {h}
@@ -1388,10 +1528,10 @@ export function XtriumDashboardPage() {
             </thead>
             <tbody>
               {sources.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">No Xtrium-linked sources yet</td></tr>
+                <tr><td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-400">No Xtrium-linked sources yet</td></tr>
               ) : rows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-gray-400">
+                  <td colSpan={8} className="px-4 py-10 text-center text-sm text-gray-400">
                     No sources match these filters.{' '}
                     <button onClick={clearFilters} className="text-brand-600 font-semibold hover:text-brand-700">Clear filters</button>
                   </td>
@@ -1401,6 +1541,9 @@ export function XtriumDashboardPage() {
                 return (
                   <tr key={s.id} onClick={() => setSelectedId(s.id)}
                     className="border-b border-gray-50 hover:bg-gray-50/60 transition cursor-pointer">
+                    <td className="pl-4 pr-0 py-3 w-8" onClick={e => e.stopPropagation()}>
+                      <input type="checkbox" aria-label={`Select ${s.name}`} checked={clearSel.has(s.id)} onChange={() => toggleClear(s.id)} />
+                    </td>
                     <td className="px-4 py-3">
                       <p className="text-sm font-semibold text-gray-900 truncate max-w-[260px]">{s.name}</p>
                       <p className="text-xs text-gray-400 truncate max-w-[260px]">{s.project_name ?? '—'}</p>

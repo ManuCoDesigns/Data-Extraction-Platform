@@ -2,6 +2,9 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from 'react-router-dom'
 import { JsonRecordViewer } from './JsonRecordViewer'
+import { ActionMenu } from '@/components/ActionMenu'
+import { SopPanel } from '@/components/SopPanel'
+import { XtriumNoticesBanner } from '@/components/XtriumNoticesBanner'
 import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
@@ -25,7 +28,7 @@ const STATUS_META: Record<SourceStatus, { label: string; color: 'gray'|'amber'|'
   approved:          { label: 'Approved',          color: 'green' },
 }
 
-type Tab = 'records' | 'files' | 'details'
+type Tab = 'records' | 'files' | 'details' | 'sop'
 
 export function SourceDetailPage() {
   const { projectId, sourceId } = useParams<{ projectId: string; sourceId: string }>()
@@ -899,30 +902,6 @@ export function SourceDetailPage() {
               <AlertTriangle className="w-3.5 h-3.5" /> Escalate — No Data Found
             </Button>
           )}
-          {isAdmin && (
-            <Button variant="secondary" size="sm" onClick={() => {
-              setEditSourceForm({ name: source.name, description: source.description || '', website_url: source.website_url || '' })
-              setShowEditSource(true)
-            }}>
-              <Edit3 className="w-3.5 h-3.5" /> Edit Source
-            </Button>
-          )}
-          {isAdmin && records.length > 0 && (
-            <Button variant="secondary" size="sm"
-              className="!text-orange-600 !border-orange-200 hover:!bg-orange-50"
-              onClick={async () => {
-                if (!window.confirm(`Clear all ${records.length} records from "${source.name}"? This cannot be undone.`)) return
-                try {
-                  const r = await sourcesApi.clearRecords(sourceId!)
-                  toast.success(r.message || 'Records cleared')
-                  load()
-                } catch (err: any) {
-                  toast.error(err?.response?.data?.detail || 'Clear failed')
-                }
-              }}>
-              <Trash2 className="w-3.5 h-3.5" /> Clear Records
-            </Button>
-          )}
           {isExtractor && source.website_url && source.status !== 'approved' && (
             <Button variant="secondary" size="sm" onClick={handleScrape} loading={scraping}>
               <Search className="w-3.5 h-3.5" />
@@ -968,22 +947,29 @@ export function SourceDetailPage() {
               <Zap className="w-3.5 h-3.5" /> Submit to Xtrium
             </Button>
           )}
-          {isFromXtrium && isAdmin && (
-            <Button variant="secondary" size="sm" loading={checkingXtriumStatus} onClick={handleCheckXtriumStatus}>
-              <Link2 className="w-3.5 h-3.5" /> Check Xtrium Status
-            </Button>
-          )}
-          {isFromXtrium && isAdmin && source.status !== 'approved' && (
-            <Button variant="secondary" size="sm"
-              className="!text-red-600 !border-red-200 hover:!bg-red-50"
-              onClick={() => setShowReportFailure(true)}>
-              <AlertTriangle className="w-3.5 h-3.5" /> Report Failure
-            </Button>
-          )}
-          {source.status === 'approved' && isAdmin && (
-            <Button variant="secondary" size="sm"
-              className="!text-amber-600 !border-amber-200 hover:!bg-amber-50"
-              onClick={async () => {
+          <ActionMenu items={[
+            { key: 'edit', label: 'Edit Source', icon: <Edit3 className="w-3.5 h-3.5" />, hidden: !isAdmin,
+              onClick: () => {
+                setEditSourceForm({ name: source.name, description: source.description || '', website_url: source.website_url || '' })
+                setShowEditSource(true)
+              } },
+            { key: 'status', label: 'Check Xtrium Status', icon: <Link2 className="w-3.5 h-3.5" />,
+              hidden: !(isFromXtrium && isAdmin), loading: checkingXtriumStatus, onClick: handleCheckXtriumStatus },
+            { key: 'clear', label: 'Clear Records', icon: <Trash2 className="w-3.5 h-3.5" />, tone: 'warn', divider: true,
+              hidden: !(isAdmin && records.length > 0),
+              onClick: async () => {
+                if (!window.confirm(`Clear all ${records.length} records from "${source.name}"? This cannot be undone.`)) return
+                try {
+                  const r = await sourcesApi.clearRecords(sourceId!)
+                  toast.success(r.message || 'Records cleared')
+                  load()
+                } catch (err: any) {
+                  toast.error(err?.response?.data?.detail || 'Clear failed')
+                }
+              } },
+            { key: 'unlock', label: 'Unlock Records', icon: <RotateCcw className="w-3.5 h-3.5" />, tone: 'warn',
+              hidden: !(source.status === 'approved' && isAdmin),
+              onClick: async () => {
                 if (!window.confirm(`Unlock all submitted records in "${source.name}"?\n\nThis resets their submitted status so they can be corrected and re-submitted.`)) return
                 try {
                   const r = await sourcesApi.unlockRecords(sourceId!)
@@ -992,24 +978,18 @@ export function SourceDetailPage() {
                 } catch (err: any) {
                   toast.error(err?.response?.data?.detail || 'Unlock failed')
                 }
-              }}>
-              <RotateCcw className="w-3.5 h-3.5" /> Unlock Records
-            </Button>
-          )}
-          {isAdmin && source.status !== 'approved' && (
-            <Button variant="secondary" size="sm" onClick={() => setDeleteSourceConfirm(true)}
-              className="!text-red-600 !border-red-200 hover:!bg-red-50">
-              <Trash2 className="w-3.5 h-3.5" /> Delete
-            </Button>
-          )}
-          {isAdmin && (
-            <Button variant="secondary" size="sm" onClick={() => setShowReset(true)}
-              className="!text-orange-600 !border-orange-200 hover:!bg-orange-50">
-              <RotateCcw className="w-3.5 h-3.5" /> Reset Source
-            </Button>
-          )}
+              } },
+            { key: 'reset', label: 'Reset Source', icon: <RotateCcw className="w-3.5 h-3.5" />, tone: 'warn',
+              hidden: !isAdmin, onClick: () => setShowReset(true) },
+            { key: 'fail', label: 'Report Failure to Xtrium', icon: <AlertTriangle className="w-3.5 h-3.5" />, tone: 'danger', divider: true,
+              hidden: !(isFromXtrium && isAdmin && source.status !== 'approved'), onClick: () => setShowReportFailure(true) },
+            { key: 'delete', label: 'Delete Source', icon: <Trash2 className="w-3.5 h-3.5" />, tone: 'danger',
+              hidden: !(isAdmin && source.status !== 'approved'), onClick: () => setDeleteSourceConfirm(true) },
+          ]} />
         </div>
       </div>
+
+      {isFromXtrium && <XtriumNoticesBanner sourceId={source.id} reloadKey={String(source.updated_at ?? '')} />}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[
@@ -1064,7 +1044,7 @@ export function SourceDetailPage() {
       </Card>
 
       <div style={{ display: 'flex', gap: 4, padding: '4px', background: '#f1f5f9', borderRadius: 12, alignSelf: 'flex-start' }}>
-        {(['records', 'files', 'details'] as Tab[]).map(t => (
+        {((isFromXtrium ? ['records', 'files', 'details', 'sop'] : ['records', 'files', 'details']) as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '7px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
             fontSize: 13, fontWeight: 600, transition: 'all 0.15s',
@@ -1072,7 +1052,7 @@ export function SourceDetailPage() {
             color: tab === t ? '#1d4ed8' : '#64748b',
             boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
           }}>
-            {t === 'records' ? `Records (${records.length})` : t === 'files' ? 'Files' : 'Details & Notes'}
+            {t === 'records' ? `Records (${records.length})` : t === 'files' ? 'Files' : t === 'sop' ? 'SOP' : 'Details & Notes'}
           </button>
         ))}
       </div>
@@ -1595,6 +1575,10 @@ export function SourceDetailPage() {
             </Card>
           )}
         </div>
+      )}
+
+      {tab === 'sop' && isFromXtrium && (
+        <SopPanel sourceId={source.id} fullPageHref={`/projects/${source.project_id}/sources/${source.id}/sop`} />
       )}
 
       {tab === 'details' && (

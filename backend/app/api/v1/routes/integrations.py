@@ -283,6 +283,7 @@ async def submit_source_to_xtrium(
     db.commit()
 
     source.xtrium_submitted_at = datetime.now(timezone.utc)
+    db.commit()  # persist the submit time (it used to be set after the commit and was lost)
     return {**result, "records_submitted": len(approved_records), "bundled": len(approved_records) > 1}
 
 
@@ -1438,3 +1439,72 @@ async def source_sop(
         "meta": meta,
         "sop": sop,
     }
+
+
+# ─── Clear pulled sources (any stage) ────────────────────────────────────────
+
+class ClearRequest(BaseModel):
+    source_ids: list[str]
+
+
+@router.post("/clear")
+def clear_pulled_sources(
+    payload: ClearRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Removes pulled (Xtrium-linked) sources from OUR queue at any stage, together
+    with their jobs and records. Nothing is sent to Xtrium: items already
+    submitted stay submitted there, and claimed items stay claimed there.
+    Only admins; project admins only within their own projects.
+    """
+    _require_admin(current_user)
+    ids = list(dict.fromkeys(payload.source_ids))[:500]
+    if not ids:
+        raise HTTPException(status_code=422, detail="No sources selected")
+
+    from app.models.all_models import ProjectMember as _PM
+    is_org_admin = "org_admin" in {r.role.value for r in current_user.roles}
+    allowed_projects = None
+    if not is_org_admin:
+        allowed_projects = {
+            m.project_id for m in db.query(_PM).filter(_PM.user_id == current_user.id).all()
+            if m.role.value in ("project_admin", "org_admin")
+        }
+
+    sources = db.query(Source).filter(Source.id.in_(ids)).all()
+    found = {s.id for s in sources}
+    cleared, skipped = [], [{"source_id": i, "reason": "not found"} for i in ids if i not in found]
+
+    for s in sources:
+        if not s.external_ref_id:
+            skipped.append({"source_id": s.id, "name": s.name, "reason": "not pulled from Xtrium"})
+            continue
+        if allowed_projects is not None and s.project_id not in allowed_projects:
+            skipped.append({"source_id": s.id, "name": s.name, "reason": "you are not an admin of this project"})
+            continue
+
+        job_ids = [j.id for j in db.query(ExtractionJob).filter(ExtractionJob.source_id == s.id).all()]
+        n_records = 0
+        if job_ids:
+            n_records = db.query(ExtractedRecord).filter(ExtractedRecord.job_id.in_(job_ids)).delete(synchronize_session=False)
+            db.query(ExtractionJob).filter(ExtractionJob.id.in_(job_ids)).delete(synchronize_session=False)
+
+        info = {
+            "source_id": s.id, "name": s.name, "item_id": s.external_ref_id,
+            "stage": s.status.value, "records_removed": n_records,
+            "was_submitted": s.xtrium_submitted_at is not None,
+        }
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=s.project_id,
+            action=AuditAction.SOURCE_STATUS_CHANGED,
+            before_value={"name": s.name, "status": info["stage"], "external_ref_id": s.external_ref_id},
+            after_value={"deleted": True, "stage": "xtrium_cleared", "bulk": True,
+                         "records_removed": n_records, "was_submitted": info["was_submitted"]},
+        ))
+        db.delete(s)
+        cleared.append(info)
+
+    db.commit()
+    return {"cleared": len(cleared), "skipped": skipped, "items": cleared}
