@@ -30,6 +30,7 @@ export function AppLayout() {
   const canManageUsers   = useCapability('manage_users')
   const canManageSchemas = useCapability('manage_schemas')
   const isAdmin          = canManageSchemas || canManageUsers
+  const isTeamLead       = ['org_admin', 'project_admin', 'qa_lead'].some(r => user?.roles?.includes(r))
 
   useEffect(() => { fetchMe() }, [])
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
@@ -104,7 +105,7 @@ export function AppLayout() {
     { to: '/escalations', icon: AlertTriangle,   label: 'Escalations',  show: true, badge: escalationCount },
     { to: '/xtrium',      icon: Zap,             label: 'Xtrium Integration', show: isAdmin },
     { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true, forceActive: isProjectsPath },
-    { to: '/workload',    icon: Activity,        label: 'Team Workload', show: true },
+    { to: '/workload',    icon: Activity,        label: 'Team Workload', show: isTeamLead },
     { to: '/schemas',     icon: Layers,          label: 'Schemas',      show: isAdmin && canManageSchemas },
   ].filter(n => n.show)
 

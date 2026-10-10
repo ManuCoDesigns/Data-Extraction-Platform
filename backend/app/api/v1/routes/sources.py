@@ -451,6 +451,9 @@ def team_workload(
     delivered yet, with its current extractor/reviewer, how long each has
     had it, and where it's stuck. Powers the Team Workload page.
     """
+    if not {r.role.value for r in current_user.roles} & {"org_admin", "project_admin", "qa_lead"}:
+        raise HTTPException(status_code=403, detail="Team Workload is for admins and QA leads.")
+
     q = db.query(Source).filter(Source.status != SourceStatus.APPROVED)
     q = restrict_sources_query(q, current_user, db)
     if project_id:

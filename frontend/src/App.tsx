@@ -55,6 +55,14 @@ function RequireAdmin({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function RequireTeamLead({ children }: { children: React.ReactNode }) {
+  const { user } = useAuthStore()
+  if (!['org_admin', 'project_admin', 'qa_lead'].some(r => user?.roles?.includes(r))) {
+    return <Navigate to="/" replace />
+  }
+  return <>{children}</>
+}
+
 // Every authenticated user lands on the Dashboard — DashboardPage's own
 // role logic (in pages/Dashboard.tsx) picks the right variant: full
 // Admin overview, or the focused Extractor/Reviewer workspace view.
@@ -127,7 +135,7 @@ export function App() {
 
           <Route
             path="workload"
-            element={<TeamWorkloadPage />}
+            element={<RequireTeamLead><TeamWorkloadPage /></RequireTeamLead>}
           />
 
           <Route
