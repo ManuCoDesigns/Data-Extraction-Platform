@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   Plus, Globe, Database, LayoutGrid, Table as TableIcon,
-  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2, Zap, ListChecks
+  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2, Zap, ListChecks, LayoutPanelLeft
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, xtriumApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -10,6 +10,8 @@ import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinne
 import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
 import { MyQueue } from '@/components/MyQueue'
+import { SourcesWorkbench } from '@/components/SourcesWorkbench'
+import { saveNav } from '@/lib/sourceNav'
 
 const STATUS_META: Record<SourceStatus, { label: string; color: 'gray' | 'amber' | 'red' | 'blue' | 'purple' | 'green' | 'indigo' }> = {
   not_started:       { label: 'Not Started',       color: 'gray' },
@@ -33,6 +35,31 @@ const SIMPLE_STEPS: { label: string; statuses: SourceStatus[]; color: string }[]
   { label: '3. In Review',  statuses: ['ready_for_review', 'in_review', 'changes_requested'], color: 'bg-purple-500' },
   { label: '4. Done',       statuses: ['approved'],                                        color: 'bg-emerald-500' },
 ]
+
+
+// Remembers how you had the list set up, so coming back from a source doesn't reset it.
+const VIEWS = ['queue', 'bench', 'simple', 'kanban', 'table']
+function readSavedState(): { view?: string; search?: string; projectFilter?: string; mineOnly?: boolean } {
+  const out: { view?: string; search?: string; projectFilter?: string; mineOnly?: boolean } = {}
+  try {
+    const v = localStorage.getItem('dx.sourcesView')
+    if (v && VIEWS.includes(v)) out.view = v
+  } catch { /* ignore */ }
+  try {
+    const raw = sessionStorage.getItem('dx.sourcesFilters')
+    if (raw) {
+      const f = JSON.parse(raw)
+      if (typeof f.search === 'string') out.search = f.search
+      if (typeof f.projectFilter === 'string') out.projectFilter = f.projectFilter
+      if (typeof f.mineOnly === 'boolean') out.mineOnly = f.mineOnly
+    }
+  } catch { /* ignore */ }
+  return out
+}
+function writeSavedState(view: string, filters: { search: string; projectFilter: string; mineOnly: boolean }) {
+  try { localStorage.setItem('dx.sourcesView', view) } catch { /* ignore */ }
+  try { sessionStorage.setItem('dx.sourcesFilters', JSON.stringify(filters)) } catch { /* ignore */ }
+}
 
 /**
  * Works in two modes:
@@ -64,10 +91,13 @@ export function SourcesPage() {
     ]).catch(() => {}).finally(() => setSchemasLoading(false))
   }
   const [loading, setLoading] = useState(true)
-  const [view, setView] = useState<'queue' | 'simple' | 'kanban' | 'table'>(canManage ? 'simple' : 'queue')
-  const [search, setSearch] = useState('')
-  const [projectFilter, setProjectFilter] = useState(projectId ?? '')
-  const [mineOnly, setMineOnly] = useState(false)
+  const saved = readSavedState()
+  const [view, setView] = useState<'queue' | 'bench' | 'simple' | 'kanban' | 'table'>(
+    (saved.view as 'queue' | 'bench' | 'simple' | 'kanban' | 'table' | undefined) ?? (canManage ? 'bench' : 'queue'))
+  const [search, setSearch] = useState(saved.search ?? '')
+  const [projectFilter, setProjectFilter] = useState(projectId ?? saved.projectFilter ?? '')
+  const [mineOnly, setMineOnly] = useState(saved.mineOnly ?? false)
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [showCreate, setShowCreate] = useState(false)
   const [creating, setCreating] = useState(false)
   const [deleteSource, setDeleteSource] = useState<Source | null>(null)
@@ -136,6 +166,19 @@ export function SourcesPage() {
     if (mineOnly && s.assigned_extractor_id !== user?.id && s.assigned_reviewer_id !== user?.id) return false
     return true
   })
+
+  // Remember the order shown here so a source page can step to the next one.
+  const navKey = filtered.map(s => s.id).join(',')
+  useEffect(() => {
+    if (view === 'bench') return // the workbench saves its own order when you open a source
+    saveNav(
+      SIMPLE_STEPS.flatMap(st => filtered.filter(s => st.statuses.includes(s.status))),
+      isGlobal ? '/sources' : `/projects/${projectId}/sources`, 'sources',
+    )
+  }, [navKey, view])
+  useEffect(() => {
+    writeSavedState(view, { search, projectFilter: isGlobal ? projectFilter : '', mineOnly })
+  }, [view, search, projectFilter, mineOnly])
 
   const handleDeleteSource = async () => {
     if (!deleteSource) return
@@ -236,15 +279,15 @@ export function SourcesPage() {
       {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex items-center bg-gray-100 rounded-xl p-1">
-          {((canManage ? ['simple', 'kanban', 'table'] : ['queue', 'simple', 'kanban', 'table']) as ('queue' | 'simple' | 'kanban' | 'table')[]).map(v => (
+          {((canManage ? ['bench', 'simple', 'kanban', 'table'] : ['queue', 'bench', 'simple', 'kanban', 'table']) as ('queue' | 'bench' | 'simple' | 'kanban' | 'table')[]).map(v => (
             <button
               key={v}
               onClick={() => setView(v)}
               className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition',
                 view === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}
             >
-              {v === 'queue' ? <ListChecks className="w-3.5 h-3.5" /> : v === 'simple' ? <Sparkles className="w-3.5 h-3.5" /> : v === 'kanban' ? <LayoutGrid className="w-3.5 h-3.5" /> : <TableIcon className="w-3.5 h-3.5" />}
-              {v === 'queue' ? 'My queue' : v === 'simple' ? 'Simple' : v === 'kanban' ? 'Full Kanban' : 'Table'}
+              {v === 'queue' ? <ListChecks className="w-3.5 h-3.5" /> : v === 'bench' ? <LayoutPanelLeft className="w-3.5 h-3.5" /> : v === 'simple' ? <Sparkles className="w-3.5 h-3.5" /> : v === 'kanban' ? <LayoutGrid className="w-3.5 h-3.5" /> : <TableIcon className="w-3.5 h-3.5" />}
+              {v === 'queue' ? 'My queue' : v === 'bench' ? 'Workbench' : v === 'simple' ? 'Simple' : v === 'kanban' ? 'Full Kanban' : 'Table'}
             </button>
           ))}
         </div>
@@ -267,7 +310,7 @@ export function SourcesPage() {
         <div className="relative ml-auto">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />
           <input
-            type="text" placeholder="Search sources…" value={search} onChange={e => setSearch(e.target.value)}
+            id="sources-search" type="text" placeholder="Search sources…" value={search} onChange={e => setSearch(e.target.value)}
             className="pl-9 pr-4 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500 w-52"
           />
         </div>
@@ -287,6 +330,9 @@ export function SourcesPage() {
         )
       ) : view === 'queue' ? (
         <MyQueue sources={filtered} userId={user?.id} projectNames={isGlobal ? projectMap : undefined} />
+      ) : view === 'bench' ? (
+        <SourcesWorkbench sources={filtered} projectNames={projectMap} showProject={isGlobal}
+          backTo={isGlobal ? '/sources' : `/projects/${projectId}/sources`} />
       ) : view === 'simple' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {SIMPLE_STEPS.map(step => {
@@ -301,9 +347,19 @@ export function SourcesPage() {
                 <div className="space-y-2.5 min-h-[60px]">
                   {items.length === 0 ? (
                     <p className="text-xs text-gray-300 px-1">Nothing here</p>
-                  ) : items.map(s => (
-                    <SourceCard key={s.id} source={s} projectId={s.project_id} projectName={isGlobal ? projectMap[s.project_id] : undefined} />
-                  ))}
+                  ) : (
+                    <>
+                      {(expanded[step.label] ? items : items.slice(0, 12)).map(s => (
+                        <SourceCard key={s.id} source={s} projectId={s.project_id} projectName={isGlobal ? projectMap[s.project_id] : undefined} />
+                      ))}
+                      {items.length > 12 && !expanded[step.label] && (
+                        <button type="button" onClick={() => setExpanded(p => ({ ...p, [step.label]: true }))}
+                          className="w-full py-2 text-xs font-semibold text-brand-600 rounded-xl bg-white border border-gray-100 hover:bg-gray-50 transition">
+                          Show {items.length - 12} more
+                        </button>
+                      )}
+                    </>
+                  )}
                 </div>
               </div>
             )

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { createPortal } from 'react-dom'
 import { useParams, Link, useNavigate } from 'react-router-dom'
+import { SourceNav } from '@/components/SourceNav'
 import { JsonRecordViewer } from './JsonRecordViewer'
 import { ActionMenu } from '@/components/ActionMenu'
 import { SopPanel } from '@/components/SopPanel'
@@ -30,7 +31,14 @@ const STATUS_META: Record<SourceStatus, { label: string; color: 'gray'|'amber'|'
 
 type Tab = 'records' | 'files' | 'details' | 'sop'
 
+// A fresh page for every source, so stepping from one source to the next never carries over
+// the previous one's open tabs or half-finished edits.
 export function SourceDetailPage() {
+  const { sourceId } = useParams<{ sourceId: string }>()
+  return <SourceDetailInner key={sourceId} />
+}
+
+function SourceDetailInner() {
   const { projectId, sourceId } = useParams<{ projectId: string; sourceId: string }>()
   const navigate = useNavigate()
   const { user } = useAuthStore()
@@ -865,6 +873,7 @@ export function SourceDetailPage() {
 
   return (
     <div className="p-8 space-y-6">
+      <SourceNav sourceId={sourceId!} />
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <div className="flex items-center gap-2 text-sm text-gray-400 mb-1">
