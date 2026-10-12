@@ -18,7 +18,7 @@ const group = (s: string) => s.replace(/(.{4})/g, '$1 ').trim()
 /** Email preferences and two-step sign-in, shown on the Profile page. */
 export function AccountSettings() {
   const [s, setS] = useState<any>(null)
-  const [setup, setSetup] = useState<{ secret: string; uri: string } | null>(null)
+  const [setup, setSetup] = useState<{ secret: string; uri: string; qr?: string | null } | null>(null)
   const [code, setCode] = useState('')
   const [disabling, setDisabling] = useState(false)
   const [pw, setPw] = useState('')
@@ -83,7 +83,13 @@ export function AccountSettings() {
 
         {setup && !s.totp_enabled && (
           <ol className="mt-5 space-y-4 m-0 pl-0 list-none text-sm text-gray-700">
-            <li><b>1.</b> In your authenticator app choose <i>Add account</i>, then <i>Enter a setup key</i> and type this key.
+            <li><b>1.</b> {setup.qr ? <>In your authenticator app choose <i>Add account</i> and scan this code.</> : <>In your authenticator app choose <i>Add account</i>, then <i>Enter a setup key</i> and type this key.</>}
+              {setup.qr && (
+                <div className="mt-3 inline-block bg-white border border-gray-100 rounded-2xl p-3 shadow-sm">
+                  <img src={setup.qr} alt="QR code for your authenticator app" width={176} height={176} className="block" />
+                </div>
+              )}
+              {setup.qr && <p className="text-xs text-gray-500 mt-2 mb-0">Can't scan? Choose <i>Enter a setup key</i> and type this key instead.</p>}
               <div className="mt-2 flex items-center gap-2 flex-wrap">
                 <code className="font-mono text-sm tracking-wider bg-gray-50 border border-gray-100 rounded-lg px-3 py-2 select-all">{group(setup.secret)}</code>
                 <Button size="sm" variant="secondary" onClick={() => copy(setup.secret)}><Copy className="w-3.5 h-3.5" /> Copy</Button>

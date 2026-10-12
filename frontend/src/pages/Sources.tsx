@@ -98,6 +98,8 @@ export function SourcesPage() {
   }
   const [loading, setLoading] = useState(true)
   const saved = readSavedState()
+  const [tableLimit, setTableLimit] = useState(50)
+  const [colLimit, setColLimit] = useState<Record<string, number>>({})
   const [view, setView] = useState<'queue' | 'bench' | 'simple' | 'kanban' | 'table'>(
     (saved.view as 'queue' | 'bench' | 'simple' | 'kanban' | 'table' | undefined) ?? (canManage ? 'bench' : 'queue'))
   const [search, setSearch] = useState(saved.search ?? '')
@@ -426,7 +428,13 @@ export function SourcesPage() {
                   <span className="text-xs font-bold text-gray-500 bg-white shadow-sm px-2 py-0.5 rounded-full shrink-0">{items.length}</span>
                 </div>
                 <div className="space-y-2.5 min-h-[60px] max-h-[calc(100vh-320px)] overflow-y-auto scrollbar-thin pr-0.5">
-                  {items.map(s => <SourceCard key={s.id} source={s} projectId={s.project_id} projectName={isGlobal ? projectMap[s.project_id] : undefined} />)}
+                  {items.slice(0, colLimit[status] ?? 30).map(s => <SourceCard key={s.id} source={s} projectId={s.project_id} projectName={isGlobal ? projectMap[s.project_id] : undefined} />)}
+                  {items.length > (colLimit[status] ?? 30) && (
+                    <button onClick={() => setColLimit(c => ({ ...c, [status]: (c[status] ?? 30) + 30 }))}
+                      className="w-full text-xs font-semibold text-brand-600 hover:bg-white rounded-xl py-2 transition">
+                      Show {Math.min(30, items.length - (colLimit[status] ?? 30))} more ({items.length - (colLimit[status] ?? 30)} left)
+                    </button>
+                  )}
                 </div>
               </div>
             )
@@ -449,7 +457,7 @@ export function SourcesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {filtered.map(s => {
+              {filtered.slice(0, tableLimit).map(s => {
                 const statusGrad: Record<string, string> = {
                   gray: 'from-gray-400 to-gray-500', amber: 'from-amber-500 to-orange-600',
                   red: 'from-red-500 to-rose-600', blue: 'from-blue-500 to-blue-600',
@@ -526,6 +534,12 @@ export function SourcesPage() {
             </tbody>
           </table>
           </div>
+          {filtered.length > tableLimit && (
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-t border-gray-100 bg-gray-50/60">
+              <span className="text-xs text-gray-500">Showing {tableLimit} of {filtered.length}</span>
+              <button onClick={() => setTableLimit(n => n + 50)} className="text-sm font-semibold text-brand-600 hover:underline">Show 50 more</button>
+            </div>
+          )}
         </Card>
       )}
 

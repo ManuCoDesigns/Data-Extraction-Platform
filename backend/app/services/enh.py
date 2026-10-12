@@ -573,6 +573,17 @@ def verify_totp(secret: str, code: str) -> bool:
     return any(hmac.compare_digest(_hotp(secret, t + d), code) for d in (-1, 0, 1))
 
 
+def qr_svg_data_uri(text: str) -> str | None:
+    """A scannable QR code as an inline SVG image, or None if the library is not installed."""
+    try:
+        import io, base64, segno
+        buf = io.BytesIO()
+        segno.make(text, error="m").save(buf, kind="svg", scale=6, border=2, xmldecl=False, svgns=True, nl=False)
+        return "data:image/svg+xml;base64," + base64.b64encode(buf.getvalue()).decode()
+    except Exception:
+        return None
+
+
 def totp_uri(secret: str, email: str) -> str:
     from urllib.parse import quote
     return f"otpauth://totp/{quote('Data Extraction')}:{quote(email)}?secret={secret}&issuer={quote('Data Extraction')}"

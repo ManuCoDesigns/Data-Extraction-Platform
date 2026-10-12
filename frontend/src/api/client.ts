@@ -416,6 +416,7 @@ export const enhApi = {
   checkLinks: (body: { project_id?: string; source_ids?: string[]; only_unchecked?: boolean; force?: boolean; limit?: number }) =>
     api.post('/enh/links/check', body, { timeout: 120000 }).then(r => r.data),
   markLink: (sourceId: string, status: string, note?: string) => api.put(`/enh/links/${sourceId}`, { status, note }).then(r => r.data),
+  counts: () => api.get('/enh/counts').then(r => r.data),
   delivery: (projectId?: string) => api.get('/enh/delivery', { params: { project_id: projectId || undefined } }).then(r => r.data),
   duplicateSources: (projectId?: string) => api.get('/enh/duplicates/sources', { params: { project_id: projectId || undefined } }).then(r => r.data),
   duplicates: (projectId?: string) => api.get('/enh/duplicates', { params: { project_id: projectId || undefined } }).then(r => r.data),
@@ -432,6 +433,7 @@ export const enhApi = {
   peopleStats: (days = 30, projectId?: string) => api.get('/enh/stats/people', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
   myStats: (days = 30) => api.get('/enh/stats/me', { params: { days } }).then(r => r.data),
   people: (projectId?: string) => api.get('/enh/people', { params: { project_id: projectId || undefined } }).then(r => r.data),
+  bulkUndo: (snapshots: any[]) => api.post('/enh/sources/bulk/undo', { snapshots }).then(r => r.data),
   bulk: (body: { source_ids: string[]; action: string; user_id?: string | null; user_ids?: string[]; note?: string }) => api.post('/enh/sources/bulk', body).then(r => r.data),
   settings: () => api.get('/enh/me/settings').then(r => r.data),
   saveSettings: (body: { email_alerts?: boolean; email_digest?: boolean; prefs?: Record<string, string> }) => api.put('/enh/me/settings', body).then(r => r.data),

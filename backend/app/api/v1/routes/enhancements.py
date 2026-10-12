@@ -147,6 +147,17 @@ def duplicate_sources(project_id: str | None = None, db: Session = Depends(get_d
     return {"groups": groups, "total": len(groups)}
 
 
+@router.get("/counts")
+def nav_counts(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Small numbers for the sidebar: open client questions, and websites we could not open."""
+    pids = _project_ids_for(db, user)
+    open_q = db.query(func.count(ClientQuestion.id)).filter(ClientQuestion.project_id.in_(pids), ClientQuestion.status == "open").scalar() if pids else 0
+    vis = _visible_sources(db, user).filter(Source.status != SourceStatus.APPROVED).with_entities(Source.id)
+    bad = (db.query(func.count(SourceLinkCheck.source_id))
+           .filter(SourceLinkCheck.source_id.in_(vis), SourceLinkCheck.status.in_(("login", "blocked", "dead"))).scalar())
+    return {"open_questions": int(open_q or 0), "link_problems": int(bad or 0)}
+
+
 # ─── Delivery summary (for the client conversation) ─────────────────────────
 
 @router.get("/delivery")
@@ -464,6 +475,15 @@ def _eligible(db, source: Source, u: User) -> str | None:
     return None
 
 
+UNDOABLE = {"assign_extractor", "unassign_extractor", "add_peers", "remove_peers"}
+
+
+def _snapshot(s: Source) -> dict:
+    return {"source_id": s.id, "extractor_id": s.assigned_extractor_id, "reviewer_id": s.assigned_reviewer_id,
+            "peers": [{"user_id": p.user_id, "status": p.status, "comment": p.comment, "assigned_by": p.assigned_by,
+                       "submitted_at": p.submitted_at.isoformat() if p.submitted_at else None} for p in s.peer_reviews]}
+
+
 @router.post("/sources/bulk")
 def bulk(body: BulkBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if not (_roles(user) & {"org_admin", "project_admin"}):
@@ -492,10 +512,13 @@ def bulk(body: BulkBody, db: Session = Depends(get_db), user: User = Depends(get
         raise HTTPException(status_code=422, detail="Unknown action.")
     people = {u.id: u for u in db.query(User).filter(User.id.in_(ids), User.is_active == True).all()} if ids else {}  # noqa: E712
 
+    snaps: dict[str, dict] = {}
     for s in sources:
         if s.status == SourceStatus.APPROVED:
             results.append({"source_id": s.id, "ok": False, "reason": "Already approved"})
             continue
+        if body.action in UNDOABLE:
+            snaps[s.id] = _snapshot(s)
         if body.action == "send_back":
             if s.status not in REVIEW_STAGES:
                 results.append({"source_id": s.id, "ok": False, "reason": "Only work that has been delivered for review can be sent back"})
@@ -576,7 +599,50 @@ def bulk(body: BulkBody, db: Session = Depends(get_db), user: User = Depends(get
             s.assigned_reviewer_id = rest[0].user_id if rest else None
             results.append({"source_id": s.id, "ok": bool(gone), "reason": None if gone else "They were not on it"})
     db.commit()
-    return {"results": results, "done": sum(1 for r in results if r["ok"]), "skipped": sum(1 for r in results if not r["ok"])}
+    undo = [snaps[r["source_id"]] for r in results if r["ok"] and r["source_id"] in snaps]
+    return {"results": results, "done": sum(1 for r in results if r["ok"]), "skipped": sum(1 for r in results if not r["ok"]),
+            "undo": undo if body.action in UNDOABLE else []}
+
+
+class UndoBody(BaseModel):
+    snapshots: list[dict]
+
+
+@router.post("/sources/bulk/undo")
+def bulk_undo(body: UndoBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Put the extractor and peer reviewers back the way they were before a bulk assignment."""
+    if not (_roles(user) & {"org_admin", "project_admin"}):
+        raise HTTPException(status_code=403, detail="Only admins can change several sources at once.")
+    if len(body.snapshots) > 200:
+        raise HTTPException(status_code=422, detail="Too many sources to undo at once.")
+    by_id = {str(x.get("source_id")): x for x in body.snapshots}
+    sources = _visible_sources(db, user).filter(Source.id.in_(list(by_id))).all()
+    restored, skipped = 0, len(by_id) - len(sources)
+    for s in sources:
+        snap = by_id[s.id]
+        if s.status == SourceStatus.APPROVED:
+            skipped += 1
+            continue
+        s.assigned_extractor_id = snap.get("extractor_id")
+        s.assigned_reviewer_id = snap.get("reviewer_id")
+        keep = {p["user_id"] for p in snap.get("peers", [])}
+        for p in list(s.peer_reviews):
+            if p.user_id not in keep:
+                s.peer_reviews.remove(p)
+        have = {p.user_id for p in s.peer_reviews}
+        for p in snap.get("peers", []):
+            if p["user_id"] not in have:
+                sub = None
+                if p.get("submitted_at"):
+                    try:
+                        sub = datetime.fromisoformat(p["submitted_at"])
+                    except ValueError:
+                        sub = None
+                s.peer_reviews.append(SourcePeerReview(user_id=p["user_id"], status=p.get("status") or "pending",
+                                                       comment=p.get("comment"), submitted_at=sub, assigned_by=p.get("assigned_by")))
+        restored += 1
+    db.commit()
+    return {"restored": restored, "skipped": skipped}
 
 
 @router.get("/people")
@@ -666,7 +732,8 @@ def totp_setup(db: Session = Depends(get_db), user: User = Depends(get_current_u
         raise HTTPException(status_code=409, detail="Two-step sign-in is already on. Turn it off first to set it up again.")
     s.totp_secret = enh.new_totp_secret()
     db.commit()
-    return {"secret": s.totp_secret, "uri": enh.totp_uri(s.totp_secret, user.email)}
+    uri = enh.totp_uri(s.totp_secret, user.email)
+    return {"secret": s.totp_secret, "uri": uri, "qr": enh.qr_svg_data_uri(uri)}
 
 
 class CodeIn(BaseModel):

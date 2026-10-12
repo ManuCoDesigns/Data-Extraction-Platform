@@ -6,7 +6,7 @@ import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
   Menu, X, Shield, Activity, AlertTriangle,
-  Zap, HeartPulse, CircleHelp, CalendarCheck, PackageCheck, ChartColumn, History,
+  Zap, HeartPulse, CircleHelp, CalendarCheck, PackageCheck, ChartColumn, History, Search,
 } from 'lucide-react'
 import { cn, ToastContainer, toast } from '@/components/ui'
 import { notificationsApi, sourcesApi } from '@/api/client'
@@ -15,6 +15,9 @@ import type { Notification } from '@/types'
 import { formatDistanceToNow } from 'date-fns'
 import { NotificationBanner } from '@/components/NotificationBanner'
 import { IdleGuard } from '@/components/enh/IdleGuard'
+import { CommandPalette } from '@/components/enh/CommandPalette'
+import { enhApi } from '@/api/client'
+import { UndoBanner } from '@/components/enh/UndoBanner'
 
 export function AppLayout() {
   const { user, logout, fetchMe } = useAuthStore()
@@ -26,6 +29,8 @@ export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
   const [escalationCount, setEscalationCount] = useState(0)
+  const [counts, setCounts] = useState({ open_questions: 0, link_problems: 0 })
+  const [paletteOpen, setPaletteOpen] = useState(false)
   // Tracks notification ids already seen, so a genuinely new one arriving
   // between polls can get its own toast — without spamming a toast for
   // every item already in the mailbox on first load.
@@ -39,6 +44,18 @@ export function AppLayout() {
   useEffect(() => { fetchMe() }, [])
   useEffect(() => { if (user?.id) usePrefs.getState().load() }, [user?.id])
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen(o => !o) } }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [])
+  useEffect(() => {
+    if (!user?.id) return
+    const load = () => enhApi.counts().then(setCounts).catch(() => {})
+    load()
+    const iv = setInterval(load, 120000)
+    return () => clearInterval(iv)
+  }, [user?.id, location.pathname])
 
   useEffect(() => {
     if (!showNotif) return
@@ -148,8 +165,8 @@ export function AppLayout() {
     { to: '/workload',    icon: Activity,        label: 'Team Workload', show: isTeamLead },
     { to: '/digest',      icon: CalendarCheck,   label: 'Daily Digest', show: isTeamLead },
     { to: '/delivery',    icon: PackageCheck,    label: 'Delivery Summary', show: isTeamLead },
-    { to: '/data-health', icon: HeartPulse,      label: 'Data Health',  show: true },
-    { to: '/client-questions', icon: CircleHelp, label: 'Client Questions', show: true },
+    { to: '/data-health', icon: HeartPulse,      label: 'Data Health',  show: true, badge: counts.link_problems, badgeColor: '#d97706' },
+    { to: '/client-questions', icon: CircleHelp, label: 'Client Questions', show: true, badge: counts.open_questions, badgeColor: '#d97706' },
     { to: '/insights',    icon: ChartColumn,     label: isTeamLead ? 'Insights' : 'My Stats', show: true },
     { to: '/schemas',     icon: Layers,          label: 'Schemas',      show: isAdmin && canManageSchemas },
   ].filter(n => n.show)
@@ -161,7 +178,7 @@ export function AppLayout() {
     { to: '/help',        icon: BookOpen, label: 'Help',     show: true },
   ].filter(n => n.show)
 
-  const NavItem = ({ to, icon: Icon, label, exact = false, badge, forceActive }: any) => (
+  const NavItem = ({ to, icon: Icon, label, exact = false, badge, badgeColor = '#dc2626', forceActive }: any) => (
     <NavLink to={to} end={exact}
       style={({ isActive }) => {
         const active = forceActive !== undefined ? forceActive : isActive
@@ -180,9 +197,9 @@ export function AppLayout() {
       {badge > 0 && (
         <span style={{
           minWidth: 18, height: 18, padding: '0 5px', borderRadius: 20,
-          background: '#dc2626', color: '#fff', fontSize: 10, fontWeight: 700,
+          background: badgeColor, color: '#fff', fontSize: 10, fontWeight: 700,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
-        }}>{badge > 9 ? '9+' : badge}</span>
+        }} aria-label={`${badge} need attention`}>{badge > 99 ? '99+' : badge}</span>
       )}
     </NavLink>
   )
@@ -209,6 +226,14 @@ export function AppLayout() {
             <p style={{ fontSize: 10, color: '#94a3b8', margin: 0 }}>Platform · Careerflow</p>
           </div>
         </div>
+      </div>
+
+      <div style={{ padding: '10px 10px 0' }}>
+        <button type="button" onClick={() => setPaletteOpen(true)} aria-label="Quick search"
+          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>
+          <Search style={{ width: 14, height: 14 }} /> <span style={{ flex: 1, textAlign: 'left' }}>Quick search</span>
+          <kbd style={{ fontSize: 10, fontWeight: 600, border: '1px solid #e2e8f0', borderRadius: 4, padding: '1px 5px', background: '#fff' }}>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
+        </button>
       </div>
 
       {/* Nav */}
@@ -393,7 +418,9 @@ export function AppLayout() {
       </main>
 
       <ToastContainer />
+      <UndoBanner />
       <IdleGuard onTimeout={() => { logout() }} />
+      <CommandPalette pages={[...mainNav, ...adminNav].map(n => ({ to: n.to, label: n.label }))} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, CheckCheck, ChevronUp, CornerUpLeft, UserMinus, UserPlus, Users, X } from 'lucide-react'
 import { enhApi } from '@/api/client'
 import { Avatar, Button, Modal, cn, toast } from '@/components/ui'
+import { useUndo } from '@/lib/undo'
 
 interface Person { user_id: string; name: string; email: string; role: string }
 type Mode = 'extractor' | 'add_peers' | 'remove_peers' | 'send_back' | 'approve' | null
@@ -47,6 +48,14 @@ export function BulkBar({ ids, names, onClear, onDone }: Props) {
       const rows = r.results.filter((x: any) => !x.ok).map((x: any) => ({ name: names[x.source_id] ?? 'A source', reason: x.reason ?? 'Skipped' }))
       if (r.skipped > 0) setReport({ done: r.done, skipped: r.skipped, rows })
       else toast.success(`Updated ${r.done} source${r.done === 1 ? '' : 's'}`)
+      if (r.undo?.length) {
+        const snaps = r.undo
+        useUndo.getState().offer(`Updated ${r.done} source${r.done === 1 ? '' : 's'}`, async () => {
+          const u = await enhApi.bulkUndo(snaps)
+          onDone()
+          return `Put back ${u.restored} source${u.restored === 1 ? '' : 's'}${u.skipped ? `, ${u.skipped} could not be changed` : ''}`
+        })
+      }
       setMode(null); setPick(new Set()); setNote('')
       onDone()
       if (r.skipped === 0) onClear()
