@@ -220,8 +220,10 @@ def _is_assigned_reviewer(user: User, source: Source) -> bool:
 
 # ─── Serialization ───────────────────────────────────────────────────────────
 
-def _serialize_source(s: Source) -> SourceOut:
+def _serialize_source(s: Source, peer=None) -> SourceOut:
     return SourceOut(
+        peer_reviewed_records=peer[0] if peer else 0,
+        peer_reviewed_at=peer[1] if peer else None,
         id=s.id, project_id=s.project_id, schema_id=s.schema_id,
         schema_name=s.schema.name if s.schema else None,
         name=s.name, description=s.description, website_url=s.website_url,
@@ -393,7 +395,24 @@ def list_sources(
         )
 
     sources = q.order_by(Source.updated_at.desc()).all()
-    return [_serialize_source(s) for s in sources]
+
+    # "Peer reviewed" = a reviewer approved the record and an admin has yet to sign off.
+    # One grouped query for the whole list, not one per source.
+    from sqlalchemy import func
+    peer = {}
+    ids = [s.id for s in sources]
+    for i in range(0, len(ids), 500):
+        rows = (
+            db.query(ExtractionJob.source_id, func.count(ExtractedRecord.id), func.max(ExtractedRecord.reviewed_at))
+            .join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
+            .filter(ExtractionJob.source_id.in_(ids[i:i + 500]),
+                    ExtractedRecord.review_status == ReviewStatus.PENDING_ADMIN_REVIEW)
+            .group_by(ExtractionJob.source_id)
+            .all()
+        )
+        for sid, n, at in rows:
+            peer[sid] = (int(n), at)
+    return [_serialize_source(s, peer.get(s.id)) for s in sources]
 
 
 @router.post("", response_model=SourceOut, status_code=201)

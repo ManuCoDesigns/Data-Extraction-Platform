@@ -160,12 +160,16 @@ export function SourcesPage() {
     loadSchemasAndMembers(pid || '')
   }, [form.project_id, projectId])
 
-  const filtered = sources.filter(s => {
+  // The workbench has its own project pills (with counts), so it gets the list before the project filter.
+  const matchesBase = (s: Source) => {
     if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false
-    if (isGlobal && projectFilter && s.project_id !== projectFilter) return false
     if (mineOnly && s.assigned_extractor_id !== user?.id && s.assigned_reviewer_id !== user?.id) return false
     return true
-  })
+  }
+  const benchSources = sources.filter(matchesBase)
+  // A remembered project that no longer exists must not leave the list empty with no way to clear it.
+  const activeProject = isGlobal && sources.some(s => s.project_id === projectFilter) ? projectFilter : ''
+  const filtered = benchSources.filter(s => !activeProject || s.project_id === activeProject)
 
   // Remember the order shown here so a source page can step to the next one.
   const navKey = filtered.map(s => s.id).join(',')
@@ -300,7 +304,7 @@ export function SourcesPage() {
           <UserIcon className="w-3.5 h-3.5" /> Assigned to me
         </button>
 
-        {isGlobal && projects.length > 1 && (
+        {isGlobal && projects.length > 1 && view !== 'bench' && (
           <Select value={projectFilter} onChange={e => setProjectFilter(e.target.value)} className="!py-1.5 !text-xs w-44">
             <option value="">All projects</option>
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -331,7 +335,8 @@ export function SourcesPage() {
       ) : view === 'queue' ? (
         <MyQueue sources={filtered} userId={user?.id} projectNames={isGlobal ? projectMap : undefined} />
       ) : view === 'bench' ? (
-        <SourcesWorkbench sources={filtered} projectNames={projectMap} showProject={isGlobal}
+        <SourcesWorkbench sources={benchSources} projectNames={projectMap} showProject={isGlobal}
+          projectFilter={activeProject} onProjectFilter={isGlobal ? setProjectFilter : undefined}
           backTo={isGlobal ? '/sources' : `/projects/${projectId}/sources`} />
       ) : view === 'simple' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

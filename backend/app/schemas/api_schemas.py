@@ -312,6 +312,8 @@ class SourceOut(BaseModel):
     review_completed_at: Optional[datetime]
     approved_at: Optional[datetime]
     reset_count: int = 0
+    peer_reviewed_records: int = 0          # reviewer-approved, awaiting admin sign-off
+    peer_reviewed_at: Optional[datetime] = None
     created_by: str
 
     model_config = {"from_attributes": True}

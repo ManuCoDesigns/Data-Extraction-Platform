@@ -249,6 +249,8 @@ export interface Source {
   valid_records: number
   invalid_records: number
   approved_records: number
+  peer_reviewed_records?: number
+  peer_reviewed_at?: string | null
   notes?: string
   created_at: string
   updated_at: string
