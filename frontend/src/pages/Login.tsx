@@ -1,9 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
+import { authApi } from '@/api/client'
 import { Database, ArrowRight, Lock, Mail, CheckCircle, ShieldCheck } from 'lucide-react'
 
+type Stats = { records_processed: number | null; accuracy_percent: number | null; active_projects: number | null }
+
+// 842 -> "842", 12,400 -> "12.4k", 1,200,000 -> "1.2M". Real numbers, just shortened.
+function compact(n: number | null | undefined) {
+  if (n == null) return '—'
+  if (n < 1000) return String(n)
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0).replace(/\.0$/, '')}k`
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M`
+}
+
 export function LoginPage() {
+  const [stats, setStats] = useState<Stats | null | 'failed'>(null)
+  useEffect(() => { authApi.publicStats().then(setStats).catch(() => setStats('failed')) }, [])
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
   const [code,     setCode]     = useState('')
@@ -89,9 +102,20 @@ export function LoginPage() {
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 24 }}>
-          {[['50k+','Records Processed'],['98.2%','Accuracy Rate'],['11','Active Projects']].map(([v,l]) => (
+          {(() => {
+            const st = stats && stats !== 'failed' ? stats : null
+            const loading = stats === null
+            const show = (v: string) => (loading ? '' : v)
+            return [
+              [show(compact(st?.records_processed)), 'Records Processed'],
+              [show(st?.accuracy_percent == null ? '—' : `${st.accuracy_percent}%`), 'Approved Without Corrections'],
+              [show(compact(st?.active_projects)), 'Active Projects'],
+            ]
+          })().map(([v,l]) => (
             <div key={l}>
-              <p style={{ fontSize: 28, fontWeight: 800, color: '#fff', margin: 0 }}>{v}</p>
+              <p aria-busy={v === ''} style={{ fontSize: 28, fontWeight: 800, color: '#fff', margin: 0, minHeight: 34 }}>
+                {v === '' ? <span style={{ display: 'inline-block', width: 64, height: 22, borderRadius: 6, background: 'rgba(255,255,255,.12)' }} /> : v}
+              </p>
               <p style={{ fontSize: 12, color: 'rgba(255,255,255,.4)', margin: '4px 0 0' }}>{l}</p>
             </div>
           ))}

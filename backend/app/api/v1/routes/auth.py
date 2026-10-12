@@ -4,10 +4,45 @@ from app.db.session import get_db
 from app.core.security import (
     verify_password, create_access_token, create_refresh_token, decode_token, get_current_user
 )
-from app.models.all_models import User, AuditLog, AuditAction
+from app.models.all_models import User, AuditLog, AuditAction, ExtractedRecord, Project, ProjectStatus, ReviewStatus
 from app.schemas.api_schemas import LoginRequest, TokenResponse, RefreshRequest, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+_PUBLIC_CACHE: dict = {"at": 0.0, "data": None}
+
+
+@router.get("/public-stats")
+def public_stats(db: Session = Depends(get_db)):
+    """Three headline numbers for the sign-in page. Counts only, no names or content, so it is safe without a login.
+    Cached for a minute so the login page cannot be used to hammer the database."""
+    import time
+    from sqlalchemy import func, case
+    now = time.time()
+    if _PUBLIC_CACHE["data"] is not None and now - _PUBLIC_CACHE["at"] < 60:
+        return _PUBLIC_CACHE["data"]
+    try:
+        total = db.query(func.count(ExtractedRecord.id)).scalar() or 0
+        approved, clean, rejected = db.query(
+            func.coalesce(func.sum(case((ExtractedRecord.review_status == ReviewStatus.APPROVED, 1), else_=0)), 0),
+            func.coalesce(func.sum(case((
+                (ExtractedRecord.review_status == ReviewStatus.APPROVED) & (func.coalesce(ExtractedRecord.correction_count, 0) == 0), 1), else_=0)), 0),
+            func.coalesce(func.sum(case((ExtractedRecord.review_status == ReviewStatus.REJECTED, 1), else_=0)), 0),
+        ).one()
+        reviewed = int(approved) + int(rejected)
+        projects = db.query(func.count(Project.id)).filter(Project.status == ProjectStatus.ACTIVE).scalar() or 0
+        data = {
+            "records_processed": int(total),
+            # share of reviewed records that were approved exactly as extracted, no corrections
+            "accuracy_percent": round(100.0 * int(clean) / reviewed, 1) if reviewed else None,
+            "active_projects": int(projects),
+        }
+    except Exception:
+        db.rollback()
+        data = {"records_processed": None, "accuracy_percent": None, "active_projects": None}
+    _PUBLIC_CACHE.update(at=now, data=data)
+    return data
 
 
 @router.post("/login", response_model=TokenResponse)

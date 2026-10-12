@@ -93,6 +93,7 @@ api.interceptors.response.use(
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const authApi = {
+  publicStats: () => api.get('/auth/public-stats').then(r => r.data as { records_processed: number | null; accuracy_percent: number | null; active_projects: number | null }),
   login: (email: string, password: string, code?: string) =>
     api.post('/auth/login', { email, password, code: code || undefined }).then(r => r.data),
   me: () => api.get('/auth/me').then(r => r.data),
