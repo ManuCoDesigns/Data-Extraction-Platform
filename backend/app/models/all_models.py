@@ -372,6 +372,28 @@ class Source(Base):
     reviewer = relationship("User", foreign_keys=[assigned_reviewer_id])
     creator = relationship("User", foreign_keys=[created_by])
     jobs = relationship("ExtractionJob", back_populates="source")
+    peer_reviews = relationship("SourcePeerReview", cascade="all, delete-orphan", order_by="SourcePeerReview.created_at")
+
+
+class SourcePeerReview(Base):
+    """One peer reviewer assigned to a source, and their review of it.
+
+    A peer finishes by submitting a comment (required). The admin approves the source only
+    after every assigned peer has submitted. Sending work back resets submitted peers to pending.
+    """
+    __tablename__ = "source_peer_reviews"
+    __table_args__ = (UniqueConstraint("source_id", "user_id", name="uq_source_peer_reviews_source_user"),)
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="pending")   # pending | submitted
+    comment = Column(Text, nullable=True)
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    assigned_by = Column(String(36), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+
+    user = relationship("User", foreign_keys=[user_id])
 
 
 class ExtractionJob(Base):

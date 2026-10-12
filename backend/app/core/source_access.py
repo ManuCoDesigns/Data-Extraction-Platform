@@ -10,9 +10,9 @@ Everything here is enforced on the server; hiding things in the UI is only a
 convenience on top of it.
 """
 from fastapi import HTTPException
-from sqlalchemy import and_, false, or_
+from sqlalchemy import and_, false, or_, select
 
-from app.models.all_models import ExtractionJob, ProjectMember, Source
+from app.models.all_models import ExtractionJob, ProjectMember, Source, SourcePeerReview
 
 # Global roles that see every source in the projects they can open.
 _GLOBAL_FULL = {"org_admin", "project_admin", "qa_lead"}
@@ -50,7 +50,9 @@ def restrict_sources_query(q, user, db):
     if is_org_admin(user):
         return q
     full, restricted = project_scopes(user, db)
-    mine = or_(Source.assigned_extractor_id == user.id, Source.assigned_reviewer_id == user.id)
+    # assigned as extractor, as the main reviewer, or as one of the source's peer reviewers
+    peer_of = select(SourcePeerReview.source_id).where(SourcePeerReview.user_id == user.id)
+    mine = or_(Source.assigned_extractor_id == user.id, Source.assigned_reviewer_id == user.id, Source.id.in_(peer_of))
     clauses = []
     if full:
         clauses.append(Source.project_id.in_(full))
@@ -65,7 +67,9 @@ def can_view_source(user, source, db) -> bool:
     full, restricted = project_scopes(user, db)
     if source.project_id in full:
         return True
-    return source.project_id in restricted and user.id in (source.assigned_extractor_id, source.assigned_reviewer_id)
+    if source.project_id not in restricted:
+        return False
+    return user.id in (source.assigned_extractor_id, source.assigned_reviewer_id) or any(r.user_id == user.id for r in source.peer_reviews)
 
 
 def assert_can_view_source(user, source, db) -> None:

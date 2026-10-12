@@ -251,6 +251,10 @@ export interface Source {
   approved_records: number
   peer_reviewed_records?: number
   peer_reviewed_at?: string | null
+  peer_ids?: string[]
+  peer_total?: number
+  peer_submitted?: number
+  peer_gated?: boolean
   notes?: string
   created_at: string
   updated_at: string

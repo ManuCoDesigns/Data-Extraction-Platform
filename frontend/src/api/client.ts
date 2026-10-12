@@ -273,6 +273,9 @@ export const workSubmissionsApi = {
 
 // ─── Sources ──────────────────────────────────────────────────────────────────
 export const sourcesApi = {
+  getPeerReviews: (id: string) => api.get(`/sources/${id}/peer-reviews`).then(r => r.data),
+  setPeerReviewers: (id: string, userIds: string[]) => api.put(`/sources/${id}/peer-reviewers`, { user_ids: userIds }).then(r => r.data),
+  submitPeerReview: (id: string, comment: string) => api.post(`/sources/${id}/peer-review/submit`, { comment }).then(r => r.data),
   list: (projectId?: string, status?: string, assignedToMe?: boolean) =>
     api.get('/sources', { params: { project_id: projectId, status, assigned_to_me: assignedToMe || undefined } }).then(r => r.data),
   create: (projectId: string, data: object) =>

@@ -12,6 +12,7 @@ import { useCapability } from '@/lib/permissions'
 import { MyQueue } from '@/components/MyQueue'
 import { SourcesWorkbench } from '@/components/SourcesWorkbench'
 import { saveNav } from '@/lib/sourceNav'
+import { isPeerOf } from '@/lib/peers'
 
 const STATUS_META: Record<SourceStatus, { label: string; color: 'gray' | 'amber' | 'red' | 'blue' | 'purple' | 'green' | 'indigo' }> = {
   not_started:       { label: 'Not Started',       color: 'gray' },
@@ -163,7 +164,7 @@ export function SourcesPage() {
   // The workbench has its own project pills (with counts), so it gets the list before the project filter.
   const matchesBase = (s: Source) => {
     if (search && !s.name.toLowerCase().includes(search.toLowerCase())) return false
-    if (mineOnly && s.assigned_extractor_id !== user?.id && s.assigned_reviewer_id !== user?.id) return false
+    if (mineOnly && s.assigned_extractor_id !== user?.id && !isPeerOf(s, user?.id)) return false
     return true
   }
   const benchSources = sources.filter(matchesBase)
@@ -535,7 +536,7 @@ export function SourcesPage() {
               <option value="">Unassigned</option>
               {members.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
             </Select>
-            <Select label="Assign reviewer" value={form.assigned_reviewer_id} onChange={e => setForm(f => ({ ...f, assigned_reviewer_id: e.target.value }))}>
+            <Select label="First peer reviewer (add more on the source page)" value={form.assigned_reviewer_id} onChange={e => setForm(f => ({ ...f, assigned_reviewer_id: e.target.value }))}>
               <option value="">Unassigned</option>
               {members.map(m => <option key={m.id} value={m.id}>{m.full_name}</option>)}
             </Select>

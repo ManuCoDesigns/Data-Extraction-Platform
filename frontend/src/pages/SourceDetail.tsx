@@ -6,6 +6,8 @@ import { JsonRecordViewer } from './JsonRecordViewer'
 import { ActionMenu } from '@/components/ActionMenu'
 import { SopPanel } from '@/components/SopPanel'
 import { XtriumNoticesBanner } from '@/components/XtriumNoticesBanner'
+import { PeerReviewPanel } from '@/components/PeerReviewPanel'
+import { isPeerOf } from '@/lib/peers'
 import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
@@ -437,7 +439,7 @@ function SourceDetailInner() {
   const userRoles = user?.roles ?? []
   const isAdmin = userRoles.includes('org_admin') || userRoles.includes('project_admin')
   const isExtractor = source?.assigned_extractor_id === user?.id || isAdmin
-  const isReviewer = source?.assigned_reviewer_id === user?.id || isAdmin || userRoles.includes('qa_lead')
+  const isReviewer = isPeerOf(source, user?.id) || isAdmin || userRoles.includes('qa_lead')
 
   const [uploadProgress, setUploadProgress] = useState(0)
   const [splitStatus, setSplitStatus] = useState<string | null>(null)
@@ -1040,7 +1042,6 @@ function SourceDetailInner() {
       <Card className="p-4 flex items-center gap-6 flex-wrap">
         {[
           { role: 'Extractor', icon: '⛏️', grad: 'from-violet-400 to-purple-600', field: 'assigned_extractor_id' as const, name: source.assigned_extractor_name, id: source.assigned_extractor_id },
-          { role: 'Reviewer', icon: '🔍', grad: 'from-cyan-400 to-blue-600', field: 'assigned_reviewer_id' as const, name: source.assigned_reviewer_name, id: source.assigned_reviewer_id },
         ].map(({ role, icon, grad, field, name, id }) => (
           <div key={role} className="flex items-center gap-2.5">
             <div className={cn('w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0 bg-gradient-to-br shadow-sm', grad)}>{icon}</div>
@@ -1062,6 +1063,8 @@ function SourceDetailInner() {
           Updated {safeFromNow(source.updated_at)}
         </div>
       </Card>
+
+      <PeerReviewPanel sourceId={source.id} onChanged={load} />
 
       <div style={{ display: 'flex', gap: 4, padding: '4px', background: '#f1f5f9', borderRadius: 12, alignSelf: 'flex-start' }}>
         {((isFromXtrium ? ['records', 'files', 'details', 'sop'] : ['records', 'files', 'details']) as Tab[]).map(t => (

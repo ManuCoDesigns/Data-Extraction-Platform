@@ -314,6 +314,10 @@ class SourceOut(BaseModel):
     reset_count: int = 0
     peer_reviewed_records: int = 0          # reviewer-approved, awaiting admin sign-off
     peer_reviewed_at: Optional[datetime] = None
+    peer_ids: list[str] = []                # everyone who peer reviews this source
+    peer_total: int = 0
+    peer_submitted: int = 0                 # how many have submitted their comment
+    peer_gated: bool = False                # True once peers are assigned: admin approval waits for them
     created_by: str
 
     model_config = {"from_attributes": True}

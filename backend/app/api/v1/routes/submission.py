@@ -360,7 +360,7 @@ def sources_summary(
 
     # My assigned sources (needs action)
     my_extracting = [s for s in sources if s.assigned_extractor_id == current_user.id and s.status.value in ("extracting", "needs_fixes", "changes_requested")]
-    my_reviewing = [s for s in sources if s.assigned_reviewer_id == current_user.id and s.status.value in ("ready_for_review", "in_review")]
+    my_reviewing = [s for s in sources if (s.assigned_reviewer_id == current_user.id or any(r.user_id == current_user.id for r in s.peer_reviews)) and s.status.value in ("ready_for_review", "in_review")]
 
     def _src(s: Source) -> dict:
         return {

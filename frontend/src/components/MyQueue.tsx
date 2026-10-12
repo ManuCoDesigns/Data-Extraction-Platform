@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { ChevronDown, ChevronRight, ArrowUpRight } from 'lucide-react'
 import { Badge, cn, safeFromNow } from '@/components/ui'
 import type { Source } from '@/types'
+import { isPeerOf } from '@/lib/peers'
 
 const STATUS: Record<string, { label: string; color: 'gray' | 'amber' | 'red' | 'blue' | 'purple' | 'green' | 'indigo' }> = {
   not_started: { label: 'Not Started', color: 'gray' },
@@ -28,7 +29,7 @@ export interface QueueItem { source: Source; role: 'extract' | 'review'; group: 
 // What does this person have to do with this source right now?
 export function classify(s: Source, userId: string | undefined): QueueItem {
   const isExtractor = !!userId && s.assigned_extractor_id === userId
-  const isReviewer = !!userId && s.assigned_reviewer_id === userId
+  const isReviewer = isPeerOf(s, userId)
   const rank = RANK[s.status] ?? 9
   if (s.status === 'approved') return { source: s, role: isExtractor ? 'extract' : 'review', group: 'done', rank }
   if (isExtractor && EXTRACT_ACTION.has(s.status)) return { source: s, role: 'extract', group: 'action', rank }

@@ -19,7 +19,8 @@ import io, json, math, re
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
+from sqlalchemy import select as sa_select
+from sqlalchemy.orm import Session, selectinload
 from pydantic import BaseModel
 import pandas as pd
 
@@ -30,7 +31,7 @@ from app.models.all_models import (
     Source, SourceStatus, Project, ProjectMember, User, Schema, SchemaVersion,
     ExtractionJob, ExtractedRecord, JobStatus, SourceType as FileSourceType,
     ExtractionConfidence, ReviewStatus, AuditLog, AuditAction, Notification,
-    LLMCallLog, SubmissionBatch, UploadedFileEntry,
+    LLMCallLog, SubmissionBatch, UploadedFileEntry, SourcePeerReview,
 )
 from app.schemas.api_schemas import (
     SourceCreate, SourceUpdate, SourceOut, SourceUploadSummary,
@@ -215,7 +216,7 @@ def _is_assigned_reviewer(user: User, source: Source) -> bool:
     roles = _user_roles(user)
     if "project_admin" in roles or "qa_lead" in roles:
         return True
-    return source.assigned_reviewer_id == user.id
+    return source.assigned_reviewer_id == user.id or any(r.user_id == user.id for r in source.peer_reviews)
 
 
 # ─── Serialization ───────────────────────────────────────────────────────────
@@ -223,6 +224,9 @@ def _is_assigned_reviewer(user: User, source: Source) -> bool:
 def _serialize_source(s: Source, peer=None) -> SourceOut:
     return SourceOut(
         peer_reviewed_records=peer[0] if peer else 0,
+        peer_ids=sorted({r.user_id for r in s.peer_reviews} | ({s.assigned_reviewer_id} if s.assigned_reviewer_id else set())),
+        peer_total=len(s.peer_reviews), peer_submitted=sum(1 for r in s.peer_reviews if r.status == 'submitted'),
+        peer_gated=bool(s.peer_reviews),
         peer_reviewed_at=peer[1] if peer else None,
         id=s.id, project_id=s.project_id, schema_id=s.schema_id,
         schema_name=s.schema.name if s.schema else None,
@@ -392,9 +396,10 @@ def list_sources(
     if assigned_to_me:
         q = q.filter(
             (Source.assigned_extractor_id == current_user.id) | (Source.assigned_reviewer_id == current_user.id)
+            | Source.id.in_(sa_select(SourcePeerReview.source_id).where(SourcePeerReview.user_id == current_user.id))
         )
 
-    sources = q.order_by(Source.updated_at.desc()).all()
+    sources = q.options(selectinload(Source.peer_reviews)).order_by(Source.updated_at.desc()).all()
 
     # "Peer reviewed" = a reviewer approved the record and an admin has yet to sign off.
     # One grouped query for the whole list, not one per source.
@@ -448,6 +453,8 @@ def create_source(
     )
     db.add(source)
     db.flush()
+    if payload.assigned_reviewer_id and payload.assigned_reviewer_id != payload.assigned_extractor_id:
+        source.peer_reviews.append(SourcePeerReview(user_id=payload.assigned_reviewer_id, status="pending", assigned_by=current_user.id))
     db.add(AuditLog(
         user_id=current_user.id, project_id=project_id,
         action=AuditAction.SOURCE_CREATED, after_value={"name": payload.name},
@@ -723,7 +730,14 @@ def update_source(
             source.status = SourceStatus.EXTRACTING
             source.extraction_started_at = datetime.now(timezone.utc)
     if payload.assigned_reviewer_id is not None:
+        old_reviewer = source.assigned_reviewer_id
         source.assigned_reviewer_id = payload.assigned_reviewer_id or None
+        if old_reviewer and old_reviewer != source.assigned_reviewer_id:
+            for r in [r for r in source.peer_reviews if r.user_id == old_reviewer and r.status != 'submitted']:
+                source.peer_reviews.remove(r)
+        new_reviewer = source.assigned_reviewer_id
+        if new_reviewer and new_reviewer != source.assigned_extractor_id and not any(r.user_id == new_reviewer for r in source.peer_reviews):
+            source.peer_reviews.append(SourcePeerReview(user_id=new_reviewer, status='pending', assigned_by=current_user.id))
 
     if payload.status is not None:
         try:
@@ -1597,6 +1611,7 @@ def review_source_record(
 
     if payload.action == "reject":
         source.status = SourceStatus.CHANGES_REQUESTED
+        _reset_peer_reviews(source)
         if source.assigned_extractor_id:
             db.add(Notification(
                 user_id=source.assigned_extractor_id,
@@ -1642,6 +1657,7 @@ def admin_review_record(
     now = datetime.now(timezone.utc)
 
     if action == "approve":
+        _assert_peers_done(source)
         record.review_status = ReviewStatus.APPROVED
         record.admin_reviewed_by = current_user.id
         record.admin_reviewed_at = now
@@ -1661,6 +1677,7 @@ def admin_review_record(
         ))
     else:
         record.review_status = ReviewStatus.PENDING
+        _reset_peer_reviews(source)
         record.correction_count = (record.correction_count or 0) + 1
         record.admin_review_note = note
         record.extraction_started_at = record.extraction_started_at or now
@@ -1746,6 +1763,8 @@ def approve_source(
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can approve a source")
 
+    _assert_peers_done(source)
+
     user_roles = _user_roles(current_user)
     is_admin = "org_admin" in user_roles or "project_admin" in user_roles
 
@@ -1787,6 +1806,165 @@ def approve_source(
     db.commit()
     db.refresh(source)
     return _serialize_source(source)
+
+
+# ─── Peer review ─────────────────────────────────────────────────────────────
+# A source can have several peer reviewers (extractors or reviewers other than the source's own
+# extractor). Each finishes by submitting a comment. The admin approves once all have submitted.
+
+_PEER_ROLES = {"pipeline_operator", "reviewer"}
+
+
+class PeerReviewersPayload(BaseModel):
+    user_ids: list[str]
+
+
+class PeerReviewSubmit(BaseModel):
+    comment: str
+
+
+def _reset_peer_reviews(source: Source):
+    """Work was sent back: peers who had finished must look again (their old comment stays visible)."""
+    for r in source.peer_reviews:
+        if r.status == "submitted":
+            r.status = "pending"
+
+
+def _assert_peers_done(source: Source):
+    waiting = [r for r in source.peer_reviews if r.status != "submitted"]
+    if waiting:
+        names = ", ".join((r.user.full_name if r.user else "a peer reviewer") for r in waiting)
+        raise HTTPException(status_code=409, detail=f"Waiting for peer review from {names}. Everyone assigned has to submit their comment first.")
+
+
+def _peer_detail(source: Source, user: User, db: Session) -> dict:
+    roles = _user_roles(user)
+    manager = bool(roles & {"org_admin", "project_admin", "qa_lead"})
+    is_extractor = source.assigned_extractor_id == user.id
+    peers, mine_pending = [], False
+    for r in source.peer_reviews:
+        mine = r.user_id == user.id
+        mine_pending = mine_pending or (mine and r.status != "submitted")
+        show = manager or is_extractor or mine
+        peers.append({
+            "user_id": r.user_id, "name": r.user.full_name if r.user else None, "status": r.status,
+            "submitted_at": r.submitted_at, "mine": mine, "comment": r.comment if show else None,
+        })
+    out = {
+        "peers": peers, "total": len(peers),
+        "submitted": sum(1 for p in peers if p["status"] == "submitted"),
+        "gated": bool(peers),
+        "can_manage": _can_manage_source(user, source),
+        "can_submit": mine_pending and source.status not in (SourceStatus.NOT_STARTED, SourceStatus.EXTRACTING, SourceStatus.APPROVED),
+        "candidates": [],
+    }
+    if out["can_manage"]:
+        taken = {r.user_id for r in source.peer_reviews}
+        members = db.query(ProjectMember).filter(ProjectMember.project_id == source.project_id).all()
+        for m in members:
+            u = m.user
+            if not u or not u.is_active or u.id == source.assigned_extractor_id:
+                continue
+            if m.role.value in _PEER_ROLES or (_user_roles(u) & _PEER_ROLES):
+                out["candidates"].append({
+                    "user_id": u.id, "name": u.full_name, "email": u.email,
+                    "role": m.role.value, "assigned": u.id in taken,
+                })
+        out["candidates"].sort(key=lambda c: (c["name"] or "").lower())
+    return out
+
+
+@router.get("/{source_id}/peer-reviews")
+def get_peer_reviews(
+    source_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    source = _get_source_or_404(source_id, db, current_user)
+    return _peer_detail(source, current_user, db)
+
+
+@router.put("/{source_id}/peer-reviewers")
+def set_peer_reviewers(
+    source_id: str, payload: PeerReviewersPayload,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """Replace the list of peer reviewers. People already on the list keep their progress."""
+    source = _get_source_or_404(source_id, db, current_user)
+    if not _can_manage_source(current_user, source):
+        raise HTTPException(status_code=403, detail="Only admins can assign peer reviewers")
+
+    ids = list(dict.fromkeys(i for i in payload.user_ids if i))
+    for uid in ids:
+        if uid == source.assigned_extractor_id:
+            raise HTTPException(status_code=422, detail="The extractor can't peer review their own source.")
+        u = db.query(User).filter(User.id == uid).first()
+        m = db.query(ProjectMember).filter(ProjectMember.project_id == source.project_id, ProjectMember.user_id == uid).first()
+        if not u or not m:
+            raise HTTPException(status_code=422, detail="Peer reviewers must be members of this project.")
+        if not (m.role.value in _PEER_ROLES or (_user_roles(u) & _PEER_ROLES)):
+            raise HTTPException(status_code=422, detail=f"{u.full_name} can't peer review: they need the extractor or reviewer role.")
+
+    existing = {r.user_id: r for r in source.peer_reviews}
+    for uid, row in list(existing.items()):
+        if uid not in ids:
+            source.peer_reviews.remove(row)
+    added = []
+    for uid in ids:
+        if uid not in existing:
+            source.peer_reviews.append(SourcePeerReview(user_id=uid, status="pending", assigned_by=current_user.id))
+            added.append(uid)
+    source.assigned_reviewer_id = ids[0] if ids else None
+
+    for uid in added:
+        db.add(Notification(
+            user_id=uid, title=f"Peer review requested: '{source.name}'",
+            body="You've been asked to peer review this source. Check the records, then submit your review with a comment.",
+            link=f"/projects/{source.project_id}/sources/{source.id}",
+        ))
+    db.commit()
+    db.refresh(source)
+    return _peer_detail(source, current_user, db)
+
+
+@router.post("/{source_id}/peer-review/submit")
+def submit_peer_review(
+    source_id: str, payload: PeerReviewSubmit,
+    db: Session = Depends(get_db), current_user: User = Depends(get_current_user),
+):
+    """A peer reviewer finishes their review. A comment is required."""
+    source = _get_source_or_404(source_id, db, current_user)
+    row = next((r for r in source.peer_reviews if r.user_id == current_user.id), None)
+    if not row:
+        raise HTTPException(status_code=403, detail="You're not a peer reviewer on this source.")
+    if source.status in (SourceStatus.NOT_STARTED, SourceStatus.EXTRACTING):
+        raise HTTPException(status_code=422, detail="Extraction isn't finished yet, so there is nothing to review.")
+    if source.status == SourceStatus.APPROVED:
+        raise HTTPException(status_code=422, detail="This source is already approved.")
+    comment = (payload.comment or "").strip()
+    if not comment:
+        raise HTTPException(status_code=422, detail="Add a comment before you finish your review.")
+
+    now = datetime.now(timezone.utc)
+    row.status = "submitted"
+    row.comment = comment
+    row.submitted_at = now
+    if source.status == SourceStatus.READY_FOR_REVIEW:
+        source.status = SourceStatus.IN_REVIEW
+        source.review_started_at = source.review_started_at or now
+
+    if all(r.status == "submitted" for r in source.peer_reviews):
+        from app.models.all_models import UserRoleAssignment, UserRole
+        admin_ids = {a.user_id for a in db.query(UserRoleAssignment).filter(UserRoleAssignment.role == UserRole.ORG_ADMIN).all()}
+        admin_ids |= {m.user_id for m in db.query(ProjectMember).filter(
+            ProjectMember.project_id == source.project_id, ProjectMember.role == UserRole.PROJECT_ADMIN).all()}
+        for uid in admin_ids:
+            db.add(Notification(
+                user_id=uid, title=f"Ready for sign-off: '{source.name}'",
+                body="Every peer reviewer has submitted their review. Check their comments, then approve.",
+                link=f"/projects/{source.project_id}/sources/{source.id}",
+            ))
+    db.commit()
+    db.refresh(source)
+    return _peer_detail(source, current_user, db)
 
 
 # ─── Export package ──────────────────────────────────────────────────────────

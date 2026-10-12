@@ -4,6 +4,7 @@ import { ArrowRight, Database, ExternalLink, FileText, RefreshCw } from 'lucide-
 import { sourcesApi, projectsApi } from '@/api/client'
 import { Spinner, cn } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
+import { isPeerOf } from '@/lib/peers'
 import { MyQueue, buildQueue } from '@/components/MyQueue'
 import type { QueueItem } from '@/components/MyQueue'
 import type { Source } from '@/types'
@@ -111,7 +112,7 @@ export function WorkDashboard() {
 
   const scoped = useMemo(() => (sources ?? []).filter(s =>
     focus === 'extract' ? s.assigned_extractor_id === user?.id
-      : focus === 'review' ? s.assigned_reviewer_id === user?.id
+      : focus === 'review' ? isPeerOf(s, user?.id)
         : true), [sources, focus, user?.id])
   const q = useMemo(() => buildQueue(scoped, user?.id), [scoped, user?.id])
 

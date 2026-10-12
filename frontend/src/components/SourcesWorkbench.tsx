@@ -21,8 +21,8 @@ interface Tier {
 }
 
 const TIERS: Tier[] = [
-  { key: 'final', label: 'Peer reviewed', hint: 'Reviewer approved. Needs final sign-off', rail: 'bg-indigo-500', text: 'text-indigo-600', ring: 'ring-indigo-300' },
-  { key: 'extracted', label: 'Extracted', hint: 'Done by the extractor. Needs a reviewer', rail: 'bg-purple-500', text: 'text-purple-600', ring: 'ring-purple-300' },
+  { key: 'final', label: 'Peer reviewed', hint: 'Peers are done. Needs admin sign-off', rail: 'bg-indigo-500', text: 'text-indigo-600', ring: 'ring-indigo-300' },
+  { key: 'extracted', label: 'Extracted', hint: 'Done by the extractor. Needs peer review', rail: 'bg-purple-500', text: 'text-purple-600', ring: 'ring-purple-300' },
   { key: 'returned', label: 'Sent back', hint: 'Needs fixes from the extractor', rail: 'bg-amber-500', text: 'text-amber-600', ring: 'ring-amber-300' },
   { key: 'extracting', label: 'Extracting', hint: 'Being worked on now', rail: 'bg-blue-500', text: 'text-blue-600', ring: 'ring-blue-300' },
   { key: 'todo', label: 'Not started', hint: 'Waiting for an extractor', rail: 'bg-gray-300', text: 'text-gray-600', ring: 'ring-gray-300' },
@@ -58,10 +58,15 @@ const DAY = 86400000
 type SortMode = 'wait' | 'new'
 
 const peerCount = (s: Source) => Number((s as any).peer_reviewed_records ?? 0) || 0
+const peerTotal = (s: Source) => s.peer_total ?? 0
+const peerDone = (s: Source) => s.peer_submitted ?? 0
+// Ready for the admin: every assigned peer has submitted their review. Older sources with no peers
+// set up fall back to "a reviewer approved some records".
+const readyForSignOff = (s: Source) => (s.peer_gated ? peerTotal(s) > 0 && peerDone(s) === peerTotal(s) : peerCount(s) > 0)
 
 function tierOf(s: Source): number {
   if (s.status === 'approved') return T_DONE
-  if (peerCount(s) > 0) return T_FINAL
+  if (readyForSignOff(s)) return T_FINAL
   switch (s.status) {
     case 'ready_for_review': case 'in_review': case 'llm_verification': return T_EXTRACTED
     case 'changes_requested': case 'needs_fixes': return 2
@@ -272,6 +277,10 @@ export function SourcesWorkbench({ sources: all, projectNames, showProject: want
                   {items.map(s => {
                     const active = sel?.id === s.id
                     const peer = peerCount(s)
+                    const pt = peerTotal(s), pd = peerDone(s)
+                    const pill = b.i === T_FINAL
+                      ? (s.peer_gated ? `All ${pt} ${pt === 1 ? 'peer' : 'peers'} done` : peer > 0 ? `${peer} peer reviewed` : null)
+                      : (s.peer_gated && pt > 0 && b.i <= 2 ? `${pd}/${pt} peers` : null)
                     const since = sinceOf(s, b.i)
                     const owner = b.i <= T_EXTRACTED ? (s.assigned_reviewer_name ?? s.assigned_extractor_name) : s.assigned_extractor_name
                     const country = field(s, 'country')
@@ -290,9 +299,11 @@ export function SourcesWorkbench({ sources: all, projectNames, showProject: want
                             {country && <span className="shrink-0">{country}</span>}
                           </p>
                         </div>
-                        {peer > 0 && b.i === T_FINAL && (
-                          <span className="hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold text-indigo-700 bg-indigo-50 px-2 py-1 rounded-full shrink-0" title="Records a reviewer has approved">
-                            <CheckCheck className="w-3 h-3" /> {peer} peer reviewed
+                        {pill && (
+                          <span className={cn('hidden sm:inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-full shrink-0',
+                            b.i === T_FINAL ? 'text-indigo-700 bg-indigo-50' : 'text-gray-600 bg-gray-100')}
+                            title={s.peer_gated ? 'Peer reviewers who have submitted their review' : 'Records a reviewer has approved'}>
+                            <CheckCheck className="w-3 h-3" /> {pill}
                           </span>
                         )}
                         {s.total_records > 0 && (
@@ -373,7 +384,17 @@ function Peek({ s, projectName, onOpen }: { s: Source; projectName?: string; onO
           )}
         </div>
 
-        {peer > 0 && tier === T_FINAL && (
+        {s.peer_gated && peerTotal(s) > 0 && tier !== T_DONE && (
+          <div className={cn('flex items-start gap-2.5 rounded-xl px-3.5 py-3', tier === T_FINAL ? 'bg-indigo-50' : 'bg-gray-50')}>
+            <CheckCheck className={cn('w-4 h-4 mt-0.5 shrink-0', tier === T_FINAL ? 'text-indigo-600' : 'text-gray-400')} />
+            <p className={cn('text-sm m-0', tier === T_FINAL ? 'text-indigo-900' : 'text-gray-700')}>
+              {tier === T_FINAL
+                ? <>All <span className="font-bold tabular-nums">{peerTotal(s)}</span> peer {peerTotal(s) === 1 ? 'reviewer has' : 'reviewers have'} submitted. Waiting for your sign-off.</>
+                : <><span className="font-bold tabular-nums">{peerDone(s)}</span> of <span className="tabular-nums">{peerTotal(s)}</span> peer reviewers have submitted.</>}
+            </p>
+          </div>
+        )}
+        {!s.peer_gated && peer > 0 && tier === T_FINAL && (
           <div className="flex items-start gap-2.5 rounded-xl bg-indigo-50 px-3.5 py-3">
             <CheckCheck className="w-4 h-4 text-indigo-600 mt-0.5 shrink-0" />
             <p className="text-sm text-indigo-900 m-0">
