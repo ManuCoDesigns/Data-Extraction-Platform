@@ -156,7 +156,7 @@ export function App() {
 
           <Route
             path="xtrium"
-            element={<XtriumDashboardPage />}
+            element={<RequireAdmin><XtriumDashboardPage /></RequireAdmin>}
           />
 
           <Route

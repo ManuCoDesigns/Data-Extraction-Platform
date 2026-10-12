@@ -72,6 +72,7 @@ class ProjectOut(BaseModel):
     job_count: Optional[int] = None
     total_sources: Optional[int] = None
     approved_sources: Optional[int] = None
+    updated_at: Optional[datetime] = None  # last activity: newest source change
 
     model_config = {"from_attributes": True}
 

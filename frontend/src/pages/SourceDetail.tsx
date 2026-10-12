@@ -1031,7 +1031,7 @@ function SourceDetailInner() {
         </div>
       </div>
 
-      {isFromXtrium && <XtriumNoticesBanner sourceId={source.id} reloadKey={String(source.updated_at ?? '')} />}
+      {isFromXtrium && isAdmin && <XtriumNoticesBanner sourceId={source.id} reloadKey={String(source.updated_at ?? '')} />}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {[

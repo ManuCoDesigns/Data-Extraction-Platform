@@ -355,7 +355,7 @@ def sources_summary(
     week_ago = datetime.now(timezone.utc) - timedelta(days=7)
     approved_this_week = sum(
         1 for s in sources
-        if s.status == SourceStatus.APPROVED and s.approved_at and s.approved_at >= week_ago
+        if s.status == SourceStatus.APPROVED and s.approved_at and (s.approved_at if s.approved_at.tzinfo else s.approved_at.replace(tzinfo=timezone.utc)) >= week_ago
     )
 
     # My assigned sources (needs action)

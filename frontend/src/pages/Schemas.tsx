@@ -362,7 +362,7 @@ export function SchemasPage() {
                       {projectMap[s.project_id] && !projectIdFilter && (
                         <span style={{ fontSize: 11, color: '#94a3b8' }}>📁 {projectMap[s.project_id]}</span>
                       )}
-                      <span style={{ fontSize: 11, color: '#94a3b8' }}>Updated {safeFromNow(s.updated_at)}</span>
+                      <span style={{ fontSize: 11, color: '#94a3b8' }}>Updated {safeFromNow(s.updated_at ?? s.created_at)}</span>
                     </div>
                   </div>
 

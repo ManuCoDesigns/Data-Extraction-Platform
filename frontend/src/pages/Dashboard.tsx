@@ -339,7 +339,7 @@ function AdminDashboard() {
             : <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={chartData} barSize={16} margin={{ top: 2, right: 2, bottom: 0, left: -20 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" vertical={false} />
-                  <XAxis dataKey="name" tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} interval={0} />
+                  <XAxis dataKey="name" tick={false} axisLine={false} tickLine={false} height={6} />
                   <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
                   <Tooltip contentStyle={{ border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 11 }} cursor={{ fill: '#f8fafc' }} />
                   <Bar dataKey="value" radius={[4, 4, 0, 0]} name="Sources">

@@ -15,10 +15,12 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 def _serialize(p: Project, db: Session) -> ProjectOut:
-    total_sources = db.query(Source).filter(Source.project_id == p.id).count()
-    approved_sources = db.query(Source).filter(
-        Source.project_id == p.id, Source.status == SourceStatus.APPROVED
-    ).count()
+    from sqlalchemy import func, case
+    total_sources, approved_sources, last_change = db.query(
+        func.count(Source.id),
+        func.coalesce(func.sum(case((Source.status == SourceStatus.APPROVED, 1), else_=0)), 0),
+        func.max(Source.updated_at),
+    ).filter(Source.project_id == p.id).one()
     return ProjectOut(
         id=p.id,
         name=p.name,
@@ -30,7 +32,8 @@ def _serialize(p: Project, db: Session) -> ProjectOut:
         member_count=len(p.members),
         job_count=len(p.jobs),
         total_sources=total_sources,
-        approved_sources=approved_sources,
+        approved_sources=int(approved_sources or 0),
+        updated_at=last_change or getattr(p, 'updated_at', None) or p.created_at,
     )
 
 
