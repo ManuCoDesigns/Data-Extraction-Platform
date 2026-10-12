@@ -1139,7 +1139,7 @@ export function SourceDetailPage() {
                     const latest = all[all.length - 1]
                     const ef = r.extracted_fields || {}
                     const sourceFile = ef._source_file as string | undefined
-                    const label = sourceFile ? sourceFile.split('/').pop()!.replace(/\.(json|csv|xlsx?|pdf|txt)$/i, '') : (r.canonical_name || r.id.slice(0, 8))
+                    const label = sourceFile ? sourceFile.split('/').pop()!.replace(/\.(json|csv|xlsx?|pdf|txt)$/i, '') : recordTitle(ef, r)
                     return (
                       <div key={r.id} onClick={() => { const idx = records.findIndex((x: any) => x.id === r.id); if (idx >= 0) setActiveRecordIndex(idx) }}
                         style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: 10,
@@ -1327,9 +1327,9 @@ export function SourceDetailPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                      {['Company','Sites','Products','Schema','Web Check','Review',''].map((h, i) => (
+                      {['Record', ...(hasCompanyCols(records) ? ['Sites', 'Products'] : []), 'Schema', 'Web Check', 'Review', ''].map((h, i) => (
                         <th key={h+i} style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
-                          className={i > 0 && i < 5 && i !== 3 ? 'hidden md:table-cell' : ''}>
+                          className={['Sites', 'Products', 'Web Check'].includes(h) ? 'hidden md:table-cell' : ''}>
                           {h}
                         </th>
                       ))}
@@ -1344,7 +1344,7 @@ export function SourceDetailPage() {
                             onClick={() => toggleFolder(item.path)}
                             style={{ cursor: 'pointer', background: '#f8fafc' }}
                             className="hover:bg-gray-100 transition">
-                            <td colSpan={7} style={{ padding: '7px 16px', paddingLeft: 16 + item.depth * 20 }}>
+                            <td colSpan={hasCompanyCols(records) ? 7 : 5} style={{ padding: '7px 16px', paddingLeft: 16 + item.depth * 20 }}>
                               <div className="flex items-center gap-2">
                                 {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-gray-400" /> : <ChevronDown className="w-3.5 h-3.5 text-gray-400" />}
                                 <Folder className="w-3.5 h-3.5 text-amber-500" />
@@ -1361,8 +1361,8 @@ export function SourceDetailPage() {
                       const ef = r.extracted_fields || {}
                       const sourceFile = ef._source_file as string | undefined
                       const fileName = sourceFile ? sourceFile.split('/').pop()!.replace(/\.(json|csv|xlsx?|pdf|txt)$/i, '') : null
-                      const primaryName = String(fileName || ef.company_name || ef.material_name || r.canonical_name || r.id.slice(0, 8))
-                      const sector = ef.industry_sector as string | undefined
+                      const primaryName = String(fileName || recordTitle(ef, r))
+                      const sector = (ef.industry_sector || (typeof ef.industry === 'string' ? ef.industry : undefined)) as string | undefined
                       const tier = ef.supply_chain_tier as number | undefined
                       const sites = Array.isArray(ef.manufacturing_sites) ? ef.manufacturing_sites.length : 0
                       const products = Array.isArray(ef.products_offered) ? ef.products_offered.length : 0
@@ -1386,6 +1386,7 @@ export function SourceDetailPage() {
                               {tier && <span className="text-xs bg-blue-50 text-blue-600 border border-blue-100 px-1.5 rounded">tier {tier}</span>}
                             </div>
                           </td>
+                          {hasCompanyCols(records) && (<>
                           <td className="px-4 py-3 hidden md:table-cell">
                             {sites > 0
                               ? <span className="text-sm font-medium text-gray-700">🏭 {sites} site{sites !== 1 ? 's' : ''}</span>
@@ -1398,6 +1399,7 @@ export function SourceDetailPage() {
                               : <span className="text-xs text-gray-300">—</span>
                             }
                           </td>
+                          </>)}
                           <td className="px-4 py-3">
                             {r.is_schema_valid ? (
                               <Badge variant="green"><CheckCircle className="w-3 h-3" /> Valid</Badge>
@@ -2194,6 +2196,31 @@ function FileReviewBadge({ status }: { status?: string }) {
       {m.label}
     </span>
   )
+}
+
+// A readable name for a record, whatever kind of data it holds.
+const RECORD_TITLE_KEYS = ['segment_name', 'company_name', 'material_name', 'supplier_name', 'product_name', 'entity_name', 'name', 'title', 'canonical_name', 'label']
+const RECORD_TITLE_SKIP = new Set(['data_origin', 'method', 'retrieved_at', 'source_url', 'url', 'notes', 'description'])
+function recordTitle(ef: Record<string, any> | undefined, r: any): string {
+  for (const k of RECORD_TITLE_KEYS) {
+    const v = ef?.[k]
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
+  if (typeof r?.canonical_name === 'string' && r.canonical_name.trim()) return r.canonical_name.trim()
+  for (const [k, v] of Object.entries(ef || {})) {
+    if (k.startsWith('_') || RECORD_TITLE_SKIP.has(k) || typeof v !== 'string') continue
+    const t = v.trim()
+    if (t && t.length <= 80 && !/^https?:\/\//i.test(t) && !/^\d{4}-\d{2}-\d{2}/.test(t)) return t
+  }
+  return String(r?.id ?? '').slice(0, 8)
+}
+// The Sites / Products columns only mean something for company-style records.
+function hasCompanyCols(records: any[]): boolean {
+  return records.some(r => {
+    const ef = r?.extracted_fields || {}
+    return (Array.isArray(ef.manufacturing_sites) && ef.manufacturing_sites.length > 0)
+      || (Array.isArray(ef.products_offered) && ef.products_offered.length > 0)
+  })
 }
 
 function CsvPreviewTable({ text }: { text: string }) {
