@@ -4,11 +4,13 @@
  * Replaces the VS Code JSON editor approach with a structured review UI.
  */
 import { useState, useRef, useCallback, useEffect } from 'react'
-import { X, CheckCircle, XCircle, AlertTriangle, Globe, ChevronLeft, ChevronRight, Edit3, Save, ExternalLink, Code } from 'lucide-react'
+import { X, CheckCircle, XCircle, AlertTriangle, Globe, ChevronLeft, ChevronRight, Edit3, Save, ExternalLink, Code, Columns2, Keyboard } from 'lucide-react'
 import type { ExtractedRecord } from '@/types'
 import { toast } from '@/components/ui'
 import { resourcesApi } from '@/api/client'
 import { JsonEditor } from './JsonEditor'
+import { RecordRequiredBar } from '@/components/enh/RequiredFields'
+import { EvidencePanel } from '@/components/enh/EvidencePanel'
 
 interface SchemaField {
   name: string; type?: string; required?: boolean
@@ -155,6 +157,9 @@ export function JsonRecordViewer({
   const [showAdminReturn, setShowAdminReturn] = useState(false)
   const [adminReturnNote, setAdminReturnNote] = useState('')
   const [adminActing, setAdminActing] = useState<'approve' | 'return' | null>(null)
+  const [sideOpen, setSideOpen] = useState(() => { try { return localStorage.getItem('dx.viewerSide') === '1' } catch { return false } })
+  const [showKeys, setShowKeys] = useState(false)
+  const toggleSide = () => setSideOpen(v => { const n = !v; try { localStorage.setItem('dx.viewerSide', n ? '1' : '0') } catch { /* ignore */ } return n })
 
   const handleAdminApprove = async () => {
     setAdminActing('approve')
@@ -216,6 +221,33 @@ export function JsonRecordViewer({
 
   const progressPct = Math.round(((currentIndex + 1) / allRecords.length) * 100)
 
+  // Keyboard: j/k or arrows move between records, a approves, r opens "send back", s saves, w toggles the side panel, ? shows this list.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const el = e.target as HTMLElement | null
+      const typing = !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)
+      if (typing) { if (e.key === 'Escape') el!.blur(); return }
+      if (viewTab !== 'review') return
+      const k = e.key
+      if (k === '?') { e.preventDefault(); setShowKeys(v => !v) }
+      else if (k === 'Escape') { if (showKeys) setShowKeys(false); else if (showReject || showAdminReturn) { setShowReject(false); setShowAdminReturn(false) } else onClose() }
+      else if (k === 'j' || k === 'ArrowRight') { if (currentIndex < allRecords.length - 1) { e.preventDefault(); onNavigate(currentIndex + 1) } }
+      else if (k === 'k' || k === 'ArrowLeft') { if (currentIndex > 0) { e.preventDefault(); onNavigate(currentIndex - 1) } }
+      else if (k === 'w') { toggleSide() }
+      else if (k === 's' && hasChanges) { e.preventDefault(); handleSaveAll() }
+      else if (k === 'a') {
+        if (isAdmin && record.review_status === 'pending_admin_review' && !adminActing) handleAdminApprove()
+        else if (isReviewer && !isApproved && !saving) handleApprove()
+      } else if (k === 'r') {
+        if (isAdmin && record.review_status === 'pending_admin_review') { e.preventDefault(); setShowAdminReturn(true) }
+        else if (isReviewer && !isApproved) { e.preventDefault(); setShowReject(true) }
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  })
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: '#f8fafc', zIndex: 9999, display: 'flex', flexDirection: 'column', overflow: 'hidden', fontFamily: 'system-ui, -apple-system, sans-serif' }}>
 
@@ -257,6 +289,13 @@ export function JsonRecordViewer({
           {webFlags.length > 0 && <span style={{ fontSize: 11, fontWeight: 600, padding: '2px 10px', borderRadius: 20, background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', flexShrink: 0 }}>🌐 {webFlags.length} web flag{webFlags.length > 1 ? 's' : ''}</span>}
           {website && <a href={website} target="_blank" rel="noreferrer" style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: '#3b82f6', textDecoration: 'none', flexShrink: 0 }}><Globe size={12} />{new URL(website).hostname}</a>}
         </div>
+
+          <button type="button" onClick={toggleSide} aria-pressed={sideOpen} title="Show the source text and website next to the record (W)"
+            style={{ display: viewTab === 'review' && !record.is_escalation_only ? 'flex' : 'none', alignItems: 'center', gap: 6, padding: '6px 11px', border: `1px solid ${sideOpen ? '#a5b4fc' : '#e2e8f0'}`, borderRadius: 8, background: sideOpen ? '#eef2ff' : '#fff', color: sideOpen ? '#4338ca' : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer', flexShrink: 0 }}>
+            <Columns2 size={13} /> Side by side
+          </button>
+          <button type="button" onClick={() => setShowKeys(v => !v)} aria-label="Keyboard shortcuts" title="Keyboard shortcuts (?)"
+            style={{ display: 'flex', padding: 7, border: '1px solid #e2e8f0', borderRadius: 8, background: '#fff', cursor: 'pointer', flexShrink: 0 }}><Keyboard size={14} color="#64748b" /></button>
 
           {/* View tabs */}
           <div style={{ display: 'flex', background: '#f1f5f9', borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0', flexShrink: 0 }}>
@@ -350,6 +389,28 @@ export function JsonRecordViewer({
         </div>
       )}
 
+      {viewTab === 'review' && !record.is_escalation_only && schemaFields.some(f => f.required) && (
+        <RecordRequiredBar fields={schemaFields} data={localFields} />
+      )}
+      {viewTab === 'review' && !record.is_escalation_only && sideOpen && (
+        <EvidencePanel record={record} localFields={localFields} sourceWebsiteUrl={sourceWebsiteUrl} onClose={toggleSide} />
+      )}
+      {showKeys && (
+        <div role="dialog" aria-label="Keyboard shortcuts" onClick={() => setShowKeys(false)}
+          style={{ position: 'fixed', inset: 0, zIndex: 20, background: 'rgba(15,23,42,0.35)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: 16, padding: '22px 26px', width: 'min(420px, 92vw)', boxShadow: '0 20px 50px rgba(0,0,0,0.25)' }}>
+            <p style={{ fontSize: 15, fontWeight: 700, color: '#0f172a', margin: '0 0 14px' }}>Keyboard shortcuts</p>
+            {[['J or right arrow', 'Next record'], ['K or left arrow', 'Previous record'], ['A', 'Approve this record'], ['R', 'Send back, with a note'], ['S', 'Save your changes'], ['W', 'Show or hide the side panel'], ['Esc', 'Close this view'], ['?', 'Show this list']].map(([k, d]) => (
+              <div key={k} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '7px 0', borderBottom: '1px solid #f8fafc' }}>
+                <span style={{ fontSize: 13, color: '#475569' }}>{d}</span>
+                <kbd style={{ fontSize: 12, fontWeight: 700, color: '#334155', background: '#f1f5f9', border: '1px solid #e2e8f0', borderBottomWidth: 2, borderRadius: 6, padding: '2px 8px' }}>{k}</kbd>
+              </div>
+            ))}
+            <p style={{ fontSize: 11, color: '#94a3b8', margin: '12px 0 0' }}>Shortcuts pause while you type in a box.</p>
+          </div>
+        </div>
+      )}
+
       {/* ── JSON EDITOR TAB ─────────────────────────────────────────────── */}
       {viewTab === 'json' && (
         <div style={{ flex: 1, overflow: 'hidden' }}>
@@ -402,7 +463,7 @@ export function JsonRecordViewer({
           </div>
         )
       })()}
-      {viewTab === 'review' && !record.is_escalation_only && <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignContent: 'start' }} className="scrollbar-thin">
+      {viewTab === 'review' && !record.is_escalation_only && <div style={{ flex: 1, overflow: 'auto', padding: '24px', display: 'grid', gridTemplateColumns: sideOpen ? '1fr' : '1fr 1fr', gap: 20, alignContent: 'start', paddingRight: sideOpen ? 'calc(44% + 24px)' : 24 }} className="scrollbar-thin">
 
         {/* ── LEFT COLUMN ────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>

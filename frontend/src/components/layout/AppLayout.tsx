@@ -5,7 +5,7 @@ import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
   Menu, X, Shield, Activity, AlertTriangle,
-  Zap,
+  Zap, HeartPulse, CircleHelp, CalendarCheck, ChartColumn, History,
 } from 'lucide-react'
 import { cn, ToastContainer, toast } from '@/components/ui'
 import { notificationsApi, sourcesApi } from '@/api/client'
@@ -13,6 +13,7 @@ import { useCapability } from '@/lib/permissions'
 import type { Notification } from '@/types'
 import { formatDistanceToNow } from 'date-fns'
 import { NotificationBanner } from '@/components/NotificationBanner'
+import { IdleGuard } from '@/components/enh/IdleGuard'
 
 export function AppLayout() {
   const { user, logout, fetchMe } = useAuthStore()
@@ -143,10 +144,15 @@ export function AppLayout() {
     { to: '/xtrium',      icon: Zap,             label: 'Xtrium Integration', show: isAdmin },
     { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true, forceActive: isProjectsPath },
     { to: '/workload',    icon: Activity,        label: 'Team Workload', show: isTeamLead },
+    { to: '/digest',      icon: CalendarCheck,   label: 'Daily Digest', show: isTeamLead },
+    { to: '/data-health', icon: HeartPulse,      label: 'Data Health',  show: true },
+    { to: '/client-questions', icon: CircleHelp, label: 'Client Questions', show: true },
+    { to: '/insights',    icon: ChartColumn,     label: isTeamLead ? 'Insights' : 'My Stats', show: true },
     { to: '/schemas',     icon: Layers,          label: 'Schemas',      show: isAdmin && canManageSchemas },
   ].filter(n => n.show)
 
   const adminNav = [
+    { to: '/audit',       icon: History,  label: 'Audit Trail', show: isTeamLead },
     { to: '/admin/users', icon: Users,    label: 'Users',    show: canManageUsers },
     { to: '/settings',    icon: Settings, label: 'Settings', show: canManageUsers },
     { to: '/help',        icon: BookOpen, label: 'Help',     show: true },
@@ -384,6 +390,7 @@ export function AppLayout() {
       </main>
 
       <ToastContainer />
+      <IdleGuard onTimeout={() => { logout() }} />
     </div>
   )
 }

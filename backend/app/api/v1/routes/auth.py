@@ -12,9 +12,43 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, request: Request, db: Session = Depends(get_db)):
+    from datetime import datetime, timedelta, timezone
+    from app.core.config import settings as _cfg
+    from app.models.all_models import UserSettings
+    from app.services import enh as _enh
     user = db.query(User).filter(User.email == payload.email, User.is_active == True).first()
+    st = None
+    if user:
+        st = db.query(UserSettings).filter(UserSettings.user_id == user.id).first()
+        if st and st.locked_until:
+            until = st.locked_until if st.locked_until.tzinfo else st.locked_until.replace(tzinfo=timezone.utc)
+            if until > datetime.now(timezone.utc):
+                mins = max(1, int((until - datetime.now(timezone.utc)).total_seconds() // 60) + 1)
+                raise HTTPException(status_code=429, detail=f"Too many wrong attempts. Try again in {mins} minute{'s' if mins != 1 else ''}, or ask an admin to unlock you.")
     if not user or not verify_password(payload.password, user.hashed_password):
+        if user:
+            if not st:
+                st = UserSettings(user_id=user.id, email_alerts=True, email_digest=True, totp_enabled=False, failed_logins=0)
+                db.add(st)
+            st.failed_logins = (st.failed_logins or 0) + 1
+            if st.failed_logins >= _cfg.MAX_FAILED_LOGINS:
+                st.locked_until = datetime.now(timezone.utc) + timedelta(minutes=_cfg.LOCKOUT_MINUTES)
+                st.failed_logins = 0
+            db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if st and st.totp_enabled:
+        if not (payload.code or "").strip():
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="TWO_STEP_REQUIRED")
+        if not _enh.verify_totp(st.totp_secret or "", payload.code):
+            st.failed_logins = (st.failed_logins or 0) + 1
+            if st.failed_logins >= _cfg.MAX_FAILED_LOGINS:
+                st.locked_until = datetime.now(timezone.utc) + timedelta(minutes=_cfg.LOCKOUT_MINUTES)
+                st.failed_logins = 0
+            db.commit()
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="That code isn't right")
+    if st and (st.failed_logins or st.locked_until):
+        st.failed_logins, st.locked_until = 0, None
+        db.commit()
 
     roles = [r.role.value for r in user.roles]
     token_data = {"sub": user.id, "email": user.email, "roles": roles}

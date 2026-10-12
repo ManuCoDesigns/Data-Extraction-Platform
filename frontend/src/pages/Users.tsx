@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Users as UsersIcon, Plus, Shield, Edit3, Trash2, Search, Mail, RotateCcw, Key, UserCheck } from 'lucide-react'
-import { usersApi } from '@/api/client'
+import { usersApi, enhApi } from '@/api/client'
 import { Modal, Input, Select, ConfirmDialog, toast, cn } from '@/components/ui'
 import { useCapability } from '@/lib/permissions'
 import type { User } from '@/types'
@@ -101,6 +101,17 @@ export function UsersPage() {
       toast.error(err?.response?.data?.detail || 'Failed to update user')
     } finally {
       setSavingEdit(false)
+    }
+  }
+
+  // ── Unlock / reset two-step sign-in ───────────────────────────────────────
+  const unlockUser = async (u: User) => {
+    if (!confirm(`Unlock ${u.full_name} and turn off their two-step sign-in? Use this when they lost their phone or are locked out.`)) return
+    try {
+      await enhApi.totpReset(u.id)
+      toast.success(`${u.full_name} can sign in again`)
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || "Couldn't unlock this user")
     }
   }
 
@@ -306,6 +317,12 @@ export function UsersPage() {
                                 border: '1px solid #e2e8f0', color: '#64748b', cursor: 'pointer',
                                 display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}>
                               <Edit3 style={{ width: 13, height: 13 }} />
+                            </button>
+                            <button onClick={() => unlockUser(u)} title="Unlock and reset two-step sign-in"
+                              style={{ padding: '5px 8px', borderRadius: 8, background: '#f8fafc',
+                                border: '1px solid #e2e8f0', color: '#64748b', cursor: 'pointer',
+                                display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}>
+                              <Key style={{ width: 13, height: 13 }} />
                             </button>
                             {isActive ? (
                               <button onClick={() => deactivate(u.id)} disabled={isToggling} title="Deactivate"

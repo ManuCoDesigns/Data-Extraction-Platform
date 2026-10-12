@@ -204,8 +204,8 @@ export function TeamWorkloadPage() {
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                  {['Source', 'Project', 'Status', 'Extractor', 'Time', 'Reviewer', 'Time', 'Progress', ''].map(h => (
-                    <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700,
+                  {['Source', 'Project', 'Status', 'Extractor', 'Time', 'Reviewer', 'Time', 'Progress', ''].map((h, hi) => (
+                    <th key={hi} style={{ padding: '10px 14px', textAlign: 'left', fontSize: 10, fontWeight: 700,
                       color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.06em', whiteSpace: 'nowrap' }}>{h}</th>
                   ))}
                 </tr>
@@ -251,10 +251,24 @@ export function TeamWorkloadPage() {
                       )}
                     </td>
                     <td style={{ padding: '12px 14px' }}>
-                      {s.reviewer ? (
+                      {s.reviewers?.length ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <Avatar name={s.reviewer} />
-                          <span style={{ fontSize: 12, color: '#1e293b' }}>{s.reviewer}</span>
+                          <div style={{ display: 'flex' }}>
+                            {s.reviewers.slice(0, 3).map((n: string, i: number) => (
+                              <span key={n} title={n} style={{ marginLeft: i ? -7 : 0, borderRadius: '50%', boxShadow: '0 0 0 2px #fff' }}><Avatar name={n} /></span>
+                            ))}
+                          </div>
+                          <span style={{ fontSize: 12, color: '#1e293b', maxWidth: 110, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            title={s.reviewers.join(', ')}>
+                            {s.reviewers.length === 1 ? s.reviewers[0] : `${s.reviewers.length} peers`}
+                          </span>
+                          {s.peers_total > 0 && (
+                            <span title="Peer reviewers who have submitted" style={{ fontSize: 10, fontWeight: 700, padding: '2px 6px', borderRadius: 20,
+                              color: s.peers_submitted === s.peers_total ? '#047857' : '#6366f1',
+                              background: s.peers_submitted === s.peers_total ? '#ecfdf5' : '#eef2ff' }}>
+                              {s.peers_submitted}/{s.peers_total}
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span style={{ fontSize: 11, color: '#94a3b8' }}>—</span>

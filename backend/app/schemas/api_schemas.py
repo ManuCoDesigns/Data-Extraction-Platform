@@ -12,6 +12,7 @@ from pydantic import BaseModel, EmailStr, Field, model_validator
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    code: str | None = None      # six-digit code from the authenticator app, when two-step sign-in is on
 
 
 class TokenResponse(BaseModel):

@@ -1,9 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowDownUp, ArrowUpRight, CheckCheck, ExternalLink, FileText, Globe } from 'lucide-react'
+import { ArrowDownUp, ArrowUpRight, CheckCheck, Check, ExternalLink, FileText, Globe, Link2Off } from 'lucide-react'
 import type { Source } from '@/types'
 import { Avatar, Badge, cn, safeFromNow } from '@/components/ui'
 import { saveNav, isTyping } from '@/lib/sourceNav'
+import { BulkBar } from '@/components/enh/BulkBar'
+
+// Link problems found by the link checker (see Data health). Only these show on the cards.
+const LINK_FLAGS: Record<string, { label: string; cls: string }> = {
+  login: { label: 'Link needs login', cls: 'text-amber-600 bg-amber-50' },
+  blocked: { label: 'Link blocked', cls: 'text-red-600 bg-red-50' },
+  dead: { label: 'Link not found', cls: 'text-red-600 bg-red-50' },
+}
 
 // The Sources workbench: summary cards that double as filters, a project filter, and one list
 // ordered by what needs attention first. Peer-reviewed sources (a reviewer has approved records
@@ -114,9 +122,12 @@ interface Props {
   backTo: string
   projectFilter?: string
   onProjectFilter?: (id: string) => void
+  linkStatus?: Record<string, string>   // source id -> ok | login | blocked | dead | ...
+  canBulk?: boolean                     // admins can tick several sources and assign people at once
+  onChanged?: () => void
 }
 
-export function SourcesWorkbench({ sources: all, projectNames, showProject: wantProject, backTo, projectFilter = '', onProjectFilter }: Props) {
+export function SourcesWorkbench({ sources: all, projectNames, showProject: wantProject, backTo, projectFilter = '', onProjectFilter, linkStatus, canBulk, onChanged }: Props) {
   const navigate = useNavigate()
   const [tier, setTier] = useState<number | 'all'>('all')
   const [shown, setShown] = useState<Record<number, number>>({})
@@ -127,6 +138,9 @@ export function SourcesWorkbench({ sources: all, projectNames, showProject: want
     try { return sessionStorage.getItem(SEL_KEY) } catch { return null }
   })
   const listRef = useRef<HTMLDivElement>(null)
+  const [checked, setChecked] = useState<Set<string>>(new Set())
+  const toggleChecked = (id: string) => setChecked(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const setMany = (ids: string[], on: boolean) => setChecked(s => { const n = new Set(s); ids.forEach(i => (on ? n.add(i) : n.delete(i))); return n })
 
   // Projects present in the list, with how many sources each has (before the project filter).
   const projectCounts = useMemo(() => {
@@ -163,6 +177,13 @@ export function SourcesWorkbench({ sources: all, projectNames, showProject: want
   const flat = rendered.flat()
   const full = blocks.flatMap(b => b.items)
   const sel = flat.find(s => s.id === selectedId) ?? flat[0] ?? null
+  useEffect(() => {
+    if (!checked.size) return
+    const ids = new Set(all.map(s => s.id))
+    const keep = [...checked].filter(i => ids.has(i))
+    if (keep.length !== checked.size) setChecked(new Set(keep))
+  }, [all])
+  const nameById = useMemo(() => Object.fromEntries(all.map(s => [s.id, s.name])), [all])
 
   const open = (s: Source) => {
     saveNav(full, backTo, 'sources')
@@ -195,6 +216,8 @@ export function SourcesWorkbench({ sources: all, projectNames, showProject: want
         return
       }
       if (e.key === '/') { e.preventDefault(); document.getElementById('sources-search')?.focus(); return }
+      if (canBulk && (e.key === 'x' || e.key === 'X') && sel) { e.preventDefault(); toggleChecked(sel.id); return }
+      if (canBulk && e.key === 'Escape' && checked.size) { setChecked(new Set()); return }
       const i = flat.findIndex(s => s.id === sel?.id)
       const move = (n: number) => { const t = flat[Math.max(0, Math.min(flat.length - 1, n))]; if (t) setSelectedId(t.id) }
       if (e.key === 'ArrowDown' || e.key === 'j') { e.preventDefault(); move(i + 1) }
@@ -272,6 +295,16 @@ export function SourcesWorkbench({ sources: all, projectNames, showProject: want
                   <span className="whitespace-nowrap">{b.t.label}</span>
                   <span className="tabular-nums text-gray-400 font-medium">{b.items.length}</span>
                   <span className="hidden sm:inline text-gray-400 font-normal truncate">{b.t.hint}</span>
+                  {canBulk && b.i !== T_DONE && b.items.length > 0 && (() => {
+                    const ids = b.items.map(s => s.id)
+                    const all_ = ids.every(i => checked.has(i))
+                    return (
+                      <button type="button" onClick={() => setMany(ids, !all_)}
+                        className="ml-auto text-[11px] font-semibold text-brand-600 hover:text-brand-700 px-2 py-0.5 rounded-md hover:bg-brand-50 transition whitespace-nowrap">
+                        {all_ ? 'Clear group' : `Select ${ids.length}`}
+                      </button>
+                    )
+                  })()}
                 </h3>
                 <div className="px-3 pb-3 space-y-2">
                   {items.map(s => {
@@ -291,11 +324,24 @@ export function SourcesWorkbench({ sources: all, projectNames, showProject: want
                         className={cn('group relative flex items-center gap-3 pl-5 pr-3 py-3 rounded-xl border bg-white cursor-pointer transition',
                           active ? 'border-brand-300 shadow-card ring-1 ring-brand-200' : 'border-gray-100 hover:border-gray-200 hover:shadow-card')}>
                         <span className={cn('absolute left-1.5 top-2.5 bottom-2.5 w-1 rounded-full', b.t.rail)} />
+                        {canBulk && s.status !== 'approved' && (
+                          <button type="button" role="checkbox" aria-checked={checked.has(s.id)} aria-label={`Select ${s.name}`}
+                            onClick={e => { e.stopPropagation(); toggleChecked(s.id) }} onDoubleClick={e => e.stopPropagation()}
+                            className={cn('w-5 h-5 -ml-1 rounded-md border flex items-center justify-center shrink-0 transition',
+                              checked.has(s.id) ? 'bg-brand-600 border-brand-600 text-white' : cn('border-gray-300 bg-white hover:border-brand-400', checked.size === 0 && 'opacity-0 group-hover:opacity-100 focus:opacity-100'))}>
+                            {checked.has(s.id) && <Check className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
                         <div className="min-w-0 flex-1">
                           <p className={cn('text-sm m-0 truncate', active ? 'font-semibold text-gray-900' : 'font-medium text-gray-800')}>{s.name}</p>
                           <p className="text-xs text-gray-400 m-0 mt-0.5 flex items-center gap-x-3 min-w-0">
                             {showProject && projectNames[s.project_id] && <span className="text-brand-600 truncate">{projectNames[s.project_id]}</span>}
                             {hostOf(s.website_url) && <span className="truncate">{hostOf(s.website_url)}</span>}
+                            {LINK_FLAGS[linkStatus?.[s.id] ?? ''] && (
+                              <span title={LINK_FLAGS[linkStatus![s.id]].label} className={cn('inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0', LINK_FLAGS[linkStatus![s.id]].cls)}>
+                                <Link2Off className="w-3 h-3" />{LINK_FLAGS[linkStatus![s.id]].label.replace('Link ', '')}
+                              </span>
+                            )}
                             {country && <span className="shrink-0">{country}</span>}
                           </p>
                         </div>
@@ -339,16 +385,19 @@ export function SourcesWorkbench({ sources: all, projectNames, showProject: want
         </div>
 
         <aside className="hidden lg:block lg:sticky lg:top-6">
-          {sel ? <Peek s={sel} projectName={showProject ? projectNames[sel.project_id] : undefined} onOpen={() => open(sel)} /> : (
+          {sel ? <Peek s={sel} projectName={showProject ? projectNames[sel.project_id] : undefined} onOpen={() => open(sel)} link={linkStatus?.[sel.id]} /> : (
             <div className="bg-white rounded-2xl border border-gray-100 shadow-card px-6 py-10 text-center text-sm text-gray-400">Select a source to see it here.</div>
           )}
         </aside>
       </div>
+      {canBulk && checked.size > 0 && (
+        <BulkBar ids={[...checked]} names={nameById} onClear={() => setChecked(new Set())} onDone={() => onChanged?.()} />
+      )}
     </div>
   )
 }
 
-function Peek({ s, projectName, onOpen }: { s: Source; projectName?: string; onOpen: () => void }) {
+function Peek({ s, projectName, onOpen, link }: { s: Source; projectName?: string; onOpen: () => void; link?: string }) {
   const si = pipeOf(s)
   const tier = tierOf(s)
   const peer = peerCount(s)
@@ -381,6 +430,11 @@ function Peek({ s, projectName, onOpen }: { s: Source; projectName?: string; onO
               className="inline-flex items-center gap-1.5 text-sm text-brand-600 hover:text-brand-700 max-w-full">
               <Globe className="w-3.5 h-3.5 shrink-0" /> <span className="truncate">{hostOf(s.website_url)}</span> <ExternalLink className="w-3 h-3 shrink-0" />
             </a>
+          )}
+          {LINK_FLAGS[link ?? ''] && (
+            <p className={cn('inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg m-0', LINK_FLAGS[link!].cls)}>
+              <Link2Off className="w-3.5 h-3.5" /> {LINK_FLAGS[link!].label}. Ask the client for another way in, or open it yourself and mark it in Data health.
+            </p>
           )}
         </div>
 

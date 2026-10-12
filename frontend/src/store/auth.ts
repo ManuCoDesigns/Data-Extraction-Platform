@@ -5,7 +5,7 @@ import { authApi } from '@/api/client'
 interface AuthState {
   user: User | null
   isLoading: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, code?: string) => Promise<void>
   logout: () => void
   fetchMe: () => Promise<void>
   hasRole: (role: string) => boolean
@@ -15,8 +15,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   isLoading: true,
 
-  login: async (email, password) => {
-    const data = await authApi.login(email, password)
+  login: async (email, password, code) => {
+    const data = await authApi.login(email, password, code)
     localStorage.setItem('access_token', data.access_token)
     localStorage.setItem('refresh_token', data.refresh_token)
     const me = await authApi.me()

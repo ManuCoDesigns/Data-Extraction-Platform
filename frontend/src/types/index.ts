@@ -274,6 +274,9 @@ export interface SourceUploadSummary {
   valid_rows: number
   invalid_rows: number
   job_id: string
+  files_processed?: number
+  extraction_method?: string
+  batch_warnings?: string[]
 }
 
 export interface PerformanceStatRow {

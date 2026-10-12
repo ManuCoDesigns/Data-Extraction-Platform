@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
 
     # Database
-    DATABASE_URL: str = "postgresql://postgres:cBUUyZhCYfKOssQnryAIEipDQDqRJJkn@postgres.railway.internal:5432/railway"
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/postgres"
 
     # Redis / Celery
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -43,6 +43,22 @@ class Settings(BaseSettings):
 
     # Sentry
     SENTRY_DSN: Optional[str] = None
+
+    # Email alerts (optional). Leave SMTP_HOST blank to keep email switched off.
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USER: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_FROM: str = ""            # e.g. "Data Extraction <alerts@yourdomain.com>"; falls back to SMTP_USER
+    APP_BASE_URL: str = ""         # e.g. https://your-app.vercel.app, used for links in emails
+
+    # Background reminders and the daily admin digest
+    REMINDERS_ENABLED: bool = True
+    DIGEST_HOUR_UTC: int = 6       # 09:00 in Nairobi
+
+    # Sign-in protection
+    MAX_FAILED_LOGINS: int = 5
+    LOCKOUT_MINUTES: int = 15
 
     # CORS — accepts JSON array string or Python list
     CORS_ORIGINS: Union[list, str] = ["http://localhost:3000", "http://localhost:5173"]

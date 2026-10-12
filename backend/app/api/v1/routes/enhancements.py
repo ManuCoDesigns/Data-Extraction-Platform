@@ -1,0 +1,571 @@
+"""Extra tools: link health, duplicates, client questions, digest and reminders, audit trail,
+people stats, bulk actions, and account settings (email alerts, two-step sign-in)."""
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.core.mailer import enabled as mail_enabled, send_now
+from app.core.notify import notify, admin_user_ids, src_link, ACTION, INFO
+from app.core.security import get_current_user, verify_password
+from app.core.source_access import project_scopes, restrict_sources_query, is_org_admin
+from app.db.session import get_db
+from app.models.all_models import (
+    AuditLog, ClientQuestion, Project, ProjectMember, Source, SourceLinkCheck, SourcePeerReview,
+    SourceStatus, User, UserSettings,
+)
+from app.services import enh
+
+router = APIRouter(prefix="/enh", tags=["enhancements"])
+
+LEAD_ROLES = {"org_admin", "project_admin", "qa_lead"}
+PEER_ROLES = {"pipeline_operator", "reviewer"}
+
+
+def _roles(u: User) -> set:
+    return {r.role.value for r in u.roles}
+
+
+def _lead(u: User) -> bool:
+    return bool(_roles(u) & LEAD_ROLES)
+
+
+def _need_lead(u: User):
+    if not _lead(u):
+        raise HTTPException(status_code=403, detail="This is for admins and QA leads.")
+
+
+def _settings(db: Session, uid: str) -> UserSettings:
+    s = db.query(UserSettings).filter(UserSettings.user_id == uid).first()
+    if not s:
+        s = UserSettings(user_id=uid, email_alerts=True, email_digest=True, totp_enabled=False, failed_logins=0)
+        db.add(s)
+        db.flush()
+    return s
+
+
+def _visible_sources(db, user, project_id=None):
+    q = restrict_sources_query(db.query(Source), user, db)
+    if project_id:
+        q = q.filter(Source.project_id == project_id)
+    return q
+
+
+# ─── Link health ─────────────────────────────────────────────────────────────
+
+@router.get("/links")
+def list_links(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    sources = _visible_sources(db, user, project_id).order_by(Source.name).all()
+    checks = {c.source_id: c for c in db.query(SourceLinkCheck).filter(SourceLinkCheck.source_id.in_([s.id for s in sources])).all()} if sources else {}
+    projects = {p.id: p.name for p in db.query(Project).all()}
+    items, summary = [], {"ok": 0, "login": 0, "blocked": 0, "dead": 0, "error": 0, "unchecked": 0, "none": 0}
+    for s in sources:
+        c = checks.get(s.id)
+        if not (s.website_url or "").strip():
+            status = "none"
+        elif c and c.url == s.website_url:
+            status = c.status
+        else:
+            status = "unchecked"
+        summary[status] = summary.get(status, 0) + 1
+        items.append({
+            "source_id": s.id, "source_name": s.name, "project_id": s.project_id, "project_name": projects.get(s.project_id, ""),
+            "url": s.website_url, "status": status, "http_code": c.http_code if c else None, "detail": c.detail if c and status not in ("none", "unchecked") else None,
+            "final_url": c.final_url if c else None, "manual": bool(c.manual) if c else False,
+            "checked_at": c.checked_at.isoformat() if c and c.checked_at else None,
+            "extractor": s.extractor.full_name if s.extractor else None, "source_status": s.status.value,
+        })
+    return {"items": items, "summary": summary}
+
+
+class LinkCheckBody(BaseModel):
+    project_id: str | None = None
+    source_ids: list[str] | None = None
+    only_unchecked: bool = False
+    force: bool = False
+    limit: int = 24
+
+
+@router.post("/links/check")
+def check_links(body: LinkCheckBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Checks one batch (default 24) and says how many are left, so the page can keep going and show progress."""
+    _need_lead(user)
+    q = _visible_sources(db, user, body.project_id).filter(Source.website_url != None, Source.website_url != "")  # noqa: E711
+    if body.source_ids:
+        q = q.filter(Source.id.in_(body.source_ids))
+    sources = q.all()
+    checks = {c.source_id: c for c in db.query(SourceLinkCheck).filter(SourceLinkCheck.source_id.in_([s.id for s in sources])).all()} if sources else {}
+    if body.only_unchecked:
+        sources = [s for s in sources if not (checks.get(s.id) and checks[s.id].url == s.website_url)]
+    else:
+        # oldest check first so repeated batches walk through everything
+        sources.sort(key=lambda s: (checks[s.id].checked_at.timestamp() if s.id in checks and checks[s.id].checked_at else 0))
+    if body.source_ids is None and not body.force and not body.only_unchecked:
+        pass
+    batch = sources[: max(1, min(body.limit, 40))]
+    done = enh.run_link_checks(db, batch, user.id, force=body.force)
+    return {"checked": len(done), "remaining": max(0, len(sources) - len(batch)), "results": done}
+
+
+class LinkMark(BaseModel):
+    status: str
+    note: str | None = None
+
+
+@router.put("/links/{source_id}")
+def mark_link(source_id: str, body: LinkMark, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Set the link status by hand (the checker can't see everything, a person opened it in a browser)."""
+    s = _visible_sources(db, user).filter(Source.id == source_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Source not found")
+    if not (_lead(user) or s.assigned_extractor_id == user.id):
+        raise HTTPException(status_code=403, detail="Only the extractor or an admin can mark a link.")
+    if body.status not in ("ok", "login", "blocked", "dead"):
+        raise HTTPException(status_code=422, detail="Status must be ok, login, blocked or dead.")
+    row = db.query(SourceLinkCheck).filter(SourceLinkCheck.source_id == source_id).first() or SourceLinkCheck(source_id=source_id)
+    row.url, row.status, row.manual = s.website_url, body.status, True
+    row.detail = (body.note or "Marked by " + user.full_name)[:500]
+    row.checked_at, row.checked_by = enh.now_utc(), user.id
+    db.add(row)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/duplicates")
+def duplicates(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    groups = enh.find_duplicates(db, user, project_id)
+    return {"groups": groups, "total": len(groups)}
+
+
+# ─── Client questions ────────────────────────────────────────────────────────
+
+def _q_out(q: ClientQuestion) -> dict:
+    return {
+        "id": q.id, "project_id": q.project_id, "source_id": q.source_id, "source_name": q.source.name if q.source else None,
+        "question": q.question, "answer": q.answer, "status": q.status,
+        "asked_by": q.asker.full_name if q.asker else None, "asked_by_id": q.asked_by,
+        "answered_by": q.answerer.full_name if q.answerer else None,
+        "sent_to_client_at": q.sent_to_client_at, "created_at": q.created_at, "answered_at": q.answered_at,
+    }
+
+
+def _project_ids_for(db, user) -> set:
+    if is_org_admin(user):
+        return {p.id for p in db.query(Project.id).all()}
+    full, restricted = project_scopes(user, db)
+    return full | restricted
+
+
+class QuestionIn(BaseModel):
+    project_id: str
+    source_id: str | None = None
+    question: str
+
+
+class AnswerIn(BaseModel):
+    answer: str
+
+
+@router.get("/questions")
+def list_questions(project_id: str | None = None, source_id: str | None = None, status: str | None = None,
+                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    pids = _project_ids_for(db, user)
+    q = db.query(ClientQuestion).filter(ClientQuestion.project_id.in_(pids))
+    if project_id:
+        q = q.filter(ClientQuestion.project_id == project_id)
+    if source_id:
+        q = q.filter(ClientQuestion.source_id == source_id)
+    if status in ("open", "answered"):
+        q = q.filter(ClientQuestion.status == status)
+    items = q.order_by(ClientQuestion.created_at.desc()).limit(500).all()
+    counts = dict(db.query(ClientQuestion.status, func.count(ClientQuestion.id)).filter(ClientQuestion.project_id.in_(pids)).group_by(ClientQuestion.status).all())
+    return {"items": [_q_out(i) for i in items], "open": counts.get("open", 0), "answered": counts.get("answered", 0)}
+
+
+@router.post("/questions", status_code=201)
+def ask_question(body: QuestionIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if body.project_id not in _project_ids_for(db, user):
+        raise HTTPException(status_code=403, detail="You are not on this project.")
+    text = (body.question or "").strip()
+    if len(text) < 5:
+        raise HTTPException(status_code=422, detail="Write the question so the client can answer it.")
+    src = None
+    if body.source_id:
+        src = _visible_sources(db, user).filter(Source.id == body.source_id, Source.project_id == body.project_id).first()
+        if not src:
+            raise HTTPException(status_code=404, detail="Source not found in this project.")
+    q = ClientQuestion(project_id=body.project_id, source_id=body.source_id, question=text, asked_by=user.id, status="open")
+    db.add(q)
+    db.flush()
+    link = "/client-questions"
+    for uid in admin_user_ids(db, body.project_id):
+        if uid != user.id:
+            notify(db, uid, "New question for the client", f"{user.full_name}: {text[:180]}", link, "client_question", ACTION, dedupe=False)
+    db.commit()
+    db.refresh(q)
+    return _q_out(q)
+
+
+@router.patch("/questions/{qid}")
+def answer_question(qid: str, body: AnswerIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    q = db.query(ClientQuestion).filter(ClientQuestion.id == qid, ClientQuestion.project_id.in_(_project_ids_for(db, user))).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+    ans = (body.answer or "").strip()
+    if not ans:
+        raise HTTPException(status_code=422, detail="Write the client's answer first.")
+    q.answer, q.status, q.answered_by, q.answered_at = ans, "answered", user.id, enh.now_utc()
+    if q.asked_by and q.asked_by != user.id:
+        notify(db, q.asked_by, "The client answered your question", f"{q.question[:120]}\n\nAnswer: {ans[:240]}",
+               (f"/projects/{q.project_id}/sources/{q.source_id}" if q.source_id else "/client-questions"), "client_answer", INFO, dedupe=False)
+    db.commit()
+    db.refresh(q)
+    return _q_out(q)
+
+
+@router.post("/questions/{qid}/reopen")
+def reopen_question(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    q = db.query(ClientQuestion).filter(ClientQuestion.id == qid, ClientQuestion.project_id.in_(_project_ids_for(db, user))).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+    q.status, q.answer, q.answered_at, q.answered_by = "open", None, None, None
+    db.commit()
+    return _q_out(q)
+
+
+class SentBody(BaseModel):
+    ids: list[str]
+
+
+@router.post("/questions/mark-sent")
+def mark_sent(body: SentBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    n = 0
+    for q in db.query(ClientQuestion).filter(ClientQuestion.id.in_(body.ids), ClientQuestion.project_id.in_(_project_ids_for(db, user))).all():
+        q.sent_to_client_at = enh.now_utc()
+        n += 1
+    db.commit()
+    return {"marked": n}
+
+
+@router.delete("/questions/{qid}", status_code=204)
+def delete_question(qid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    q = db.query(ClientQuestion).filter(ClientQuestion.id == qid, ClientQuestion.project_id.in_(_project_ids_for(db, user))).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Question not found")
+    if not (_lead(user) or (q.asked_by == user.id and q.status == "open")):
+        raise HTTPException(status_code=403, detail="You can only remove your own open questions.")
+    db.delete(q)
+    db.commit()
+
+
+# ─── Digest and reminders ────────────────────────────────────────────────────
+
+@router.get("/digest")
+def digest(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    return enh.build_digest(db, user, project_id)
+
+
+@router.post("/digest/email-me")
+def email_digest(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    if not mail_enabled():
+        raise HTTPException(status_code=422, detail="Email isn't set up yet. Add the SMTP settings on the server first.")
+    text, html = enh.digest_text(enh.build_digest(db, user))
+    if not send_now(user.email, "Daily digest: what is waiting on whom", text, html):
+        raise HTTPException(status_code=502, detail="The mail server did not accept the message. Check the SMTP settings.")
+    return {"sent_to": user.email}
+
+
+@router.post("/reminders/run")
+def run_reminders_now(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    return enh.run_reminders(db)
+
+
+# ─── Audit trail ─────────────────────────────────────────────────────────────
+
+ACTION_LABELS = {
+    "record_approved": "Approved a record", "record_admin_reviewed": "Admin reviewed a record",
+    "record_returned_for_correction": "Sent a record back for correction", "record_rejected": "Rejected a record",
+    "field_overridden": "Changed a field value", "record_escalated": "Escalated a record", "record_submitted": "Submitted a record",
+    "source_reset": "Reset the source", "source_created": "Created the source", "source_status_changed": "Changed the status",
+    "source_assigned": "Changed who is assigned", "source_data_uploaded": "Uploaded data", "source_record_fixed": "Fixed a record",
+    "source_approved": "Approved the source", "member_added": "Added a member", "member_removed": "Removed a member",
+    "user_created": "Created a user", "user_role_changed": "Changed a role", "user_deactivated": "Deactivated a user",
+    "work_submitted": "Submitted work", "work_reviewed": "Reviewed work",
+}
+
+
+def _detail(v) -> str:
+    if not isinstance(v, dict):
+        return "" if v is None else str(v)[:160]
+    parts = []
+    for k, val in list(v.items())[:4]:
+        if isinstance(val, (str, int, float, bool)) or val is None:
+            parts.append(f"{k.replace('_', ' ')}: {val}")
+    return "; ".join(parts)[:240]
+
+
+@router.get("/audit")
+def audit(project_id: str | None = None, source_id: str | None = None, user_id: str | None = None, action: str | None = None,
+          days: int = Query(30, ge=1, le=365), before: str | None = None, limit: int = Query(60, ge=10, le=200),
+          db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    q = db.query(AuditLog).filter(AuditLog.timestamp >= enh.now_utc() - timedelta(days=days))
+    if not is_org_admin(user):
+        full, _ = project_scopes(user, db)
+        q = q.filter(AuditLog.project_id.in_(full))
+    if project_id:
+        q = q.filter(AuditLog.project_id == project_id)
+    if source_id:
+        q = q.filter(AuditLog.source_id == source_id)
+    if user_id:
+        q = q.filter(AuditLog.user_id == user_id)
+    if action:
+        q = q.filter(AuditLog.action == action)
+    if before:
+        try:
+            q = q.filter(AuditLog.timestamp < datetime.fromisoformat(before))
+        except ValueError:
+            pass
+    rows = q.order_by(AuditLog.timestamp.desc()).limit(limit + 1).all()
+    more = len(rows) > limit
+    rows = rows[:limit]
+    uids = {r.user_id for r in rows if r.user_id}
+    sids = {r.source_id for r in rows if r.source_id}
+    users = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(uids)).all()} if uids else {}
+    srcs = {s.id: (s.name, s.project_id) for s in db.query(Source).filter(Source.id.in_(sids)).all()} if sids else {}
+    items = []
+    for r in rows:
+        a = r.action.value if hasattr(r.action, "value") else str(r.action)
+        sname, spid = srcs.get(r.source_id, (None, None))
+        items.append({
+            "id": r.id, "at": r.timestamp.isoformat() if r.timestamp else None, "user": users.get(r.user_id, "System"), "user_id": r.user_id,
+            "action": a, "label": ACTION_LABELS.get(a, a.replace("_", " ").capitalize()),
+            "source_id": r.source_id, "source_name": sname, "project_id": r.project_id or spid,
+            "before": _detail(r.before_value), "after": _detail(r.after_value),
+        })
+    return {"items": items, "next_before": items[-1]["at"] if more and items else None,
+            "actions": [{"value": k, "label": v} for k, v in sorted(ACTION_LABELS.items(), key=lambda kv: kv[1])]}
+
+
+# ─── People stats ────────────────────────────────────────────────────────────
+
+@router.get("/stats/people")
+def stats_people(days: int = Query(30, ge=1, le=365), project_id: str | None = None,
+                 db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    since = enh.now_utc() - timedelta(days=days)
+    return {"days": days, "people": enh.people_stats(db, since, project_id, viewer=user)}
+
+
+@router.get("/stats/me")
+def stats_me(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    since = enh.now_utc() - timedelta(days=days)
+    rows = enh.people_stats(db, since, None, only_user=user.id, viewer=user)
+    mine = rows[0] if rows else None
+    return {"days": days, "me": mine}
+
+
+# ─── Bulk actions ────────────────────────────────────────────────────────────
+
+class BulkBody(BaseModel):
+    source_ids: list[str]
+    action: str                      # assign_extractor | unassign_extractor | add_peers | remove_peers
+    user_id: str | None = None
+    user_ids: list[str] | None = None
+
+
+def _eligible(db, source: Source, u: User) -> str | None:
+    m = db.query(ProjectMember).filter(ProjectMember.project_id == source.project_id, ProjectMember.user_id == u.id).first()
+    if not m:
+        return f"{u.full_name} is not on the '{source.project.name if source.project else 'project'}' project"
+    return None
+
+
+@router.post("/sources/bulk")
+def bulk(body: BulkBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not (_roles(user) & {"org_admin", "project_admin"}):
+        raise HTTPException(status_code=403, detail="Only admins can change several sources at once.")
+    if not body.source_ids:
+        raise HTTPException(status_code=422, detail="Choose at least one source.")
+    if len(body.source_ids) > 200:
+        raise HTTPException(status_code=422, detail="Choose 200 sources or fewer at a time.")
+    sources = _visible_sources(db, user).filter(Source.id.in_(body.source_ids)).all()
+    found = {s.id for s in sources}
+    results = [{"source_id": i, "ok": False, "reason": "Not found, or you can't see it"} for i in body.source_ids if i not in found]
+
+    target = None
+    ids = [i for i in dict.fromkeys(body.user_ids or []) if i]
+    if body.action == "assign_extractor":
+        target = db.query(User).filter(User.id == body.user_id, User.is_active == True).first()  # noqa: E712
+        if not target:
+            raise HTTPException(status_code=422, detail="Choose who should extract.")
+    elif body.action in ("add_peers", "remove_peers"):
+        if not ids:
+            raise HTTPException(status_code=422, detail="Choose at least one person.")
+    elif body.action != "unassign_extractor":
+        raise HTTPException(status_code=422, detail="Unknown action.")
+    people = {u.id: u for u in db.query(User).filter(User.id.in_(ids), User.is_active == True).all()} if ids else {}  # noqa: E712
+
+    for s in sources:
+        if s.status == SourceStatus.APPROVED:
+            results.append({"source_id": s.id, "ok": False, "reason": "Already approved"})
+            continue
+        if body.action == "assign_extractor":
+            bad = _eligible(db, s, target)
+            if bad:
+                results.append({"source_id": s.id, "ok": False, "reason": bad})
+                continue
+            if any(p.user_id == target.id for p in s.peer_reviews):
+                results.append({"source_id": s.id, "ok": False, "reason": f"{target.full_name} is a peer reviewer on it"})
+                continue
+            s.assigned_extractor_id = target.id
+            results.append({"source_id": s.id, "ok": True})
+        elif body.action == "unassign_extractor":
+            s.assigned_extractor_id = None
+            results.append({"source_id": s.id, "ok": True})
+        elif body.action == "add_peers":
+            have = {p.user_id for p in s.peer_reviews}
+            added, why = [], None
+            for uid in ids:
+                u = people.get(uid)
+                if not u:
+                    why = "Someone you picked isn't active"
+                    continue
+                if uid == s.assigned_extractor_id:
+                    why = f"{u.full_name} is the extractor"
+                    continue
+                bad = _eligible(db, s, u)
+                if bad:
+                    why = bad
+                    continue
+                if uid not in have:
+                    s.peer_reviews.append(SourcePeerReview(user_id=uid, status="pending", assigned_by=user.id))
+                    added.append(uid)
+            if added and not s.assigned_reviewer_id:
+                s.assigned_reviewer_id = added[0]
+            for uid in added:
+                notify(db, uid, f"Peer review requested: '{s.name}'",
+                       "You've been asked to peer review this source. Check the records, then submit your review with a comment.",
+                       src_link(s), "peer_requested", ACTION)
+            results.append({"source_id": s.id, "ok": bool(added) or not why, "reason": None if added else (why or "Already on the list")})
+        elif body.action == "remove_peers":
+            gone = [p for p in list(s.peer_reviews) if p.user_id in ids]
+            for p in gone:
+                s.peer_reviews.remove(p)
+            rest = [p for p in s.peer_reviews]
+            s.assigned_reviewer_id = rest[0].user_id if rest else None
+            results.append({"source_id": s.id, "ok": bool(gone), "reason": None if gone else "They were not on it"})
+    db.commit()
+    return {"results": results, "done": sum(1 for r in results if r["ok"]), "skipped": sum(1 for r in results if not r["ok"])}
+
+
+@router.get("/people")
+def people(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Who can be picked as extractor or peer reviewer (project members with those roles)."""
+    if not (_roles(user) & {"org_admin", "project_admin"}):
+        raise HTTPException(status_code=403, detail="Admins only.")
+    q = db.query(ProjectMember)
+    if project_id:
+        q = q.filter(ProjectMember.project_id == project_id)
+    seen, out = set(), []
+    for m in q.all():
+        u = m.user
+        if not u or not u.is_active or u.id in seen:
+            continue
+        if m.role.value in PEER_ROLES or (_roles(u) & PEER_ROLES):
+            seen.add(u.id)
+            out.append({"user_id": u.id, "name": u.full_name, "email": u.email, "role": m.role.value})
+    out.sort(key=lambda p: (p["name"] or "").lower())
+    return {"people": out}
+
+
+# ─── My settings and two-step sign-in ────────────────────────────────────────
+
+def _settings_out(db, user):
+    s = _settings(db, user.id)
+    return {"email_alerts": s.email_alerts, "email_digest": s.email_digest, "totp_enabled": s.totp_enabled,
+            "email_configured": mail_enabled(), "is_lead": _lead(user), "email": user.email}
+
+
+@router.get("/me/settings")
+def my_settings(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    out = _settings_out(db, user)
+    db.commit()
+    return out
+
+
+class SettingsIn(BaseModel):
+    email_alerts: bool | None = None
+    email_digest: bool | None = None
+
+
+@router.put("/me/settings")
+def update_settings(body: SettingsIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    s = _settings(db, user.id)
+    if body.email_alerts is not None:
+        s.email_alerts = body.email_alerts
+    if body.email_digest is not None:
+        s.email_digest = body.email_digest
+    db.commit()
+    return _settings_out(db, user)
+
+
+@router.post("/2fa/setup")
+def totp_setup(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    s = _settings(db, user.id)
+    if s.totp_enabled:
+        raise HTTPException(status_code=409, detail="Two-step sign-in is already on. Turn it off first to set it up again.")
+    s.totp_secret = enh.new_totp_secret()
+    db.commit()
+    return {"secret": s.totp_secret, "uri": enh.totp_uri(s.totp_secret, user.email)}
+
+
+class CodeIn(BaseModel):
+    code: str
+    password: str | None = None
+
+
+@router.post("/2fa/enable")
+def totp_enable(body: CodeIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    s = _settings(db, user.id)
+    if not s.totp_secret:
+        raise HTTPException(status_code=422, detail="Start the setup first.")
+    if not enh.verify_totp(s.totp_secret, body.code):
+        raise HTTPException(status_code=422, detail="That code isn't right. Check the app and try the next code.")
+    s.totp_enabled = True
+    db.commit()
+    return _settings_out(db, user)
+
+
+@router.post("/2fa/disable")
+def totp_disable(body: CodeIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    s = _settings(db, user.id)
+    if not s.totp_enabled:
+        return _settings_out(db, user)
+    if not (body.password and verify_password(body.password, user.hashed_password)):
+        raise HTTPException(status_code=422, detail="Enter your password to turn this off.")
+    if not enh.verify_totp(s.totp_secret or "", body.code):
+        raise HTTPException(status_code=422, detail="That code isn't right.")
+    s.totp_enabled, s.totp_secret = False, None
+    db.commit()
+    return _settings_out(db, user)
+
+
+@router.post("/users/{uid}/2fa/reset")
+def totp_admin_reset(uid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """For someone who lost their phone: an org admin clears their two-step sign-in and unlocks the account."""
+    if not is_org_admin(user):
+        raise HTTPException(status_code=403, detail="Only org admins can do this.")
+    s = _settings(db, uid)
+    s.totp_enabled, s.totp_secret, s.failed_logins, s.locked_until = False, None, 0, None
+    db.commit()
+    return {"ok": True}

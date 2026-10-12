@@ -8,13 +8,16 @@ import { SopPanel } from '@/components/SopPanel'
 import { XtriumNoticesBanner } from '@/components/XtriumNoticesBanner'
 import { PeerReviewPanel } from '@/components/PeerReviewPanel'
 import { isPeerOf } from '@/lib/peers'
+import { AskClientModal } from '@/components/enh/AskClient'
+import { SourceRequiredCard } from '@/components/enh/RequiredFields'
+import { LinkChip } from '@/pages/DataHealth'
 import {
   ArrowLeft, Globe, Upload, Download, CheckCircle, XCircle,
   Edit3, ChevronRight, AlertCircle, Save, Users as UsersIcon,
   Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
-  Folder, AlertTriangle, File as FileIcon, Zap, Link2, Database
+  Folder, AlertTriangle, File as FileIcon, Zap, Link2, Database, MessageSquarePlus, History as HistoryIcon
 } from 'lucide-react'
-import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi, xtriumApi, resourcesApi } from '@/api/client'
+import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi, xtriumApi, resourcesApi, enhApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
 import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
@@ -52,6 +55,9 @@ function SourceDetailInner() {
   const [sourceNotFound, setSourceNotFound] = useState(false)
   const [sourceLoadError, setSourceLoadError] = useState(false)
   const [tab, setTab] = useState<Tab>('records')
+  const [showAsk, setShowAsk] = useState(false)
+  const [uploadWarnings, setUploadWarnings] = useState<string[]>([])
+  const [linkInfo, setLinkInfo] = useState<{ status: string; detail?: string } | null>(null)
 
   const formatDuration = (start: string | null | undefined, end: string | null | undefined) => {
     if (!start) return null
@@ -424,6 +430,10 @@ function SourceDetailInner() {
       .then((m: any) => setMembers(m.map((x: any) => ({ id: x.user_id, full_name: x.full_name, email: x.email }))))
       .catch(() => {})
     sourcesApi.schema(sourceId).then(setSchemaDefinition).catch(() => {})
+    enhApi.links(projectId).then((r: any) => {
+      const row = (r.items ?? []).find((i: any) => i.source_id === sourceId)
+      setLinkInfo(row ? { status: row.status, detail: row.detail } : null)
+    }).catch(() => {})
   }
   useEffect(() => { load(); setRawFilesLoaded(false) }, [projectId, sourceId, validityFilter])
 
@@ -542,6 +552,7 @@ function SourceDetailInner() {
             try {
               const summary = await sourcesApi.uploadMulti(sourceId, chunks, setUploadProgress)
               toast.success(`Uploaded ${summary.files_processed} part${summary.files_processed !== 1 ? 's' : ''}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+              if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
               setShowUpload(false)
               setFile(null)
               load()
@@ -573,6 +584,7 @@ function SourceDetailInner() {
       const isAI = summary.extraction_method === 'llm'
       const method = isAI ? 'AI extraction' : isZip ? `${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from ZIP` : 'schema mapping'
       toast.success(`Uploaded via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+      if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
       setShowUpload(false)
       setFile(null)
       load()
@@ -592,6 +604,7 @@ function SourceDetailInner() {
     try {
       const summary = await sourcesApi.uploadMulti(sourceId, Array.from(folderFiles), setUploadProgress)
       toast.success(`Uploaded ${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from folder: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+      if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
       setShowUpload(false)
       setFolderFiles(null)
       load()
@@ -909,6 +922,9 @@ function SourceDetailInner() {
             <a href={source.website_url} target="_blank" rel="noopener noreferrer"
               className="text-sm text-brand-600 hover:text-brand-700 flex items-center gap-1 mt-1">
               <Globe className="w-3.5 h-3.5" /> {source.website_url}
+              {linkInfo && linkInfo.status !== 'unchecked' && linkInfo.status !== 'none' && (
+                <span onClick={e => e.stopPropagation()}><LinkChip status={linkInfo.status as any} detail={linkInfo.detail} /></span>
+              )}
             </a>
           )}
         </div>
@@ -970,6 +986,10 @@ function SourceDetailInner() {
             </Button>
           )}
           <ActionMenu items={[
+            { key: 'ask', label: 'Ask the client', icon: <MessageSquarePlus className="w-3.5 h-3.5" />, onClick: () => setShowAsk(true) },
+            { key: 'activity', label: 'View activity', icon: <HistoryIcon className="w-3.5 h-3.5" />,
+              hidden: !['org_admin', 'project_admin', 'qa_lead'].some(r => user?.roles?.includes(r)),
+              onClick: () => navigate(`/audit?source=${source.id}`) },
             { key: 'edit', label: 'Edit Source', icon: <Edit3 className="w-3.5 h-3.5" />, hidden: !isAdmin,
               onClick: () => {
                 setEditSourceForm({ name: source.name, description: source.description || '', website_url: source.website_url || '' })
@@ -1243,6 +1263,10 @@ function SourceDetailInner() {
               </div>
               <button onClick={() => setShowVerifyResult(false)} className="text-gray-400 hover:text-gray-600 text-xs">✕</button>
             </div>
+          )}
+
+          {schemaDefinition?.fields?.some((f: any) => f.required) && records.length > 0 && (
+            <SourceRequiredCard fields={schemaDefinition.fields} records={records} />
           )}
 
           <div className="flex items-center gap-2 flex-wrap">
@@ -1967,6 +1991,22 @@ function SourceDetailInner() {
         </div>
       </Modal>
 
+      <AskClientModal open={showAsk} onClose={() => setShowAsk(false)} projectId={source.project_id} sourceId={source.id} />
+      <Modal open={uploadWarnings.length > 0} onClose={() => setUploadWarnings([])} title="Check these before you continue"
+        description="The upload worked, but a few things may need a second look.">
+        <ul className="m-0 p-0 list-none space-y-2.5">
+          {uploadWarnings.map((w, i) => (
+            <li key={i} className="flex items-start gap-2.5 bg-amber-50 rounded-xl px-3.5 py-3">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-amber-950 m-0 leading-relaxed">{w}</p>
+            </li>
+          ))}
+        </ul>
+        <div className="flex items-center justify-between gap-3 mt-5">
+          <button type="button" onClick={() => { setUploadWarnings([]); setShowAsk(true) }} className="text-sm font-semibold text-brand-600 hover:underline">Ask the client about this</button>
+          <Button onClick={() => setUploadWarnings([])}>Got it</Button>
+        </div>
+      </Modal>
       <Modal open={showSchemaJson} onClose={() => setShowSchemaJson(false)} title={schemaDefinition?.name || 'Schema Definition'} size="lg">
         <div style={{ height: 500, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
           <textarea readOnly value={JSON.stringify(schemaDefinition, null, 2)}

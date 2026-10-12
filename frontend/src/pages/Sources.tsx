@@ -11,6 +11,7 @@ import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
 import { MyQueue } from '@/components/MyQueue'
 import { SourcesWorkbench } from '@/components/SourcesWorkbench'
+import { enhApi } from '@/api/client'
 import { saveNav } from '@/lib/sourceNav'
 import { isPeerOf } from '@/lib/peers'
 
@@ -77,6 +78,7 @@ export function SourcesPage() {
   const [project, setProject] = useState<Project | null>(null)
   const [projects, setProjects] = useState<Project[]>([])
   const [sources, setSources] = useState<Source[]>([])
+  const [linkStatus, setLinkStatus] = useState<Record<string, string>>({})
   const [schemas, setSchemas] = useState<Schema[]>([])
   const [members, setMembers] = useState<User[]>([])
   const [schemasLoading, setSchemasLoading] = useState(false)
@@ -154,6 +156,14 @@ export function SourcesPage() {
     ]).finally(() => setLoading(false))
   }
   useEffect(() => { load() }, [projectId])
+  // Link problems found by the link checker, shown as small flags on the cards.
+  useEffect(() => {
+    enhApi.links(projectId).then((r: any) => {
+      const m: Record<string, string> = {}
+      ;(r.items ?? []).forEach((i: any) => { m[i.source_id] = i.status })
+      setLinkStatus(m)
+    }).catch(() => {})
+  }, [projectId])
 
   // Load schemas + members whenever the target project changes
   useEffect(() => {
@@ -338,6 +348,7 @@ export function SourcesPage() {
       ) : view === 'bench' ? (
         <SourcesWorkbench sources={benchSources} projectNames={projectMap} showProject={isGlobal}
           projectFilter={activeProject} onProjectFilter={isGlobal ? setProjectFilter : undefined}
+          linkStatus={linkStatus} canBulk={canManage} onChanged={load}
           backTo={isGlobal ? '/sources' : `/projects/${projectId}/sources`} />
       ) : view === 'simple' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

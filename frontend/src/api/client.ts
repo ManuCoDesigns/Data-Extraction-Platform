@@ -93,8 +93,8 @@ api.interceptors.response.use(
 
 // ─── Auth ─────────────────────────────────────────────────────────────────────
 export const authApi = {
-  login: (email: string, password: string) =>
-    api.post('/auth/login', { email, password }).then(r => r.data),
+  login: (email: string, password: string, code?: string) =>
+    api.post('/auth/login', { email, password, code: code || undefined }).then(r => r.data),
   me: () => api.get('/auth/me').then(r => r.data),
   changePassword: (current_password: string, new_password: string) =>
     api.post('/auth/change-password', { current_password, new_password }).then(r => r.data),
@@ -408,6 +408,35 @@ export const xtriumApi = {
     api.post('/integrations/xtrium/submit-ready', { source_ids: sourceIds }, { timeout: 120000 }).then(r => r.data),
   payloadPreview: (sourceId: string) =>
     api.get(`/integrations/xtrium/sources/${sourceId}/payload-preview`).then(r => r.data),
+}
+
+// ─── Extra tools: links, questions, digest, audit, stats, bulk, account settings ─────────────
+export const enhApi = {
+  links: (projectId?: string) => api.get('/enh/links', { params: { project_id: projectId || undefined } }).then(r => r.data),
+  checkLinks: (body: { project_id?: string; source_ids?: string[]; only_unchecked?: boolean; force?: boolean; limit?: number }) =>
+    api.post('/enh/links/check', body, { timeout: 120000 }).then(r => r.data),
+  markLink: (sourceId: string, status: string, note?: string) => api.put(`/enh/links/${sourceId}`, { status, note }).then(r => r.data),
+  duplicates: (projectId?: string) => api.get('/enh/duplicates', { params: { project_id: projectId || undefined } }).then(r => r.data),
+  questions: (params: { project_id?: string; source_id?: string; status?: string } = {}) => api.get('/enh/questions', { params }).then(r => r.data),
+  ask: (body: { project_id: string; source_id?: string | null; question: string }) => api.post('/enh/questions', body).then(r => r.data),
+  answer: (id: string, answer: string) => api.patch(`/enh/questions/${id}`, { answer }).then(r => r.data),
+  reopen: (id: string) => api.post(`/enh/questions/${id}/reopen`).then(r => r.data),
+  markSent: (ids: string[]) => api.post('/enh/questions/mark-sent', { ids }).then(r => r.data),
+  removeQuestion: (id: string) => api.delete(`/enh/questions/${id}`).then(r => r.data),
+  digest: (projectId?: string) => api.get('/enh/digest', { params: { project_id: projectId || undefined } }).then(r => r.data),
+  emailDigest: () => api.post('/enh/digest/email-me').then(r => r.data),
+  runReminders: () => api.post('/enh/reminders/run').then(r => r.data),
+  audit: (params: Record<string, string | number | undefined>) => api.get('/enh/audit', { params }).then(r => r.data),
+  peopleStats: (days = 30, projectId?: string) => api.get('/enh/stats/people', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
+  myStats: (days = 30) => api.get('/enh/stats/me', { params: { days } }).then(r => r.data),
+  people: (projectId?: string) => api.get('/enh/people', { params: { project_id: projectId || undefined } }).then(r => r.data),
+  bulk: (body: { source_ids: string[]; action: string; user_id?: string | null; user_ids?: string[] }) => api.post('/enh/sources/bulk', body).then(r => r.data),
+  settings: () => api.get('/enh/me/settings').then(r => r.data),
+  saveSettings: (body: { email_alerts?: boolean; email_digest?: boolean }) => api.put('/enh/me/settings', body).then(r => r.data),
+  totpSetup: () => api.post('/enh/2fa/setup').then(r => r.data),
+  totpEnable: (code: string) => api.post('/enh/2fa/enable', { code }).then(r => r.data),
+  totpDisable: (code: string, password: string) => api.post('/enh/2fa/disable', { code, password }).then(r => r.data),
+  totpReset: (userId: string) => api.post(`/enh/users/${userId}/2fa/reset`).then(r => r.data),
 }
 
 function triggerBrowserDownload(blob: Blob, filename: string) {

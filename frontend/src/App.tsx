@@ -20,6 +20,11 @@ import { TeamWorkloadPage } from '@/pages/TeamWorkload'
 import { EscalationsPage } from '@/pages/Escalations'
 import { ProfilePage } from '@/pages/Profile'
 import { SettingsPage } from '@/pages/Settings'
+import { DataHealthPage } from '@/pages/DataHealth'
+import { ClientQuestionsPage } from '@/pages/ClientQuestions'
+import { DigestPage } from '@/pages/Digest'
+import { AuditTrailPage } from '@/pages/AuditTrail'
+import { InsightsPage } from '@/pages/Insights'
 import { useAuthStore } from '@/store/auth'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -142,6 +147,12 @@ export function App() {
             path="escalations"
             element={<EscalationsPage />}
           />
+
+          <Route path="data-health" element={<DataHealthPage />} />
+          <Route path="client-questions" element={<ClientQuestionsPage />} />
+          <Route path="insights" element={<InsightsPage />} />
+          <Route path="digest" element={<RequireTeamLead><DigestPage /></RequireTeamLead>} />
+          <Route path="audit" element={<RequireTeamLead><AuditTrailPage /></RequireTeamLead>} />
 
           <Route
             path="xtrium"

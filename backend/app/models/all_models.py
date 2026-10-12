@@ -658,3 +658,62 @@ class UploadedFileEntry(Base):
 
     job = relationship("ExtractionJob")
 
+
+
+# ─── Link health, client questions, reminders, user settings ─────────────────
+
+class SourceLinkCheck(Base):
+    """Latest result of checking a source's website link. One row per source."""
+    __tablename__ = "source_link_checks"
+
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), primary_key=True)
+    url = Column(String(1024), nullable=True)
+    status = Column(String(20), nullable=False, default="unchecked")   # ok | login | blocked | dead | error | unchecked
+    http_code = Column(Integer, nullable=True)
+    detail = Column(String(500), nullable=True)
+    final_url = Column(String(1024), nullable=True)
+    manual = Column(Boolean, default=False, server_default="false", nullable=False)   # set by a person, not the checker
+    checked_at = Column(DateTime(timezone=True), default=now_utc)
+    checked_by = Column(String(36), nullable=True)
+
+
+class ClientQuestion(Base):
+    """A question for the client about an unclear point, with their answer once we have it."""
+    __tablename__ = "client_questions"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="SET NULL"), nullable=True, index=True)
+    question = Column(Text, nullable=False)
+    answer = Column(Text, nullable=True)
+    status = Column(String(12), nullable=False, default="open", server_default="open")   # open | answered
+    asked_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    answered_by = Column(String(36), ForeignKey("users.id"), nullable=True)
+    sent_to_client_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    answered_at = Column(DateTime(timezone=True), nullable=True)
+
+    asker = relationship("User", foreign_keys=[asked_by])
+    answerer = relationship("User", foreign_keys=[answered_by])
+    source = relationship("Source", foreign_keys=[source_id])
+
+
+class ReminderLog(Base):
+    """Remembers which reminders were already sent, so nobody is nudged twice in a day."""
+    __tablename__ = "reminder_log"
+
+    key = Column(String(200), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+
+
+class UserSettings(Base):
+    """Per-user extras: email alerts, two-step sign-in, and failed-login lockout."""
+    __tablename__ = "user_settings"
+
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    email_alerts = Column(Boolean, default=True, server_default="true", nullable=False)
+    email_digest = Column(Boolean, default=True, server_default="true", nullable=False)
+    totp_secret = Column(String(64), nullable=True)
+    totp_enabled = Column(Boolean, default=False, server_default="false", nullable=False)
+    failed_logins = Column(Integer, default=0, server_default="0", nullable=False)
+    locked_until = Column(DateTime(timezone=True), nullable=True)

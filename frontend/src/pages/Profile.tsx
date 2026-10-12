@@ -4,6 +4,7 @@ import { usersApi } from '@/api/client'
 import { Card, Button, Input, Avatar, Badge, toast } from '@/components/ui'
 import { User, Mail, Shield, Clock, Edit3, Save, X, Key } from 'lucide-react'
 import { format } from 'date-fns'
+import { AccountSettings } from '@/components/enh/AccountSettings'
 
 const ROLE_INFO: Record<string, { label: string; color: 'red'|'blue'|'amber'|'green'|'gray'|'purple'; desc: string }> = {
   org_admin:        { label: 'Org Admin',        color: 'red',    desc: 'Full platform access' },
@@ -164,6 +165,8 @@ export function ProfilePage() {
           </div>
         )}
       </Card>
+
+      <AccountSettings />
     </div>
   )
 }

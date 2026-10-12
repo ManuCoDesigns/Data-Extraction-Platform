@@ -29,6 +29,12 @@ def notify(db, user_id, title, body, link=None, kind="general", priority=INFO, d
             return None
     n = Notification(user_id=user_id, title=title[:255], body=body, link=link, kind=kind, priority=priority)
     db.add(n)
+    if priority == ACTION:
+        try:
+            from app.core.mailer import queue_email
+            queue_email(db, user_id, title[:255], body, link, True)
+        except Exception:
+            pass
     return n
 
 

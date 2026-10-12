@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
-import { Database, ArrowRight, Lock, Mail, CheckCircle } from 'lucide-react'
+import { Database, ArrowRight, Lock, Mail, CheckCircle, ShieldCheck } from 'lucide-react'
 
 export function LoginPage() {
   const [email,    setEmail]    = useState('')
   const [password, setPassword] = useState('')
+  const [code,     setCode]     = useState('')
+  const [needCode, setNeedCode] = useState(false)
   const [error,    setError]    = useState('')
   const [loading,  setLoading]  = useState(false)
   const { login }  = useAuthStore()
@@ -16,10 +18,16 @@ export function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      await login(email, password)
+      await login(email, password, needCode ? code : undefined)
       navigate('/', { replace: true })
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Invalid email or password')
+      const detail = err?.response?.data?.detail
+      if (detail === 'TWO_STEP_REQUIRED') {
+        setNeedCode(true)
+        setError('')
+      } else {
+        setError(detail || 'Invalid email or password')
+      }
     } finally {
       setLoading(false)
     }
@@ -136,6 +144,23 @@ export function LoginPage() {
               </div>
             </div>
 
+            {needCode && (
+              <div style={{ marginBottom: 24 }}>
+                <label htmlFor="login-code" style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+                  Code from your authenticator app
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <ShieldCheck style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', width: 16, height: 16, color: '#94a3b8' }} />
+                  <input id="login-code" inputMode="numeric" autoComplete="one-time-code" autoFocus maxLength={7}
+                    value={code} onChange={e => setCode(e.target.value.replace(/[^\d ]/g, ''))}
+                    placeholder="123456" required style={{ ...inp, letterSpacing: '0.3em', fontWeight: 700 }}
+                    onFocus={e => e.target.style.borderColor='#2563eb'}
+                    onBlur={e => e.target.style.borderColor='#e2e8f0'} />
+                </div>
+                <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 0' }}>Open your authenticator app and type the 6-digit code for this account.</p>
+              </div>
+            )}
+
             {error && (
               <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10,
                 padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#dc2626' }}>
@@ -150,7 +175,7 @@ export function LoginPage() {
               cursor: loading ? 'not-allowed' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             }}>
-              {loading ? 'Signing in…' : <><span>Sign in</span><ArrowRight style={{ width: 16, height: 16 }} /></>}
+              {loading ? 'Signing in…' : <><span>{needCode ? 'Verify and sign in' : 'Sign in'}</span><ArrowRight style={{ width: 16, height: 16 }} /></>}
             </button>
           </form>
 
