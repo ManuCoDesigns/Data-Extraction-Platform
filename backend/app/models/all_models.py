@@ -590,6 +590,8 @@ class Notification(Base):
     link = Column(String(512), nullable=True)
     is_read = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), default=now_utc)
+    kind = Column(String(40), nullable=True)                       # assigned, sent_back, ready_for_review, ...
+    priority = Column(String(10), nullable=False, default="info", server_default="info")   # action | info
 
     user = relationship("User")
 

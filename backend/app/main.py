@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.core.config import settings
+import app.core.notify_events  # noqa: F401  (registers the notification listeners)
 from app.api.v1.routes import (
     auth, users, projects, jobs, records, schemas,
     submission, project_resources, work_submissions, sources,

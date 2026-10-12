@@ -12,12 +12,14 @@ import { notificationsApi, sourcesApi } from '@/api/client'
 import { useCapability } from '@/lib/permissions'
 import type { Notification } from '@/types'
 import { formatDistanceToNow } from 'date-fns'
+import { NotificationBanner } from '@/components/NotificationBanner'
 
 export function AppLayout() {
   const { user, logout, fetchMe } = useAuthStore()
   const navigate   = useNavigate()
   const location   = useLocation()
   const [notifications, setNotifications] = useState<Notification[]>([])
+  const [unreadTotal, setUnreadTotal] = useState(0)
   const [showNotif, setShowNotif] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
@@ -58,11 +60,37 @@ export function AppLayout() {
         }
         setNotifications(items)
       }).catch(() => {})
+      notificationsApi.unreadCount().then((c: any) => setUnreadTotal(c?.unread_count ?? 0)).catch(() => {})
     }
     loadNotifications()
-    const iv = setInterval(loadNotifications, 60000)
-    return () => clearInterval(iv)
+    // Check every 30 seconds, and straight away when the person comes back to this tab.
+    const iv = setInterval(loadNotifications, 30000)
+    const onVisible = () => { if (!document.hidden) loadNotifications() }
+    document.addEventListener('visibilitychange', onVisible)
+    window.addEventListener('focus', loadNotifications)
+    return () => {
+      clearInterval(iv)
+      document.removeEventListener('visibilitychange', onVisible)
+      window.removeEventListener('focus', loadNotifications)
+    }
   }, [user])
+
+  // The browser tab shows the unread count, and blinks while the tab is in the background.
+  const unreadNow = notifications.filter(n => !n.is_read).length
+  useEffect(() => {
+    const base = (document.title || 'Data Extraction Platform').replace(/^(\(\d+\) |● \d+ new updates? - )/, '')
+    if (unreadNow === 0) { document.title = base; return }
+    let on = true
+    const tick = () => {
+      document.title = document.hidden && on
+        ? `● ${unreadNow} new ${unreadNow === 1 ? 'update' : 'updates'} - ${base}`
+        : `(${unreadNow}) ${base}`
+      on = !on
+    }
+    tick()
+    const iv = setInterval(tick, 1200)
+    return () => { clearInterval(iv); document.title = base }
+  }, [unreadNow])
 
   useEffect(() => {
     if (!user) return
@@ -75,13 +103,22 @@ export function AppLayout() {
   const handleNotifClick = async (n: Notification) => {
     if (!n.is_read) {
       setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, is_read: true } : x))
+      setUnreadTotal(t => Math.max(0, t - 1))
       notificationsApi.markRead(n.id).catch(() => {})
     }
     setShowNotif(false)
     if (n.link) navigate(n.link)
   }
 
+  // "Got it" on the banner: mark one notice read without leaving the page.
+  const handleAck = (n: Notification) => {
+    setNotifications(prev => prev.map(x => x.id === n.id ? { ...x, is_read: true } : x))
+    setUnreadTotal(t => Math.max(0, t - 1))
+    notificationsApi.markRead(n.id).catch(() => {})
+  }
+
   const handleMarkAllRead = async () => {
+    setUnreadTotal(0)
     setNotifications(prev => prev.map(n => ({ ...n, is_read: true })))
     try { await notificationsApi.markAllRead() } catch { /* local state already optimistic */ }
   }
@@ -336,6 +373,13 @@ export function AppLayout() {
       {/* Main content */}
       <main style={{ flex: 1, minWidth: 0, paddingTop: 0 }} className="dep-main">
         <style>{`@media(max-width:767px){.dep-main{padding-top:56px!important}}`}</style>
+        {location.pathname !== '/notifications' && (
+          <NotificationBanner
+            items={notifications.filter(n => !n.is_read)} total={unreadTotal}
+            onOpen={handleNotifClick} onAck={handleAck} onAckAll={handleMarkAllRead}
+            onViewAll={() => navigate('/notifications')}
+          />
+        )}
         <Outlet />
       </main>
 

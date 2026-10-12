@@ -33,6 +33,7 @@ from app.models.all_models import (
     ExtractionConfidence, ReviewStatus, AuditLog, AuditAction, Notification,
     LLMCallLog, SubmissionBatch, UploadedFileEntry, SourcePeerReview,
 )
+from app.core.notify import notify, admin_user_ids, src_link, ACTION, INFO
 from app.schemas.api_schemas import (
     SourceCreate, SourceUpdate, SourceOut, SourceUploadSummary,
     SourceRecordFix, SourceRecordReview, RecordOut, PaginatedResponse,
@@ -1612,13 +1613,8 @@ def review_source_record(
     if payload.action == "reject":
         source.status = SourceStatus.CHANGES_REQUESTED
         _reset_peer_reviews(source)
-        if source.assigned_extractor_id:
-            db.add(Notification(
-                user_id=source.assigned_extractor_id,
-                title=f"Record sent back in '{source.name}'",
-                body=payload.note or "A reviewer sent a record back for fixes.",
-                link=f"/sources/{source.id}",
-            ))
+        notify(db, source.assigned_extractor_id, f"Sent back for fixes: '{source.name}'",
+               payload.note or "A reviewer sent a record back for fixes.", src_link(source), "sent_back", ACTION)
 
     db.flush()
     _recompute_counts(source, db)
@@ -1678,6 +1674,8 @@ def admin_review_record(
     else:
         record.review_status = ReviewStatus.PENDING
         _reset_peer_reviews(source)
+        notify(db, source.assigned_extractor_id, f"Returned for correction: '{source.name}'",
+               note or "An admin returned a record for correction.", src_link(source), "sent_back", ACTION)
         record.correction_count = (record.correction_count or 0) + 1
         record.admin_review_note = note
         record.extraction_started_at = record.extraction_started_at or now
@@ -1915,11 +1913,9 @@ def set_peer_reviewers(
     source.assigned_reviewer_id = ids[0] if ids else None
 
     for uid in added:
-        db.add(Notification(
-            user_id=uid, title=f"Peer review requested: '{source.name}'",
-            body="You've been asked to peer review this source. Check the records, then submit your review with a comment.",
-            link=f"/projects/{source.project_id}/sources/{source.id}",
-        ))
+        notify(db, uid, f"Peer review requested: '{source.name}'",
+               "You've been asked to peer review this source. Check the records, then submit your review with a comment.",
+               src_link(source), "peer_requested", ACTION)
     db.commit()
     db.refresh(source)
     return _peer_detail(source, current_user, db)
@@ -1951,17 +1947,13 @@ def submit_peer_review(
         source.status = SourceStatus.IN_REVIEW
         source.review_started_at = source.review_started_at or now
 
+    notify(db, source.assigned_extractor_id, f"{current_user.full_name} finished a peer review: '{source.name}'",
+           comment, src_link(source), "peer_comment", INFO)
     if all(r.status == "submitted" for r in source.peer_reviews):
-        from app.models.all_models import UserRoleAssignment, UserRole
-        admin_ids = {a.user_id for a in db.query(UserRoleAssignment).filter(UserRoleAssignment.role == UserRole.ORG_ADMIN).all()}
-        admin_ids |= {m.user_id for m in db.query(ProjectMember).filter(
-            ProjectMember.project_id == source.project_id, ProjectMember.role == UserRole.PROJECT_ADMIN).all()}
-        for uid in admin_ids:
-            db.add(Notification(
-                user_id=uid, title=f"Ready for sign-off: '{source.name}'",
-                body="Every peer reviewer has submitted their review. Check their comments, then approve.",
-                link=f"/projects/{source.project_id}/sources/{source.id}",
-            ))
+        for uid in admin_user_ids(db, source.project_id):
+            notify(db, uid, f"Ready for sign-off: '{source.name}'",
+                   "Every peer reviewer has submitted their review. Check their comments, then approve.",
+                   src_link(source), "ready_for_signoff", ACTION)
     db.commit()
     db.refresh(source)
     return _peer_detail(source, current_user, db)

@@ -190,6 +190,8 @@ export interface Notification {
   link?: string
   is_read: boolean
   created_at: string
+  kind?: string | null
+  priority?: 'action' | 'info' | string
 }
 
 // ─── Project Resource ───────────────────────────────────────────────────────

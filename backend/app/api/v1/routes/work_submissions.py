@@ -200,6 +200,7 @@ def review_submission(
         title=f"Your submission was {status_label}",
         body=payload.notes or f"Your submission to {project.name} was {status_label}.",
         link=f"/projects/{project.id}",
+        kind="submission", priority="info" if payload.action == "approve" else "action",
     ))
     db.add(AuditLog(
         user_id=current_user.id, project_id=project.id,

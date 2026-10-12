@@ -39,6 +39,7 @@ from app.models.all_models import (
     ReviewStatus, AuditLog, AuditAction,
 )
 from app.services.xtrium_client import xtrium_client, XtriumClientError
+from app.core.notify import notify, admin_user_ids, src_link, ACTION
 
 router = APIRouter(prefix="/integrations/xtrium", tags=["integrations"])
 
@@ -1558,6 +1559,9 @@ def _apply_rework(db: Session, source, result: dict, current_user: User) -> bool
                 after_value={"stage": "xtrium_rejected", "origin": "xtrium_catalog_iq",
                              "reason": result.get("failure_reason") or result.get("notes") or ""},
             ))
+            for uid in admin_user_ids(db, source.project_id):
+                notify(db, uid, f"Xtrium rejected: '{source.name}'", result.get("failure_reason") or result.get("notes") or "Xtrium rejected this item.",
+                       src_link(source), "xtrium_rejected", ACTION)
         return False
     if not (status == "Queued" and notes):
         return False
@@ -1589,6 +1593,8 @@ def _apply_rework(db: Session, source, result: dict, current_user: User) -> bool
         applied = True
     if applied:
         source.status = SourceStatus.CHANGES_REQUESTED
+        for uid in ({source.assigned_extractor_id} | admin_user_ids(db, source.project_id)) - {None}:
+            notify(db, uid, f"Xtrium asked for rework: '{source.name}'", notes, src_link(source), "xtrium_rework", ACTION)
     return applied
 
 

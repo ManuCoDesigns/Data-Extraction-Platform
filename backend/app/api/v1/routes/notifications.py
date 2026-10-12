@@ -21,6 +21,7 @@ def _serialize(n: Notification) -> dict:
     return {
         "id": n.id, "title": n.title, "body": n.body, "link": n.link,
         "is_read": n.is_read, "created_at": n.created_at,
+        "kind": n.kind, "priority": n.priority or "info",
     }
 
 
@@ -29,6 +30,7 @@ def list_notifications(
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=100),
     unread_only: bool = Query(False),
+    action_only: bool = Query(False, description="Only notices that need the person to do something"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -41,6 +43,8 @@ def list_notifications(
     q = db.query(Notification).filter(Notification.user_id == current_user.id)
     if unread_only:
         q = q.filter(Notification.is_read == False)
+    if action_only:
+        q = q.filter(Notification.priority == "action")
     total = q.count()
     notes = q.order_by(Notification.created_at.desc()) \
         .offset((page - 1) * page_size).limit(page_size).all()
@@ -63,7 +67,12 @@ def unread_count(
         Notification.user_id == current_user.id,
         Notification.is_read == False,
     ).count()
-    return {"unread_count": count}
+    action = db.query(Notification).filter(
+        Notification.user_id == current_user.id,
+        Notification.is_read == False,
+        Notification.priority == "action",
+    ).count()
+    return {"unread_count": count, "action_count": action}
 
 
 @router.post("/{notification_id}/read")
