@@ -8,6 +8,7 @@ import { isPeerOf } from '@/lib/peers'
 import { MyQueue, buildQueue } from '@/components/MyQueue'
 import type { QueueItem } from '@/components/MyQueue'
 import type { Source } from '@/types'
+import { HeadsUp } from '@/components/enh/HeadsUp'
 
 type Focus = 'all' | 'extract' | 'review'
 
@@ -116,6 +117,8 @@ export function WorkDashboard() {
         : true), [sources, focus, user?.id])
   const q = useMemo(() => buildQueue(scoped, user?.id), [scoped, user?.id])
 
+  const mineIds = useMemo(() => new Set((sources ?? []).filter(s => s.assigned_extractor_id === user?.id || isPeerOf(s, user?.id)).map(s => s.id)), [sources, user?.id])
+
   if (error) {
     return (
       <div className="px-7 py-6 max-w-[1100px] mx-auto">
@@ -190,6 +193,8 @@ export function WorkDashboard() {
       </div>
 
       {top && <UpNext item={top} rest={q.action.length - 1} projectName={projectNames[top.source.project_id]} />}
+
+      <HeadsUp mine={mineIds} />
 
       <div className={cn('grid gap-3', tiles.length >= 4 ? 'grid-cols-2 md:grid-cols-4' : 'grid-cols-3')}>
         {tiles.map(t => <Tile key={t.label} {...t} />)}

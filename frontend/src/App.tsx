@@ -24,6 +24,7 @@ import { DataHealthPage } from '@/pages/DataHealth'
 import { ClientQuestionsPage } from '@/pages/ClientQuestions'
 import { DigestPage } from '@/pages/Digest'
 import { AuditTrailPage } from '@/pages/AuditTrail'
+import { DeliveryPage } from '@/pages/Delivery'
 import { InsightsPage } from '@/pages/Insights'
 import { useAuthStore } from '@/store/auth'
 
@@ -152,6 +153,7 @@ export function App() {
           <Route path="client-questions" element={<ClientQuestionsPage />} />
           <Route path="insights" element={<InsightsPage />} />
           <Route path="digest" element={<RequireTeamLead><DigestPage /></RequireTeamLead>} />
+          <Route path="delivery" element={<RequireTeamLead><DeliveryPage /></RequireTeamLead>} />
           <Route path="audit" element={<RequireTeamLead><AuditTrailPage /></RequireTeamLead>} />
 
           <Route

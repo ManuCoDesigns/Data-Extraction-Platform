@@ -416,6 +416,7 @@ export const enhApi = {
   checkLinks: (body: { project_id?: string; source_ids?: string[]; only_unchecked?: boolean; force?: boolean; limit?: number }) =>
     api.post('/enh/links/check', body, { timeout: 120000 }).then(r => r.data),
   markLink: (sourceId: string, status: string, note?: string) => api.put(`/enh/links/${sourceId}`, { status, note }).then(r => r.data),
+  delivery: (projectId?: string) => api.get('/enh/delivery', { params: { project_id: projectId || undefined } }).then(r => r.data),
   duplicateSources: (projectId?: string) => api.get('/enh/duplicates/sources', { params: { project_id: projectId || undefined } }).then(r => r.data),
   duplicates: (projectId?: string) => api.get('/enh/duplicates', { params: { project_id: projectId || undefined } }).then(r => r.data),
   questions: (params: { project_id?: string; source_id?: string; status?: string } = {}) => api.get('/enh/questions', { params }).then(r => r.data),

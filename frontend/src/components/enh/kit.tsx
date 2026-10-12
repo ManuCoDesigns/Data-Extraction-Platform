@@ -74,13 +74,13 @@ export function Panel({ title, subtitle, actions, children, className, flush }: 
   return (
     <section className={cn('bg-white rounded-2xl border border-gray-100 shadow-card', className)}>
       {(title || actions) && (
-        <header className="flex items-center justify-between gap-3 px-5 pt-4 pb-3 border-b border-gray-50">
+        <div className="flex items-center justify-between gap-3 px-5 pt-4 pb-3 border-b border-gray-50">
           <div className="min-w-0">
             {title && <h2 className="text-sm font-bold text-gray-900 m-0">{title}</h2>}
             {subtitle && <p className="text-xs text-gray-400 m-0 mt-0.5">{subtitle}</p>}
           </div>
           {actions}
-        </header>
+        </div>
       )}
       <div className={flush ? '' : 'p-5'}>{children}</div>
     </section>

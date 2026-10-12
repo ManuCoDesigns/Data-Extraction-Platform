@@ -6,7 +6,7 @@ import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
   Menu, X, Shield, Activity, AlertTriangle,
-  Zap, HeartPulse, CircleHelp, CalendarCheck, ChartColumn, History,
+  Zap, HeartPulse, CircleHelp, CalendarCheck, PackageCheck, ChartColumn, History,
 } from 'lucide-react'
 import { cn, ToastContainer, toast } from '@/components/ui'
 import { notificationsApi, sourcesApi } from '@/api/client'
@@ -147,6 +147,7 @@ export function AppLayout() {
     { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true, forceActive: isProjectsPath },
     { to: '/workload',    icon: Activity,        label: 'Team Workload', show: isTeamLead },
     { to: '/digest',      icon: CalendarCheck,   label: 'Daily Digest', show: isTeamLead },
+    { to: '/delivery',    icon: PackageCheck,    label: 'Delivery Summary', show: isTeamLead },
     { to: '/data-health', icon: HeartPulse,      label: 'Data Health',  show: true },
     { to: '/client-questions', icon: CircleHelp, label: 'Client Questions', show: true },
     { to: '/insights',    icon: ChartColumn,     label: isTeamLead ? 'Insights' : 'My Stats', show: true },
