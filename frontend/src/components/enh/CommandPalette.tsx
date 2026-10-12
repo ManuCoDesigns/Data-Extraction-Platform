@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Database, FolderKanban, LayoutDashboard, Search } from 'lucide-react'
+import { Database, FolderKanban, History, LayoutDashboard, Search, Zap } from 'lucide-react'
+import { getRecent } from '@/lib/recent'
 import { projectsApi, sourcesApi } from '@/api/client'
 import { cn } from '@/components/ui'
 
 interface Page { to: string; label: string }
-interface Hit { key: string; group: 'Pages' | 'Projects' | 'Sources'; title: string; sub?: string; to: string }
+export interface PaletteAction { id: string; label: string; hint?: string; run: () => void }
+interface Hit { key: string; group: 'Recent' | 'Actions' | 'Pages' | 'Projects' | 'Sources'; title: string; sub?: string; to?: string; run?: () => void }
 
 const norm = (s: string) => s.toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N} ]+/gu, ' ').replace(/\s+/g, ' ').trim()
 /** Every typed word must appear somewhere; names that start with the text rank first. */
@@ -17,7 +19,7 @@ function score(text: string, q: string): number {
 }
 
 /** Ctrl+K (or Cmd+K): jump to any page, project or source by typing a few letters. */
-export function CommandPalette({ pages, open, onClose }: { pages: Page[]; open: boolean; onClose: () => void }) {
+export function CommandPalette({ pages, open, onClose, actions = [] }: { pages: Page[]; open: boolean; onClose: () => void; actions?: PaletteAction[] }) {
   const navigate = useNavigate()
   const [q, setQ] = useState('')
   const [active, setActive] = useState(0)
@@ -45,6 +47,13 @@ export function CommandPalette({ pages, open, onClose }: { pages: Page[]; open: 
     const rank = <T,>(items: T[], text: (x: T) => string) =>
       items.map(i => [i, score(text(i), nq)] as const).filter(([, s]) => s > 0).sort((a, b) => b[1] - a[1]).map(([i]) => i)
     const out: Hit[] = []
+    if (!nq) {
+      const byId = Object.fromEntries(sources.map(s => [s.id, s]))
+      getRecent().map(v => byId[v.sid]).filter(Boolean).slice(0, 5).forEach((s: any) => out.push({
+        key: 'r' + s.id, group: 'Recent', title: s.name, sub: `${pname[s.project_id] ?? ''} · ${String(s.status).replace(/_/g, ' ')}`, to: `/projects/${s.project_id}/sources/${s.id}`,
+      }))
+    }
+    rank(actions, a => a.label).slice(0, nq ? 3 : 4).forEach(a => out.push({ key: 'a' + a.id, group: 'Actions', title: a.label, sub: a.hint, run: a.run }))
     rank(pages, p => p.label).slice(0, nq ? 4 : 6).forEach(p => out.push({ key: 'p' + p.to, group: 'Pages', title: p.label, to: p.to }))
     if (nq) {
       rank(projects, p => p.name).slice(0, 4).forEach(p => out.push({ key: 'j' + p.id, group: 'Projects', title: p.name, sub: `${p.total_sources ?? 0} sources`, to: `/projects/${p.id}/sources` }))
@@ -53,13 +62,13 @@ export function CommandPalette({ pages, open, onClose }: { pages: Page[]; open: 
       }))
     }
     return out
-  }, [q, pages, projects, sources])
+  }, [q, pages, projects, sources, actions])
 
   useEffect(() => { setActive(0) }, [q])
   useEffect(() => { list.current?.querySelector('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest' }) }, [active])
 
   if (!open) return null
-  const go = (h?: Hit) => { if (!h) return; onClose(); navigate(h.to) }
+  const go = (h?: Hit) => { if (!h) return; onClose(); if (h.run) h.run(); else if (h.to) navigate(h.to) }
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') { e.preventDefault(); setActive(a => Math.min(hits.length - 1, a + 1)) }
     else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(a => Math.max(0, a - 1)) }
@@ -86,7 +95,7 @@ export function CommandPalette({ pages, open, onClose }: { pages: Page[]; open: 
           )}
           {hits.map((h, i) => {
             const head = h.group !== lastGroup; lastGroup = h.group
-            const Icon = h.group === 'Pages' ? LayoutDashboard : h.group === 'Projects' ? FolderKanban : Database
+            const Icon = h.group === 'Pages' ? LayoutDashboard : h.group === 'Projects' ? FolderKanban : h.group === 'Recent' ? History : h.group === 'Actions' ? Zap : Database
             return (
               <li key={h.key} role="presentation">
                 {head && <p className="px-3 pt-2 pb-1 text-[11px] font-semibold text-gray-400 m-0">{h.group}</p>}

@@ -19,6 +19,8 @@ import { CommandPalette } from '@/components/enh/CommandPalette'
 import { enhApi } from '@/api/client'
 import { UndoBanner } from '@/components/enh/UndoBanner'
 import { useTheme } from '@/lib/theme'
+import { recordVisit } from '@/lib/recent'
+import { ShortcutsHelp } from '@/components/enh/ShortcutsHelp'
 
 export function AppLayout() {
   const { user, logout, fetchMe } = useAuthStore()
@@ -32,6 +34,7 @@ export function AppLayout() {
   const [escalationCount, setEscalationCount] = useState(0)
   const [counts, setCounts] = useState({ open_questions: 0, link_problems: 0 })
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('dep_sidebar') === 'mini' } catch { return false } })
   const toggleSidebar = () => setCollapsed(c => { const n = !c; try { localStorage.setItem('dep_sidebar', n ? 'mini' : 'full') } catch { /* ignore */ } return n })
   const { dark, toggle: toggleTheme } = useTheme()
@@ -47,7 +50,23 @@ export function AppLayout() {
 
   useEffect(() => { fetchMe() }, [])
   useEffect(() => { if (user?.id) usePrefs.getState().load() }, [user?.id])
-  useEffect(() => { setMobileOpen(false) }, [location.pathname])
+  useEffect(() => { setMobileOpen(false); recordVisit(location.pathname) }, [location.pathname])
+  // "?" opens the shortcut list; "g" then a letter jumps to a page. Ignored while typing in a field.
+  useEffect(() => {
+    let armed = 0
+    const GO: Record<string, string> = { d: '/', s: '/sources', p: '/projects', h: '/data-health', q: '/client-questions', i: '/insights' }
+    const h = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return
+      const t = e.target as HTMLElement | null
+      if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return
+      const k = e.key.toLowerCase()
+      if (e.key === '?') { e.preventDefault(); setHelpOpen(o => !o); return }
+      if (armed && Date.now() - armed < 1200 && GO[k]) { e.preventDefault(); armed = 0; navigate(GO[k]); return }
+      armed = k === 'g' ? Date.now() : 0
+    }
+    window.addEventListener('keydown', h)
+    return () => window.removeEventListener('keydown', h)
+  }, [])
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen(o => !o) }
@@ -448,7 +467,13 @@ export function AppLayout() {
       <ToastContainer />
       <UndoBanner />
       <IdleGuard onTimeout={() => { logout() }} />
-      <CommandPalette pages={[...mainNav, ...adminNav].map(n => ({ to: n.to, label: n.label }))} open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CommandPalette pages={[...mainNav, ...adminNav].map(n => ({ to: n.to, label: n.label }))} open={paletteOpen} onClose={() => setPaletteOpen(false)}
+        actions={[
+          { id: 'theme', label: dark ? 'Switch to light mode' : 'Switch to dark mode', hint: 'Appearance', run: toggleTheme },
+          { id: 'sidebar', label: collapsed ? 'Expand the sidebar' : 'Collapse the sidebar', hint: 'Ctrl+B', run: toggleSidebar },
+          { id: 'keys', label: 'Keyboard shortcuts', hint: 'Press ? anywhere', run: () => setHelpOpen(true) },
+        ]} />
+      <ShortcutsHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   )
 }
