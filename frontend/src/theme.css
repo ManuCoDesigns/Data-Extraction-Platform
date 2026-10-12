@@ -1,0 +1,149 @@
+/* Theme colours. Light values are the original colours, so light mode looks exactly as before.
+   Dark values are applied when <html> has the "dark" class (see lib/theme.ts). */
+:root {
+  color-scheme: light;
+  --page: #f8fafc;
+  --gray-50: 249 250 251; --gray-100: 243 244 246; --gray-200: 229 231 235; --gray-300: 209 213 219; --gray-400: 156 163 175;
+  --gray-500: 107 114 128; --gray-600: 75 85 99; --gray-700: 55 65 81; --gray-800: 31 41 55; --gray-900: 17 24 39;
+  --slate-50: 248 250 252; --slate-100: 241 245 249; --slate-200: 226 232 240; --slate-300: 203 213 225; --slate-400: 148 163 184;
+  --slate-500: 100 116 139; --slate-600: 71 85 105; --slate-700: 51 65 85; --slate-800: 30 41 59; --slate-900: 15 23 42;
+  --bd-6ee7b7: #6ee7b7;
+  --bd-93c5fd: #93c5fd;
+  --bd-bbf7d0: #bbf7d0;
+  --bd-bfdbfe: #bfdbfe;
+  --bd-e2e8f0: #e2e8f0;
+  --bd-e9d5ff: #e9d5ff;
+  --bd-f1f5f9: #f1f5f9;
+  --bd-f8fafc: #f8fafc;
+  --bd-fca5a5: #fca5a5;
+  --bd-fcd34d: #fcd34d;
+  --bd-fde68a: #fde68a;
+  --bd-fecaca: #fecaca;
+  --bd-fed7aa: #fed7aa;
+  --bg-d1fae5: #d1fae5;
+  --bg-dbeafe: #dbeafe;
+  --bg-e2e8f0: #e2e8f0;
+  --bg-ecfdf5: #ecfdf5;
+  --bg-eef2ff: #eef2ff;
+  --bg-eff6ff: #eff6ff;
+  --bg-f0fdf4: #f0fdf4;
+  --bg-f1f5f9: #f1f5f9;
+  --bg-f8fafc: #f8fafc;
+  --bg-f9fafb: #f9fafb;
+  --bg-faf5ff: #faf5ff;
+  --bg-fef2f2: #fef2f2;
+  --bg-fef9c3: #fef9c3;
+  --bg-fff: #fff;
+  --bg-fff7ed: #fff7ed;
+  --bg-fffbeb: #fffbeb;
+  --tx-047857: #047857;
+  --tx-059669: #059669;
+  --tx-065f46: #065f46;
+  --tx-0f172a: #0f172a;
+  --tx-1d4ed8: #1d4ed8;
+  --tx-1e293b: #1e293b;
+  --tx-1e40af: #1e40af;
+  --tx-2563eb: #2563eb;
+  --tx-334155: #334155;
+  --tx-374151: #374151;
+  --tx-3b82f6: #3b82f6;
+  --tx-475569: #475569;
+  --tx-64748b: #64748b;
+  --tx-7c3aed: #7c3aed;
+  --tx-7f1d1d: #7f1d1d;
+  --tx-92400e: #92400e;
+  --tx-a855f7: #a855f7;
+  --tx-b45309: #b45309;
+  --tx-b91c1c: #b91c1c;
+  --tx-c2410c: #c2410c;
+  --tx-d97706: #d97706;
+  --tx-dc2626: #dc2626;
+  --tx-ea580c: #ea580c;
+  --tx-ef4444: #ef4444;
+}
+.dark {
+  color-scheme: dark;
+  --page: #0b1120;
+  --gray-50: 23 32 51; --gray-100: 28 38 56; --gray-200: 38 50 72; --gray-300: 54 67 89; --gray-400: 122 136 160;
+  --gray-500: 148 163 184; --gray-600: 168 181 201; --gray-700: 195 205 219; --gray-800: 219 226 236; --gray-900: 241 245 249;
+  --slate-50: 11 17 32; --slate-100: 28 38 56; --slate-200: 38 50 72; --slate-300: 54 67 89; --slate-400: 122 136 160;
+  --slate-500: 148 163 184; --slate-600: 168 181 201; --slate-700: 195 205 219; --slate-800: 219 226 236; --slate-900: 241 245 249;
+  --bd-6ee7b7: rgba(52,211,153,.35);
+  --bd-93c5fd: rgba(96,165,250,.35);
+  --bd-bbf7d0: rgba(52,211,153,.35);
+  --bd-bfdbfe: rgba(96,165,250,.35);
+  --bd-e2e8f0: #263248;
+  --bd-e9d5ff: rgba(192,132,252,.35);
+  --bd-f1f5f9: #1c2638;
+  --bd-f8fafc: #172033;
+  --bd-fca5a5: rgba(248,113,113,.35);
+  --bd-fcd34d: rgba(251,191,36,.35);
+  --bd-fde68a: rgba(251,191,36,.35);
+  --bd-fecaca: rgba(248,113,113,.35);
+  --bd-fed7aa: rgba(251,146,60,.35);
+  --bg-d1fae5: rgba(16,185,129,.2);
+  --bg-dbeafe: rgba(59,130,246,.22);
+  --bg-e2e8f0: #263248;
+  --bg-ecfdf5: rgba(16,185,129,.12);
+  --bg-eef2ff: rgba(99,102,241,.16);
+  --bg-eff6ff: rgba(59,130,246,.14);
+  --bg-f0fdf4: rgba(16,185,129,.12);
+  --bg-f1f5f9: #1c2638;
+  --bg-f8fafc: #172033;
+  --bg-f9fafb: #172033;
+  --bg-faf5ff: rgba(168,85,247,.13);
+  --bg-fef2f2: rgba(239,68,68,.12);
+  --bg-fef9c3: rgba(245,158,11,.14);
+  --bg-fff: #111827;
+  --bg-fff7ed: rgba(249,115,22,.12);
+  --bg-fffbeb: rgba(245,158,11,.12);
+  --tx-047857: #6ee7b7;
+  --tx-059669: #34d399;
+  --tx-065f46: #6ee7b7;
+  --tx-0f172a: #f1f5f9;
+  --tx-1d4ed8: #93c5fd;
+  --tx-1e293b: #e5eaf2;
+  --tx-1e40af: #93c5fd;
+  --tx-2563eb: #60a5fa;
+  --tx-334155: #cbd5e1;
+  --tx-374151: #cbd5e1;
+  --tx-3b82f6: #60a5fa;
+  --tx-475569: #aab6c8;
+  --tx-64748b: #8a98ad;
+  --tx-7c3aed: #a78bfa;
+  --tx-7f1d1d: #fca5a5;
+  --tx-92400e: #fcd34d;
+  --tx-a855f7: #c084fc;
+  --tx-b45309: #fcd34d;
+  --tx-b91c1c: #fca5a5;
+  --tx-c2410c: #fdba74;
+  --tx-d97706: #fbbf24;
+  --tx-dc2626: #f87171;
+  --tx-ea580c: #fb923c;
+  --tx-ef4444: #f87171;
+}
+
+html { background: var(--page); }
+.dark body { color: #e5eaf2; }
+.dark .bg-white { background-color: #111827; }
+.dark .hover\:bg-white:hover { background-color: #172033; }
+.dark .bg-gray-900 { background-color: #243049; }
+.dark .text-brand-600, .dark .text-brand-700, .dark .text-brand-800 { color: #a5b4fc; }
+.dark .text-brand-500 { color: #a5b4fc; }
+.dark .bg-brand-50 { background-color: rgba(99,102,241,.16); }
+.dark .bg-brand-100 { background-color: rgba(99,102,241,.24); }
+.dark .border-brand-100, .dark .border-brand-200 { border-color: rgba(129,140,248,.35); }
+.dark .hover\:bg-brand-50:hover { background-color: rgba(99,102,241,.24); }
+.dark .hover\:bg-brand-100:hover { background-color: rgba(99,102,241,.3); }
+.dark .hover\:text-brand-700:hover { color: #c7d2fe; }
+.dark .shadow-card, .dark .shadow-soft { box-shadow: 0 1px 3px rgba(0,0,0,.5); }
+.dark .shadow-float { box-shadow: 0 10px 30px rgba(0,0,0,.6); }
+.dark input::placeholder, .dark textarea::placeholder { color: #64748b; }
+.dark input, .dark textarea, .dark select { color-scheme: dark; }
+.dark input:not([type=checkbox]):not([type=radio]):not([type=range]), .dark textarea, .dark select { background-color: #0f1626; color: #e5eaf2; }
+.dark .scrollbar-thin { scrollbar-color: #334155 transparent; }
+.dark .scrollbar-thin::-webkit-scrollbar-thumb { background: #334155; }
+.dark .skeleton { background: linear-gradient(90deg,#172033 25%,#1f2b42 50%,#172033 75%); background-size: 200% 100%; }
+.dark .glass { background: rgba(17,24,39,.85); }
+.dark ::selection { background: rgba(99,102,241,.45); }
+.dark pre, .dark code { color-scheme: dark; }

@@ -7,12 +7,12 @@ import type { User } from '@/types'
 import { fmtDate } from '@/lib/prefs'
 
 const ROLE_META: Record<string, { label: string; color: string; bg: string; grad: string }> = {
-  org_admin:         { label: 'Org Admin',     color: '#dc2626', bg: '#fef2f2', grad: 'linear-gradient(135deg,#ef4444,#b91c1c)' },
-  project_admin:     { label: 'Project Admin', color: '#d97706', bg: '#fffbeb', grad: 'linear-gradient(135deg,#f59e0b,#b45309)' },
-  qa_lead:           { label: 'QA Lead',       color: '#7c3aed', bg: '#faf5ff', grad: 'linear-gradient(135deg,#a855f7,#7c3aed)' },
-  pipeline_operator: { label: 'Extractor',     color: '#2563eb', bg: '#eff6ff', grad: 'linear-gradient(135deg,#3b82f6,#1d4ed8)' },
-  reviewer:          { label: 'Reviewer',      color: '#059669', bg: '#ecfdf5', grad: 'linear-gradient(135deg,#10b981,#047857)' },
-  read_only:         { label: 'Read Only',     color: '#64748b', bg: '#f1f5f9', grad: 'linear-gradient(135deg,#94a3b8,#64748b)' },
+  org_admin:         { label: 'Org Admin',     color: 'var(--tx-dc2626)', bg: 'var(--bg-fef2f2)', grad: 'linear-gradient(135deg,#ef4444,#b91c1c)' },
+  project_admin:     { label: 'Project Admin', color: 'var(--tx-d97706)', bg: 'var(--bg-fffbeb)', grad: 'linear-gradient(135deg,#f59e0b,#b45309)' },
+  qa_lead:           { label: 'QA Lead',       color: 'var(--tx-7c3aed)', bg: 'var(--bg-faf5ff)', grad: 'linear-gradient(135deg,#a855f7,#7c3aed)' },
+  pipeline_operator: { label: 'Extractor',     color: 'var(--tx-2563eb)', bg: 'var(--bg-eff6ff)', grad: 'linear-gradient(135deg,#3b82f6,#1d4ed8)' },
+  reviewer:          { label: 'Reviewer',      color: 'var(--tx-059669)', bg: 'var(--bg-ecfdf5)', grad: 'linear-gradient(135deg,#10b981,#047857)' },
+  read_only:         { label: 'Read Only',     color: 'var(--tx-64748b)', bg: 'var(--bg-f1f5f9)', grad: 'linear-gradient(135deg,#94a3b8,#64748b)' },
 }
 
 export function UsersPage() {
@@ -181,7 +181,7 @@ export function UsersPage() {
             <UsersIcon className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Team Members</h1>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--tx-0f172a)', margin: 0 }}>Team Members</h1>
             <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
               {users.length} member{users.length !== 1 ? 's' : ''} · manage access and roles
             </p>
@@ -204,13 +204,13 @@ export function UsersPage() {
         {Object.entries(ROLE_META).map(([role, meta]) => (
           roleCounts[role] ? (
             <div key={role} className="relative overflow-hidden" style={{
-              padding: '8px 16px 8px 14px', borderRadius: 12, background: '#fff',
-              border: '1px solid #e2e8f0', display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 16px 8px 14px', borderRadius: 12, background: 'var(--bg-fff)',
+              border: '1px solid var(--bd-e2e8f0)', display: 'flex', alignItems: 'center', gap: 8,
               boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
             }}>
               <div className="absolute top-0 left-0 bottom-0" style={{ width: 3, background: meta.grad }} />
               <span style={{ fontSize: 18, fontWeight: 800, color: meta.color, lineHeight: 1 }}>{roleCounts[role]}</span>
-              <span style={{ fontSize: 12, fontWeight: 600, color: '#64748b' }}>{meta.label}</span>
+              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--tx-64748b)' }}>{meta.label}</span>
             </div>
           ) : null
         ))}
@@ -223,22 +223,22 @@ export function UsersPage() {
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search by name or email…"
           style={{ width: '100%', padding: '9px 12px 9px 36px', fontSize: 13,
-            border: '1px solid #e2e8f0', borderRadius: 10, outline: 'none',
-            background: '#fff', color: '#1e293b', boxSizing: 'border-box', transition: 'border-color 0.15s' }}
+            border: '1px solid var(--bd-e2e8f0)', borderRadius: 10, outline: 'none',
+            background: 'var(--bg-fff)', color: 'var(--tx-1e293b)', boxSizing: 'border-box', transition: 'border-color 0.15s' }}
           onFocus={e => e.target.style.borderColor='#2563eb'}
-          onBlur={e => e.target.style.borderColor='#e2e8f0'} />
+          onBlur={e => e.target.style.borderColor='var(--bd-e2e8f0)'} />
       </div>
 
       {/* Table */}
       {loading ? (
         <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>Loading…</div>
       ) : (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
+        <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 16,
           overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
           <div style={{ overflowX: 'auto' }} className="scrollbar-thin">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+              <tr style={{ background: 'var(--bg-f8fafc)', borderBottom: '2px solid var(--bd-e2e8f0)' }}>
                 {['Member','Email','Role','Status','Joined',''].map(h => (
                   <th key={h} style={{ padding: '11px 16px', textAlign: 'left', fontSize: 10,
                     fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.07em', whiteSpace: 'nowrap' }}>
@@ -254,14 +254,14 @@ export function UsersPage() {
                   </td></tr>
                 : filtered.map((u, i) => {
                   const role = Array.isArray(u.roles) ? u.roles[0] : (u as any).role ?? ''
-                  const rm   = ROLE_META[role] ?? { label: role, color: '#64748b', bg: '#f1f5f9', grad: 'linear-gradient(135deg,#94a3b8,#64748b)' }
+                  const rm   = ROLE_META[role] ?? { label: role, color: 'var(--tx-64748b)', bg: 'var(--bg-f1f5f9)', grad: 'linear-gradient(135deg,#94a3b8,#64748b)' }
                   const isActive = (u as any).is_active !== false
                   const isToggling = togglingId === u.id
                   return (
                     <tr key={u.id}
-                      style={{ borderBottom: i < filtered.length - 1 ? '1px solid #f8fafc' : 'none',
+                      style={{ borderBottom: i < filtered.length - 1 ? '1px solid var(--bd-f8fafc)' : 'none',
                         opacity: isActive ? 1 : 0.55, transition: 'background 0.12s' }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+                      onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-f8fafc)' }}
                       onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}>
                       <td style={{ padding: '14px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -271,7 +271,7 @@ export function UsersPage() {
                             fontSize: 13, fontWeight: 700, color: '#fff' }}>
                             {(u.full_name ?? u.email ?? '?')[0].toUpperCase()}
                           </div>
-                          <span style={{ fontSize: 14, fontWeight: 600, color: '#1e293b' }}>
+                          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tx-1e293b)' }}>
                             {u.full_name ?? '—'}
                           </span>
                         </div>
@@ -279,7 +279,7 @@ export function UsersPage() {
                       <td style={{ padding: '14px 16px' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                           <Mail style={{ width: 13, height: 13, color: '#94a3b8' }} />
-                          <span style={{ fontSize: 13, color: '#64748b' }}>{u.email}</span>
+                          <span style={{ fontSize: 13, color: 'var(--tx-64748b)' }}>{u.email}</span>
                         </div>
                       </td>
                       <td style={{ padding: '14px 16px' }}>
@@ -302,8 +302,8 @@ export function UsersPage() {
                       </td>
                       <td style={{ padding: '14px 16px' }}>
                         <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 9px', borderRadius: 20,
-                          background: isActive ? '#ecfdf5' : '#f1f5f9',
-                          color: isActive ? '#059669' : '#94a3b8' }}>
+                          background: isActive ? 'var(--bg-ecfdf5)' : 'var(--bg-f1f5f9)',
+                          color: isActive ? 'var(--tx-059669)' : '#94a3b8' }}>
                           {isActive ? 'Active' : 'Inactive'}
                         </span>
                       </td>
@@ -314,37 +314,37 @@ export function UsersPage() {
                         {canManage && (
                           <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>
                             <button onClick={() => openEdit(u)} title="Edit name / reset password"
-                              style={{ padding: '5px 8px', borderRadius: 8, background: '#f8fafc',
-                                border: '1px solid #e2e8f0', color: '#64748b', cursor: 'pointer',
+                              style={{ padding: '5px 8px', borderRadius: 8, background: 'var(--bg-f8fafc)',
+                                border: '1px solid var(--bd-e2e8f0)', color: 'var(--tx-64748b)', cursor: 'pointer',
                                 display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}>
                               <Edit3 style={{ width: 13, height: 13 }} />
                             </button>
                             <button onClick={() => unlockUser(u)} title="Unlock and reset two-step sign-in"
-                              style={{ padding: '5px 8px', borderRadius: 8, background: '#f8fafc',
-                                border: '1px solid #e2e8f0', color: '#64748b', cursor: 'pointer',
+                              style={{ padding: '5px 8px', borderRadius: 8, background: 'var(--bg-f8fafc)',
+                                border: '1px solid var(--bd-e2e8f0)', color: 'var(--tx-64748b)', cursor: 'pointer',
                                 display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}>
                               <Key style={{ width: 13, height: 13 }} />
                             </button>
                             {isActive ? (
                               <button onClick={() => deactivate(u.id)} disabled={isToggling} title="Deactivate"
-                                style={{ padding: '5px 8px', borderRadius: 8, background: '#f8fafc',
-                                  border: '1px solid #e2e8f0', color: '#94a3b8', transition: 'all 0.15s',
+                                style={{ padding: '5px 8px', borderRadius: 8, background: 'var(--bg-f8fafc)',
+                                  border: '1px solid var(--bd-e2e8f0)', color: '#94a3b8', transition: 'all 0.15s',
                                   cursor: isToggling ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center',
                                   opacity: isToggling ? 0.5 : 1 }}>
                                 <Trash2 style={{ width: 13, height: 13 }} />
                               </button>
                             ) : (
                               <button onClick={() => reactivate(u.id)} disabled={isToggling} title="Reactivate"
-                                style={{ padding: '5px 8px', borderRadius: 8, background: '#ecfdf5',
-                                  border: '1px solid #bbf7d0', color: '#059669', transition: 'all 0.15s',
+                                style={{ padding: '5px 8px', borderRadius: 8, background: 'var(--bg-ecfdf5)',
+                                  border: '1px solid var(--bd-bbf7d0)', color: 'var(--tx-059669)', transition: 'all 0.15s',
                                   cursor: isToggling ? 'not-allowed' : 'pointer', display: 'flex', alignItems: 'center',
                                   opacity: isToggling ? 0.5 : 1 }}>
                                 <RotateCcw style={{ width: 13, height: 13 }} />
                               </button>
                             )}
                             <button onClick={() => setDeleteTarget(u)} title="Permanently remove"
-                              style={{ padding: '5px 8px', borderRadius: 8, background: '#fef2f2',
-                                border: '1px solid #fecaca', color: '#dc2626', cursor: 'pointer',
+                              style={{ padding: '5px 8px', borderRadius: 8, background: 'var(--bg-fef2f2)',
+                                border: '1px solid var(--bd-fecaca)', color: 'var(--tx-dc2626)', cursor: 'pointer',
                                 display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}>
                               <Shield style={{ width: 13, height: 13 }} />
                             </button>
@@ -369,7 +369,7 @@ export function UsersPage() {
             { label: 'Password', key: 'password', type: 'password', placeholder: '••••••••' },
           ].map(({ label, key, type, placeholder }) => (
             <div key={key}>
-              <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
                 {label} *
               </label>
               <Input type={type} placeholder={placeholder} required
@@ -378,13 +378,13 @@ export function UsersPage() {
             </div>
           ))}
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
               Role
             </label>
             <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}
               style={{ width: '100%', padding: '10px 12px', fontSize: 13,
-                border: '1px solid #e2e8f0', borderRadius: 10, outline: 'none',
-                background: '#fff', color: '#1e293b' }}>
+                border: '1px solid var(--bd-e2e8f0)', borderRadius: 10, outline: 'none',
+                background: 'var(--bg-fff)', color: 'var(--tx-1e293b)' }}>
               {Object.entries(ROLE_META).map(([r, m]) => (
                 <option key={r} value={r}>{m.label}</option>
               ))}
@@ -392,8 +392,8 @@ export function UsersPage() {
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8 }}>
             <button type="button" onClick={() => setShowNew(false)}
-              style={{ padding: '9px 18px', background: '#f1f5f9', border: 'none',
-                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#64748b' }}>
+              style={{ padding: '9px 18px', background: 'var(--bg-f1f5f9)', border: 'none',
+                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--tx-64748b)' }}>
               Cancel
             </button>
             <button type="submit" disabled={saving}
@@ -411,13 +411,13 @@ export function UsersPage() {
       <Modal open={!!editUser} onClose={() => setEditUser(null)} title={`Edit — ${editUser?.full_name ?? editUser?.email ?? ''}`}>
         <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
               Full name
             </label>
             <Input value={editName} onChange={e => setEditName(e.target.value)} />
           </div>
-          <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 14 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+          <div style={{ borderTop: '1px solid var(--bd-f1f5f9)', paddingTop: 14 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
               <Key style={{ width: 13, height: 13 }} /> Reset password (optional)
             </label>
             <Input type="password" placeholder="Leave blank to keep current password"
@@ -425,8 +425,8 @@ export function UsersPage() {
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8 }}>
             <button type="button" onClick={() => setEditUser(null)}
-              style={{ padding: '9px 18px', background: '#f1f5f9', border: 'none',
-                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#64748b' }}>
+              style={{ padding: '9px 18px', background: 'var(--bg-f1f5f9)', border: 'none',
+                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--tx-64748b)' }}>
               Cancel
             </button>
             <button type="submit" disabled={savingEdit}

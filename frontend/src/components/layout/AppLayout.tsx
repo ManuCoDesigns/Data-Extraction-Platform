@@ -6,7 +6,7 @@ import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
   Menu, X, Shield, Activity, AlertTriangle,
-  Zap, HeartPulse, CircleHelp, CalendarCheck, PackageCheck, ChartColumn, History, Search,
+  Zap, HeartPulse, CircleHelp, CalendarCheck, PackageCheck, ChartColumn, History, Search, PanelLeftClose, PanelLeftOpen, Sun, Moon,
 } from 'lucide-react'
 import { cn, ToastContainer, toast } from '@/components/ui'
 import { notificationsApi, sourcesApi } from '@/api/client'
@@ -18,6 +18,7 @@ import { IdleGuard } from '@/components/enh/IdleGuard'
 import { CommandPalette } from '@/components/enh/CommandPalette'
 import { enhApi } from '@/api/client'
 import { UndoBanner } from '@/components/enh/UndoBanner'
+import { useTheme } from '@/lib/theme'
 
 export function AppLayout() {
   const { user, logout, fetchMe } = useAuthStore()
@@ -31,6 +32,9 @@ export function AppLayout() {
   const [escalationCount, setEscalationCount] = useState(0)
   const [counts, setCounts] = useState({ open_questions: 0, link_problems: 0 })
   const [paletteOpen, setPaletteOpen] = useState(false)
+  const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('dep_sidebar') === 'mini' } catch { return false } })
+  const toggleSidebar = () => setCollapsed(c => { const n = !c; try { localStorage.setItem('dep_sidebar', n ? 'mini' : 'full') } catch { /* ignore */ } return n })
+  const { dark, toggle: toggleTheme } = useTheme()
   // Tracks notification ids already seen, so a genuinely new one arriving
   // between polls can get its own toast — without spamming a toast for
   // every item already in the mailbox on first load.
@@ -45,7 +49,10 @@ export function AppLayout() {
   useEffect(() => { if (user?.id) usePrefs.getState().load() }, [user?.id])
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
   useEffect(() => {
-    const h = (e: KeyboardEvent) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen(o => !o) } }
+    const h = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setPaletteOpen(o => !o) }
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b') { e.preventDefault(); toggleSidebar() }
+    }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   }, [])
@@ -178,89 +185,100 @@ export function AppLayout() {
     { to: '/help',        icon: BookOpen, label: 'Help',     show: true },
   ].filter(n => n.show)
 
-  const NavItem = ({ to, icon: Icon, label, exact = false, badge, badgeColor = '#dc2626', forceActive }: any) => (
-    <NavLink to={to} end={exact}
+  const NavItem = ({ to, icon: Icon, label, exact = false, badge, badgeColor = '#dc2626', forceActive, mini }: any) => (
+    <NavLink to={to} end={exact} title={mini ? label : undefined} className="dep-nav" aria-label={mini ? label : undefined}
       style={({ isActive }) => {
         const active = forceActive !== undefined ? forceActive : isActive
         return {
-          display: 'flex', alignItems: 'center', gap: 10, padding: '9px 14px',
+          position: 'relative',
+          display: 'flex', alignItems: 'center', justifyContent: mini ? 'center' : undefined, gap: 10,
+          padding: mini ? '10px 0' : '9px 14px',
           borderRadius: 10, textDecoration: 'none', fontSize: 13, fontWeight: 500,
-          transition: 'all 0.12s',
-          background: active ? '#eff6ff' : 'transparent',
-          color: active ? '#2563eb' : '#64748b',
+          transition: 'background .12s, color .12s',
+          background: active ? 'var(--bg-eff6ff)' : undefined,
+          color: active ? 'var(--tx-2563eb)' : 'var(--tx-64748b)',
         }
-      }}
-      onMouseEnter={e => { const el = e.currentTarget as HTMLElement; if (!el.style.background.includes('eff6ff')) el.style.background = '#f8fafc' }}
-      onMouseLeave={e => { const el = e.currentTarget as HTMLElement; if (!el.style.background.includes('eff6ff')) el.style.background = 'transparent' }}>
-      <Icon style={{ width: 16, height: 16, flexShrink: 0 }} />
-      <span style={{ flex: 1 }}>{label}</span>
-      {badge > 0 && (
+      }}>
+      <Icon style={{ width: mini ? 18 : 16, height: mini ? 18 : 16, flexShrink: 0 }} />
+      {!mini && <span style={{ flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>}
+      {badge > 0 && (mini ? (
+        <span style={{ position: 'absolute', top: 6, right: 12, width: 9, height: 9, borderRadius: 99, background: badgeColor, border: '2px solid var(--bg-fff)' }}
+          aria-label={`${badge} need attention`} />
+      ) : (
         <span style={{
           minWidth: 18, height: 18, padding: '0 5px', borderRadius: 20,
           background: badgeColor, color: '#fff', fontSize: 10, fontWeight: 700,
           display: 'flex', alignItems: 'center', justifyContent: 'center',
         }} aria-label={`${badge} need attention`}>{badge > 99 ? '99+' : badge}</span>
-      )}
+      ))}
     </NavLink>
   )
 
-  const Sidebar = () => (
+  const Sidebar = ({ mini = false }: { mini?: boolean }) => (
     <aside style={{
-      width: 240, background: '#fff', borderRight: '1px solid #e2e8f0',
+      width: mini ? 68 : 240, transition: 'width .18s ease', background: 'var(--bg-fff)', borderRight: '1px solid var(--bd-e2e8f0)',
       display: 'flex', flexDirection: 'column', height: '100vh',
       position: 'sticky', top: 0, flexShrink: 0,
     }}>
-      {/* Logo */}
-      <div style={{ padding: '20px 18px 16px', borderBottom: '1px solid #f1f5f9' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      {/* Logo and collapse button */}
+      <div style={{ padding: mini ? '16px 0 12px' : '18px 14px 14px 18px', borderBottom: '1px solid var(--bd-f1f5f9)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: mini ? 'center' : undefined, gap: 10, flexDirection: mini ? 'column' : 'row' }}>
           <div style={{ width: 34, height: 34, borderRadius: 9,
             background: 'linear-gradient(135deg,#2563eb,#4f46e5)',
             display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
             <Database style={{ width: 17, height: 17, color: '#fff' }} />
           </div>
-          <div style={{ minWidth: 0 }}>
-            <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', margin: 0,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              Data Extraction
-            </p>
-            <p style={{ fontSize: 10, color: '#94a3b8', margin: 0 }}>Platform · Careerflow</p>
-          </div>
+          {!mini && (
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-0f172a)', margin: 0,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                Data Extraction
+              </p>
+              <p style={{ fontSize: 10, color: '#94a3b8', margin: 0 }}>Platform · Careerflow</p>
+            </div>
+          )}
+          <button type="button" onClick={toggleSidebar} className="dep-iconbtn dep-collapse"
+            aria-label={mini ? 'Expand sidebar' : 'Collapse sidebar'} title={`${mini ? 'Expand' : 'Collapse'} sidebar (${/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : 'Ctrl'}+B)`}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6, borderRadius: 8, color: '#94a3b8', display: 'flex' }}>
+            {mini ? <PanelLeftOpen style={{ width: 17, height: 17 }} /> : <PanelLeftClose style={{ width: 17, height: 17 }} />}
+          </button>
         </div>
       </div>
 
-      <div style={{ padding: '10px 10px 0' }}>
-        <button type="button" onClick={() => setPaletteOpen(true)} aria-label="Quick search"
-          style={{ width: '100%', display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 10, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>
-          <Search style={{ width: 14, height: 14 }} /> <span style={{ flex: 1, textAlign: 'left' }}>Quick search</span>
-          <kbd style={{ fontSize: 10, fontWeight: 600, border: '1px solid #e2e8f0', borderRadius: 4, padding: '1px 5px', background: '#fff' }}>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd>
+      <div style={{ padding: mini ? '10px 12px 0' : '10px 10px 0' }}>
+        <button type="button" onClick={() => setPaletteOpen(true)} aria-label="Quick search" title={mini ? 'Quick search' : undefined}
+          style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: mini ? 'center' : undefined, gap: 8, padding: mini ? '9px 0' : '8px 12px', borderRadius: 10, border: '1px solid var(--bd-e2e8f0)', background: 'var(--bg-f8fafc)', color: '#94a3b8', fontSize: 12, cursor: 'pointer' }}>
+          <Search style={{ width: 14, height: 14 }} />
+          {!mini && <><span style={{ flex: 1, textAlign: 'left' }}>Quick search</span>
+          <kbd style={{ fontSize: 10, fontWeight: 600, border: '1px solid var(--bd-e2e8f0)', borderRadius: 4, padding: '1px 5px', background: 'var(--bg-fff)' }}>{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘K' : 'Ctrl K'}</kbd></>}
         </button>
       </div>
 
       {/* Nav */}
-      <nav style={{ flex: 1, padding: '12px 10px', overflowY: 'auto' }}>
+      <nav style={{ flex: 1, padding: mini ? '12px 10px' : '12px 10px', overflowY: 'auto', overflowX: 'hidden' }}>
         <div style={{ marginBottom: 8 }}>
-          <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase',
-            letterSpacing: '.07em', padding: '4px 14px', margin: '0 0 4px' }}>Main</p>
-          {mainNav.map(n => <NavItem key={n.to} {...n} exact={n.to === '/'} />)}
+          {!mini && <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase',
+            letterSpacing: '.07em', padding: '4px 14px', margin: '0 0 4px' }}>Main</p>}
+          {mainNav.map(n => <NavItem key={n.to} {...n} mini={mini} exact={n.to === '/'} />)}
         </div>
 
         {adminNav.length > 0 && (
-          <div style={{ marginTop: 16 }}>
-            <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase',
-              letterSpacing: '.07em', padding: '4px 14px', margin: '0 0 4px' }}>Admin</p>
-            {adminNav.map(n => <NavItem key={n.to} {...n} />)}
+          <div style={{ marginTop: mini ? 10 : 16, paddingTop: mini ? 10 : 0, borderTop: mini ? '1px solid var(--bd-f1f5f9)' : undefined }}>
+            {!mini && <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase',
+              letterSpacing: '.07em', padding: '4px 14px', margin: '0 0 4px' }}>Admin</p>}
+            {adminNav.map(n => <NavItem key={n.to} {...n} mini={mini} />)}
           </div>
         )}
       </nav>
 
       {/* User footer */}
-      <div style={{ padding: '12px 14px', borderTop: '1px solid #f1f5f9' }}>
+      <div style={{ padding: mini ? '12px 10px' : '12px 14px', borderTop: '1px solid var(--bd-f1f5f9)' }}>
         {/* Notifications */}
         <div ref={notifRef} style={{ position: 'relative', marginBottom: 8 }}>
-          <button onClick={() => setShowNotif(!showNotif)} style={{
-            width: '100%', display: 'flex', alignItems: 'center', gap: 10,
-            padding: '8px 10px', borderRadius: 10, background: 'none', border: 'none',
-            cursor: 'pointer', fontSize: 13, color: '#64748b',
+          <button onClick={() => setShowNotif(!showNotif)} title={mini ? 'Notifications' : undefined} aria-label="Notifications" className="dep-nav" style={{
+            width: '100%', display: 'flex', alignItems: 'center', justifyContent: mini ? 'center' : undefined, gap: 10,
+            padding: mini ? '10px 0' : '8px 10px', borderRadius: 10, background: 'none', border: 'none',
+            cursor: 'pointer', fontSize: 13, color: 'var(--tx-64748b)',
           }}>
             <div style={{ position: 'relative' }}>
               <Bell style={{ width: 16, height: 16 }} />
@@ -272,10 +290,10 @@ export function AppLayout() {
                 }}>{unread > 9 ? '9+' : unread}</span>
               )}
             </div>
-            <span>Notifications</span>
-            {unread > 0 && (
+            {!mini && <span>Notifications</span>}
+            {!mini && unread > 0 && (
               <span style={{ marginLeft: 'auto', fontSize: 10, fontWeight: 700,
-                background: '#fef2f2', color: '#dc2626', padding: '1px 6px', borderRadius: 20 }}>
+                background: 'var(--bg-fef2f2)', color: 'var(--tx-dc2626)', padding: '1px 6px', borderRadius: 20 }}>
                 {unread} new
               </span>
             )}
@@ -283,20 +301,20 @@ export function AppLayout() {
 
           {showNotif && (
             <div style={{
-              position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 4,
-              background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12,
+              position: 'absolute', bottom: '100%', left: 0, right: mini ? undefined : 0, width: mini ? 320 : undefined, marginBottom: 4,
+              background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 12,
               boxShadow: '0 8px 24px rgba(0,0,0,0.12)', maxHeight: 380, display: 'flex', flexDirection: 'column', zIndex: 50,
             }}>
-              <div style={{ padding: '12px 14px', borderBottom: '1px solid #f1f5f9', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-                <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Notifications</span>
+              <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--bd-f1f5f9)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-0f172a)' }}>Notifications</span>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                   {unread > 0 && (
                     <button onClick={handleMarkAllRead}
-                      style={{ fontSize: 11, color: '#2563eb', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
+                      style={{ fontSize: 11, color: 'var(--tx-2563eb)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>
                       Mark all read
                     </button>
                   )}
-                  {unread > 0 && <span style={{ fontSize: 11, color: '#dc2626', fontWeight: 600 }}>{unread} unread</span>}
+                  {unread > 0 && <span style={{ fontSize: 11, color: 'var(--tx-dc2626)', fontWeight: 600 }}>{unread} unread</span>}
                 </div>
               </div>
               <div style={{ overflowY: 'auto', flex: 1 }} className="scrollbar-thin">
@@ -305,15 +323,15 @@ export function AppLayout() {
                   : notifications.slice(0, 10).map(n => (
                     <div key={n.id} onClick={() => handleNotifClick(n)}
                       style={{
-                        position: 'relative', padding: '10px 14px 10px 18px', borderBottom: '1px solid #f8fafc',
-                        background: n.is_read ? '#fff' : '#eff6ff', cursor: 'pointer', transition: 'background 0.12s',
+                        position: 'relative', padding: '10px 14px 10px 18px', borderBottom: '1px solid var(--bd-f8fafc)',
+                        background: n.is_read ? 'var(--bg-fff)' : 'var(--bg-eff6ff)', cursor: 'pointer', transition: 'background 0.12s',
                       }}
-                      onMouseEnter={e => e.currentTarget.style.background = n.is_read ? '#f8fafc' : '#dbeafe'}
-                      onMouseLeave={e => e.currentTarget.style.background = n.is_read ? '#fff' : '#eff6ff'}>
+                      onMouseEnter={e => e.currentTarget.style.background = n.is_read ? 'var(--bg-f8fafc)' : 'var(--bg-dbeafe)'}
+                      onMouseLeave={e => e.currentTarget.style.background = n.is_read ? 'var(--bg-fff)' : 'var(--bg-eff6ff)'}>
                       {!n.is_read && (
                         <span style={{ position: 'absolute', left: 6, top: 14, width: 6, height: 6, borderRadius: '50%', background: 'linear-gradient(135deg,#3b82f6,#2563eb)' }} />
                       )}
-                      <p style={{ fontSize: 13, color: '#1e293b', margin: '0 0 2px', fontWeight: n.is_read ? 400 : 600 }}>
+                      <p style={{ fontSize: 13, color: 'var(--tx-1e293b)', margin: '0 0 2px', fontWeight: n.is_read ? 400 : 600 }}>
                         {n.title}
                       </p>
                       <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>
@@ -323,9 +341,9 @@ export function AppLayout() {
                   ))}
               </div>
               <button onClick={() => { setShowNotif(false); navigate('/notifications') }}
-                style={{ padding: '9px 14px', borderTop: '1px solid #f1f5f9', background: '#f8fafc', border: 'none',
-                  borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: '#f1f5f9', cursor: 'pointer',
-                  fontSize: 12, fontWeight: 600, color: '#2563eb', flexShrink: 0, width: '100%', textAlign: 'center' }}>
+                style={{ padding: '9px 14px', borderTop: '1px solid var(--bd-f1f5f9)', background: 'var(--bg-f8fafc)', border: 'none',
+                  borderTopWidth: 1, borderTopStyle: 'solid', borderTopColor: 'var(--bd-f1f5f9)', cursor: 'pointer',
+                  fontSize: 12, fontWeight: 600, color: 'var(--tx-2563eb)', flexShrink: 0, width: '100%', textAlign: 'center' }}>
                 View all notifications →
               </button>
             </div>
@@ -333,8 +351,8 @@ export function AppLayout() {
         </div>
 
         {/* User */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px' }}>
-          <div style={{
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: mini ? '4px 0' : '8px 10px', flexDirection: mini ? 'column' : 'row' }}>
+          <div title={mini ? (user.full_name ?? user.email) : undefined} style={{
             width: 30, height: 30, borderRadius: '50%',
             background: 'linear-gradient(135deg,#2563eb,#4f46e5)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -342,43 +360,53 @@ export function AppLayout() {
           }}>
             {(user.full_name ?? user.email ?? '?')[0].toUpperCase()}
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <p style={{ fontSize: 12, fontWeight: 600, color: '#1e293b', margin: 0,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.full_name ?? user.email}
-            </p>
-            <p style={{ fontSize: 10, color: '#94a3b8', margin: 0 }}>
-              {Array.isArray(user.roles) ? user.roles[0] : 'member'}
-            </p>
+          {!mini && (
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--tx-1e293b)', margin: 0,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {user.full_name ?? user.email}
+              </p>
+              <p style={{ fontSize: 10, color: '#94a3b8', margin: 0 }}>
+                {Array.isArray(user.roles) ? user.roles[0] : 'member'}
+              </p>
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: mini ? 'column' : 'row', gap: 2 }}>
+            <button onClick={toggleTheme} className="dep-iconbtn" aria-label={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={dark ? 'Switch to light mode' : 'Switch to dark mode'}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6,
+                color: '#94a3b8', borderRadius: 8, display: 'flex', alignItems: 'center' }}>
+              {dark ? <Sun style={{ width: 15, height: 15 }} /> : <Moon style={{ width: 15, height: 15 }} />}
+            </button>
+            <button onClick={() => { logout(); navigate('/login') }} className="dep-iconbtn"
+              title="Sign out" aria-label="Sign out"
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 6,
+                color: '#94a3b8', borderRadius: 8, display: 'flex', alignItems: 'center' }}>
+              <LogOut style={{ width: 15, height: 15 }} />
+            </button>
           </div>
-          <button onClick={() => { logout(); navigate('/login') }}
-            title="Sign out"
-            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4,
-              color: '#94a3b8', borderRadius: 6, display: 'flex', alignItems: 'center' }}>
-            <LogOut style={{ width: 15, height: 15 }} />
-          </button>
         </div>
       </div>
     </aside>
   )
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', background: '#f8fafc' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', background: 'var(--page)' }}>
       {/* Desktop sidebar */}
       <div style={{ display: 'none' }} className="dep-sidebar">
-        <style>{`@media(min-width:768px){.dep-sidebar{display:block!important}}`}</style>
-        <Sidebar />
+        <style>{`@media(min-width:768px){.dep-sidebar{display:block!important}}.dep-nav:hover{background:var(--bg-f8fafc)}.dep-iconbtn:hover{background:var(--bg-f1f5f9);color:var(--tx-0f172a)}@media(prefers-reduced-motion:reduce){aside{transition:none!important}}`}</style>
+        <Sidebar mini={collapsed} />
       </div>
 
       {/* Mobile header */}
       <div style={{
         position: 'fixed', top: 0, left: 0, right: 0, height: 56, zIndex: 40,
-        background: '#fff', borderBottom: '1px solid #e2e8f0',
+        background: 'var(--bg-fff)', borderBottom: '1px solid var(--bd-e2e8f0)',
         display: 'flex', alignItems: 'center', padding: '0 16px', gap: 12,
       }} className="dep-mobile-hdr">
         <style>{`@media(min-width:768px){.dep-mobile-hdr{display:none!important}}`}</style>
         <button onClick={() => setMobileOpen(!mobileOpen)}
-          style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 4 }}>
+          style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tx-64748b)', padding: 4 }}>
           {mobileOpen ? <X style={{ width: 20, height: 20 }} /> : <Menu style={{ width: 20, height: 20 }} />}
         </button>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -387,7 +415,7 @@ export function AppLayout() {
             display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <Database style={{ width: 14, height: 14, color: '#fff' }} />
           </div>
-          <span style={{ fontSize: 13, fontWeight: 700, color: '#0f172a' }}>Data Extraction Platform</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-0f172a)' }}>Data Extraction Platform</span>
         </div>
       </div>
 
@@ -395,11 +423,11 @@ export function AppLayout() {
       {mobileOpen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex' }}
           className="dep-mobile-overlay">
-          <style>{`@media(min-width:768px){.dep-mobile-overlay{display:none!important}}`}</style>
+          <style>{`@media(min-width:768px){.dep-mobile-overlay{display:none!important}}.dep-mobile-overlay .dep-collapse{display:none!important}`}</style>
           <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)' }}
             onClick={() => setMobileOpen(false)} />
           <div style={{ position: 'relative', width: 240 }}>
-            <Sidebar />
+            <Sidebar mini={false} />
           </div>
         </div>
       )}

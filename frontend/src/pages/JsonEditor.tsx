@@ -55,7 +55,7 @@ function TreeNode({
 
   if (!isObj) {
     return (
-      <div style={{ paddingLeft: indent, display: 'flex', gap: 8, alignItems: 'baseline', minHeight: 22, background: isModified ? '#fef9c3' : 'transparent' }}>
+      <div style={{ paddingLeft: indent, display: 'flex', gap: 8, alignItems: 'baseline', minHeight: 22, background: isModified ? 'var(--bg-fef9c3)' : 'transparent' }}>
         {k !== null && <span style={{ color: '#93c5fd', fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{k}:</span>}
         <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)' }}>{scalar(value)}</span>
         {isModified && <span style={{ fontSize: 9, background: '#f59e0b', color: '#fff', padding: '0 5px', borderRadius: 3, fontWeight: 700 }}>EDITED</span>}
@@ -67,12 +67,12 @@ function TreeNode({
   const bracket = isArr ? ['[', ']'] : ['{', '}']
 
   return (
-    <div style={{ background: isModified ? '#fef9c3' : 'transparent' }}>
+    <div style={{ background: isModified ? 'var(--bg-fef9c3)' : 'transparent' }}>
       <div style={{ paddingLeft: indent, display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', minHeight: 22 }} onClick={() => setOpen(o => !o)}>
-        <span style={{ color: '#64748b', fontSize: 10 }}>{open ? '▼' : '▶'}</span>
+        <span style={{ color: 'var(--tx-64748b)', fontSize: 10 }}>{open ? '▼' : '▶'}</span>
         {k !== null && <span style={{ color: '#93c5fd', fontSize: 12, fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{k}:</span>}
         <span style={{ color: '#fbbf24', fontSize: 12, fontFamily: 'var(--font-mono)' }}>{bracket[0]}</span>
-        {!open && <span style={{ color: '#475569', fontSize: 11 }}>{entries.length} {isArr ? 'items' : 'keys'}</span>}
+        {!open && <span style={{ color: 'var(--tx-475569)', fontSize: 11 }}>{entries.length} {isArr ? 'items' : 'keys'}</span>}
         {!open && <span style={{ color: '#fbbf24', fontSize: 12, fontFamily: 'var(--font-mono)' }}>{bracket[1]}</span>}
         {isModified && open && <span style={{ fontSize: 9, background: '#f59e0b', color: '#fff', padding: '0 5px', borderRadius: 3, fontWeight: 700 }}>EDITED</span>}
       </div>
@@ -184,7 +184,7 @@ export function JsonEditor({ record, sourceId, canEdit, onSave, onClose }: Props
             <button key={m} onClick={() => setMode(m)} style={{
               padding: '5px 14px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 600,
               background: mode === m ? '#3b82f6' : 'transparent',
-              color: mode === m ? '#fff' : '#64748b', display: 'flex', alignItems: 'center', gap: 5,
+              color: mode === m ? '#fff' : 'var(--tx-64748b)', display: 'flex', alignItems: 'center', gap: 5,
             }}>
               {m === 'code' ? <Code size={12} /> : <List size={12} />}
               {m === 'code' ? 'Code' : 'Tree'}
@@ -206,14 +206,14 @@ export function JsonEditor({ record, sourceId, canEdit, onSave, onClose }: Props
 
         {/* Modified indicator */}
         {modifiedCount > 0 && !error && (
-          <span style={{ fontSize: 11, background: '#fef9c3', color: '#92400e', padding: '3px 10px', borderRadius: 20, fontWeight: 600, border: '1px solid #fcd34d' }}>
+          <span style={{ fontSize: 11, background: 'var(--bg-fef9c3)', color: 'var(--tx-92400e)', padding: '3px 10px', borderRadius: 20, fontWeight: 600, border: '1px solid var(--bd-fcd34d)' }}>
             ✏ {modifiedCount} field{modifiedCount > 1 ? 's' : ''} modified
           </span>
         )}
 
         {/* Validation error */}
         {error && (
-          <span style={{ fontSize: 11, background: '#fef2f2', color: '#dc2626', padding: '3px 10px', borderRadius: 20, fontWeight: 600, border: '1px solid #fca5a5', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: 11, background: 'var(--bg-fef2f2)', color: 'var(--tx-dc2626)', padding: '3px 10px', borderRadius: 20, fontWeight: 600, border: '1px solid var(--bd-fca5a5)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             ✗ {error}
           </span>
         )}
@@ -221,7 +221,7 @@ export function JsonEditor({ record, sourceId, canEdit, onSave, onClose }: Props
         <div style={{ flex: 1 }} />
 
         {/* Role badge */}
-        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: canEdit ? '#ecfdf5' : '#f0f9ff', color: canEdit ? '#059669' : '#0369a1', border: `1px solid ${canEdit ? '#6ee7b7' : '#7dd3fc'}`, fontWeight: 700 }}>
+        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: canEdit ? 'var(--bg-ecfdf5)' : '#f0f9ff', color: canEdit ? 'var(--tx-059669)' : '#0369a1', border: `1px solid ${canEdit ? 'var(--bd-6ee7b7)' : '#7dd3fc'}`, fontWeight: 700 }}>
           {canEdit ? '✏ Extractor — Editable' : '👁 Reviewer — Read Only'}
         </span>
 
@@ -329,18 +329,18 @@ export function JsonEditor({ record, sourceId, canEdit, onSave, onClose }: Props
 
       {/* ── Status bar ─────────────────────────────────────────────────────── */}
       <div style={{ background: '#1e293b', borderTop: '1px solid #334155', padding: '4px 16px', display: 'flex', alignItems: 'center', gap: 16, flexShrink: 0 }}>
-        <span style={{ fontSize: 11, color: error ? '#ef4444' : '#22c55e', display: 'flex', alignItems: 'center', gap: 4 }}>
+        <span style={{ fontSize: 11, color: error ? 'var(--tx-ef4444)' : '#22c55e', display: 'flex', alignItems: 'center', gap: 4 }}>
           {error ? <AlertTriangle size={11} /> : <CheckCircle size={11} />}
           {error ? 'Invalid JSON' : 'Valid JSON'}
         </span>
-        <span style={{ fontSize: 11, color: '#475569' }}>
+        <span style={{ fontSize: 11, color: 'var(--tx-475569)' }}>
           {Object.keys(typeof draft === 'string' ? (() => { try { return JSON.parse(draft) } catch { return {} } })() : {}).length} fields
         </span>
         {isDirty && canEdit && (
           <span style={{ fontSize: 11, color: '#f59e0b' }}>● Unsaved changes</span>
         )}
         <div style={{ flex: 1 }} />
-        <span style={{ fontSize: 11, color: '#334155' }}>Ctrl+F to search  ·  Ctrl+Z to undo  ·  Ctrl+Shift+F to format</span>
+        <span style={{ fontSize: 11, color: 'var(--tx-334155)' }}>Ctrl+F to search  ·  Ctrl+Z to undo  ·  Ctrl+Shift+F to format</span>
       </div>
     </div>
   )

@@ -5,6 +5,7 @@ import { AccountSettings } from '@/components/enh/AccountSettings'
 import { Panel, SelectBox, PageHeader, PAGE } from '@/components/enh/kit'
 import { TIMEZONES, fmtDateTime, usePrefs, type Prefs } from '@/lib/prefs'
 import { useAuthStore } from '@/store/auth'
+import { useTheme, type ThemeChoice } from '@/lib/theme'
 
 type Tab = 'general' | 'notifications' | 'storage'
 
@@ -16,9 +17,9 @@ const TABS: { id: Tab; icon: any; label: string; adminOnly?: boolean }[] = [
 
 function SectionCard({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
-      <div style={{ padding: '18px 22px', borderBottom: '1px solid #f1f5f9' }}>
-        <p style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>{title}</p>
+    <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
+      <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--bd-f1f5f9)' }}>
+        <p style={{ fontSize: 14, fontWeight: 700, color: 'var(--tx-0f172a)', margin: 0 }}>{title}</p>
         {description && <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>{description}</p>}
       </div>
       <div style={{ padding: '20px 22px', display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -58,7 +59,16 @@ function DisplaySettings() {
     </button>
   )
   const today = new Date()
+  const theme = useTheme()
   return (
+    <div className="space-y-5">
+    <Panel title="Appearance" subtitle="Dark is the default. This is saved on this device, so each browser can have its own.">
+      <div role="radiogroup" aria-label="Theme" className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        {([['dark', 'Dark', 'Easier on the eyes at night'], ['light', 'Light', 'Bright, like paper'], ['system', 'Match my device', 'Follows your system setting']] as [ThemeChoice, string, string][]).map(([k, label, hint]) =>
+          radio(label, theme.choice === k, () => theme.set(k), hint))}
+      </div>
+      <p className="text-xs text-gray-400 mt-3 mb-0">Tip: press Ctrl+B (or ⌘B) to collapse the sidebar into icons.</p>
+    </Panel>
     <Panel title="Dates and times" subtitle="Used for every date and time you see in the platform. Saved to your account, so it follows you to any device.">
       <div className="space-y-6">
         <div>
@@ -90,6 +100,7 @@ function DisplaySettings() {
         </div>
       </div>
     </Panel>
+    </div>
   )
 }
 
@@ -99,40 +110,40 @@ function StorageSettings() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 12, padding: '12px 16px', display: 'flex', gap: 10 }}>
-        <Info style={{ width: 16, height: 16, color: '#d97706', flexShrink: 0, marginTop: 1 }} />
+      <div style={{ background: 'var(--bg-fff7ed)', border: '1px solid var(--bd-fed7aa)', borderRadius: 12, padding: '12px 16px', display: 'flex', gap: 10 }}>
+        <Info style={{ width: 16, height: 16, color: 'var(--tx-d97706)', flexShrink: 0, marginTop: 1 }} />
         <div>
-          <p style={{ fontSize: 13, fontWeight: 700, color: '#92400e', margin: '0 0 3px' }}>Set these in Railway environment variables</p>
-          <p style={{ fontSize: 12, color: '#b45309', margin: 0, lineHeight: 1.5 }}>This panel helps you draft values. The actual storage config must be set directly in Railway → backend service → Variables — not through this UI.</p>
+          <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-92400e)', margin: '0 0 3px' }}>Set these in Railway environment variables</p>
+          <p style={{ fontSize: 12, color: 'var(--tx-b45309)', margin: 0, lineHeight: 1.5 }}>This panel helps you draft values. The actual storage config must be set directly in Railway → backend service → Variables — not through this UI.</p>
         </div>
       </div>
 
       <SectionCard title="Object Storage" description="Configure Cloudflare R2 or AWS S3 for file uploads.">
         <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Storage provider</label>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--tx-374151)', marginBottom: 6 }}>Storage provider</label>
           <select value={form.provider} onChange={e => setForm(f => ({ ...f, provider: e.target.value }))}
-            style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none' }}>
+            style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--bd-e2e8f0)', borderRadius: 10, fontSize: 13, outline: 'none' }}>
             <option value="r2">Cloudflare R2 (recommended)</option>
             <option value="s3">AWS S3</option>
           </select>
         </div>
         <div>
-          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Endpoint URL</label>
+          <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--tx-374151)', marginBottom: 6 }}>Endpoint URL</label>
           <input value={form.endpoint_url} onChange={e => setForm(f => ({ ...f, endpoint_url: e.target.value }))}
             placeholder={form.provider === 'r2' ? 'https://<account_id>.r2.cloudflarestorage.com' : 'https://s3.<region>.amazonaws.com'}
-            style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+            style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--bd-e2e8f0)', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Bucket name</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--tx-374151)', marginBottom: 6 }}>Bucket name</label>
             <input value={form.bucket} onChange={e => setForm(f => ({ ...f, bucket: e.target.value }))}
-              style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--bd-e2e8f0)', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Region</label>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--tx-374151)', marginBottom: 6 }}>Region</label>
             <input value={form.region} onChange={e => setForm(f => ({ ...f, region: e.target.value }))}
               placeholder="auto (R2) or us-east-1 (S3)"
-              style={{ width: '100%', padding: '9px 12px', border: '1px solid #e2e8f0', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+              style={{ width: '100%', padding: '9px 12px', border: '1px solid var(--bd-e2e8f0)', borderRadius: 10, fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
           </div>
         </div>
       </SectionCard>
@@ -148,11 +159,11 @@ S3_REGION=${form.region}`}
         </pre>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <a href={form.provider === 'r2' ? 'https://developers.cloudflare.com/r2/' : 'https://docs.aws.amazon.com/s3/'} target="_blank" rel="noopener noreferrer"
-            style={{ fontSize: 12, color: '#2563eb', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+            style={{ fontSize: 12, color: 'var(--tx-2563eb)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
             <ExternalLink style={{ width: 12, height: 12 }} /> Provider docs
           </a>
           <button onClick={() => { navigator.clipboard.writeText(`STORAGE_PROVIDER=s3\nS3_ENDPOINT_URL=${form.endpoint_url || '<your-endpoint>'}\nS3_ACCESS_KEY_ID=<paste>\nS3_SECRET_ACCESS_KEY=<paste>\nS3_BUCKET_NAME=${form.bucket}\nS3_REGION=${form.region}`); toast.success('Copied to clipboard') }}
-            style={{ padding: '7px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: '#374151' }}>
+            style={{ padding: '7px 16px', background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 8, cursor: 'pointer', fontSize: 12, fontWeight: 600, color: 'var(--tx-374151)' }}>
             Copy block
           </button>
         </div>

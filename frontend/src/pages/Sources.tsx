@@ -313,12 +313,12 @@ export function SourcesPage() {
 
       {/* Controls */}
       <div className="flex items-center gap-3 flex-wrap">
-        <div className="flex items-center bg-gray-100 rounded-xl p-1">
+        <div className="flex items-center bg-gray-100 rounded-xl p-1 max-w-full overflow-x-auto scrollbar-thin">
           {((canManage ? ['bench', 'simple', 'kanban', 'table'] : ['queue', 'bench', 'simple', 'kanban', 'table']) as ('queue' | 'bench' | 'simple' | 'kanban' | 'table')[]).map(v => (
             <button
               key={v}
               onClick={() => setView(v)}
-              className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition',
+              className={cn('flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition shrink-0',
                 view === v ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700')}
             >
               {v === 'queue' ? <ListChecks className="w-3.5 h-3.5" /> : v === 'bench' ? <LayoutPanelLeft className="w-3.5 h-3.5" /> : v === 'simple' ? <Sparkles className="w-3.5 h-3.5" /> : v === 'kanban' ? <LayoutGrid className="w-3.5 h-3.5" /> : <TableIcon className="w-3.5 h-3.5" />}
@@ -561,7 +561,7 @@ export function SourcesPage() {
           <label style={{display:'flex',alignItems:'center',gap:8,margin:'4px 0'}}>
             <input type="checkbox" checked={form.no_schema}
               onChange={e => setForm(f => ({ ...f, no_schema: e.target.checked, schema_id: e.target.checked ? '' : f.schema_id }))} />
-            <span style={{fontSize:13,color:'#64748b'}}>This source has no fixed schema (flexible extraction only)</span>
+            <span style={{fontSize:13,color:'var(--tx-64748b)'}}>This source has no fixed schema (flexible extraction only)</span>
           </label>
 
           {!form.no_schema && (

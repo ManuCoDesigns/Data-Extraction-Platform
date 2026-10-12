@@ -4,6 +4,17 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Data Extraction Platform</title>
+  <meta name="theme-color" content="#0b1120" />
+  <script>
+    // Apply the saved theme before the page paints so there is no light flash. Dark is the default.
+    (function () {
+      try {
+        var t = localStorage.getItem('dep_theme') || 'dark';
+        var dark = t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        if (dark) { document.documentElement.classList.add('dark'); document.documentElement.style.colorScheme = 'dark'; }
+      } catch (e) { document.documentElement.classList.add('dark'); }
+    })();
+  </script>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
 </head>
 <body>

@@ -104,12 +104,12 @@ export function LoginPage() {
 
   const inp: React.CSSProperties = {
     width: '100%', padding: '11px 12px 11px 40px', fontSize: 14,
-    border: '1px solid #e2e8f0', borderRadius: 10, outline: 'none',
-    background: '#fff', color: '#0f172a', boxSizing: 'border-box',
+    border: '1px solid var(--bd-e2e8f0)', borderRadius: 10, outline: 'none',
+    background: 'var(--bg-fff)', color: 'var(--tx-0f172a)', boxSizing: 'border-box',
   }
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', background: '#f8fafc' }}>
+    <div style={{ minHeight: '100vh', display: 'flex', background: 'var(--bg-f8fafc)' }}>
 
       {/* Left branding panel */}
       <div style={{
@@ -181,17 +181,17 @@ export function LoginPage() {
               <Database style={{ width: 20, height: 20, color: '#fff' }} />
             </div>
             <div>
-              <p style={{ fontWeight: 700, fontSize: 15, margin: 0, color: '#0f172a' }}>Data Extraction Platform</p>
+              <p style={{ fontWeight: 700, fontSize: 15, margin: 0, color: 'var(--tx-0f172a)' }}>Data Extraction Platform</p>
               <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>by Careerflow</p>
             </div>
           </div>
 
-          <h2 style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: '0 0 6px' }}>Welcome back</h2>
-          <p style={{ fontSize: 14, color: '#64748b', margin: '0 0 32px' }}>Sign in to your account to continue</p>
+          <h2 style={{ fontSize: 26, fontWeight: 800, color: 'var(--tx-0f172a)', margin: '0 0 6px' }}>Welcome back</h2>
+          <p style={{ fontSize: 14, color: 'var(--tx-64748b)', margin: '0 0 32px' }}>Sign in to your account to continue</p>
 
           <form onSubmit={submit}>
             <div style={{ marginBottom: 16 }}>
-              <label htmlFor="login-email" style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              <label htmlFor="login-email" style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
                 Email address
               </label>
               <div style={{ position: 'relative' }}>
@@ -199,12 +199,12 @@ export function LoginPage() {
                 <input id="login-email" type="email" autoComplete="username" autoFocus={!email} value={email} onChange={e => setEmail(e.target.value)}
                   placeholder="you@careerflow.ai" required style={inp}
                   onFocus={e => e.target.style.borderColor='#2563eb'}
-                  onBlur={e => e.target.style.borderColor='#e2e8f0'} />
+                  onBlur={e => e.target.style.borderColor='var(--bd-e2e8f0)'} />
               </div>
             </div>
 
             <div style={{ marginBottom: 16 }}>
-              <label htmlFor="login-password" style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+              <label htmlFor="login-password" style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
                 Password
               </label>
               <div style={{ position: 'relative' }}>
@@ -214,19 +214,19 @@ export function LoginPage() {
                   onKeyUp={e => setCaps(e.getModifierState?.('CapsLock') ?? false)}
                   placeholder="••••••••" required style={{ ...inp, paddingRight: 44 }}
                   onFocus={e => e.target.style.borderColor='#2563eb'}
-                  onBlur={e => { e.target.style.borderColor='#e2e8f0'; setCaps(false) }} />
+                  onBlur={e => { e.target.style.borderColor='var(--bd-e2e8f0)'; setCaps(false) }} />
                 <button type="button" onClick={() => setShowPw(v => !v)} aria-label={showPw ? 'Hide password' : 'Show password'} aria-pressed={showPw}
                   style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', border: 'none', background: 'transparent', cursor: 'pointer', padding: 8, color: '#94a3b8', display: 'flex' }}>
                   {showPw ? <EyeOff style={{ width: 16, height: 16 }} /> : <Eye style={{ width: 16, height: 16 }} />}
                 </button>
               </div>
               <div style={{ minHeight: 18, marginTop: 6 }}>
-                {caps && <p role="status" style={{ margin: 0, fontSize: 12, color: '#b45309', display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert style={{ width: 13, height: 13 }} /> Caps Lock is on</p>}
+                {caps && <p role="status" style={{ margin: 0, fontSize: 12, color: 'var(--tx-b45309)', display: 'flex', alignItems: 'center', gap: 6 }}><TriangleAlert style={{ width: 13, height: 13 }} /> Caps Lock is on</p>}
               </div>
             </div>
 
             {!needCode && (
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: '#475569', marginBottom: 20, cursor: 'pointer', width: 'fit-content' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, color: 'var(--tx-475569)', marginBottom: 20, cursor: 'pointer', width: 'fit-content' }}>
                 <input type="checkbox" checked={remember} onChange={e => setRemember(e.target.checked)} style={{ width: 15, height: 15, accentColor: '#2563eb' }} />
                 Remember my email on this device
               </label>
@@ -234,7 +234,7 @@ export function LoginPage() {
 
             {needCode && (
               <div style={{ marginBottom: 24 }}>
-                <label htmlFor="login-code" style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+                <label htmlFor="login-code" style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
                   Code from your authenticator app
                 </label>
                 <div style={{ position: 'relative' }}>
@@ -243,19 +243,19 @@ export function LoginPage() {
                     value={code} onChange={e => setCode(e.target.value.replace(/[^\d ]/g, ''))}
                     placeholder="123456" required style={{ ...inp, letterSpacing: '0.3em', fontWeight: 700 }}
                     onFocus={e => e.target.style.borderColor='#2563eb'}
-                    onBlur={e => e.target.style.borderColor='#e2e8f0'} />
+                    onBlur={e => e.target.style.borderColor='var(--bd-e2e8f0)'} />
                 </div>
                 <p style={{ fontSize: 12, color: '#94a3b8', margin: '6px 0 0' }}>Open your authenticator app and type the 6-digit code for this account.</p>
                 <button type="button" onClick={() => { setNeedCode(false); setCode(''); setPassword(''); setError('') }}
-                  style={{ marginTop: 8, padding: 0, border: 'none', background: 'none', color: '#2563eb', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
+                  style={{ marginTop: 8, padding: 0, border: 'none', background: 'none', color: 'var(--tx-2563eb)', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}>
                   Use a different account
                 </button>
               </div>
             )}
 
             {error && (
-              <div role="alert" style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10,
-                padding: '10px 14px', marginBottom: 16, fontSize: 13, color: '#dc2626' }}>
+              <div role="alert" style={{ background: 'var(--bg-fef2f2)', border: '1px solid var(--bd-fecaca)', borderRadius: 10,
+                padding: '10px 14px', marginBottom: 16, fontSize: 13, color: 'var(--tx-dc2626)' }}>
                 {error}
               </div>
             )}
@@ -276,10 +276,10 @@ export function LoginPage() {
           </p>
 
           {st && (
-            <div className="dep-mstats" style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid #e2e8f0', display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, textAlign: 'center' }}>
+            <div className="dep-mstats" style={{ marginTop: 28, paddingTop: 20, borderTop: '1px solid var(--bd-e2e8f0)', display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, textAlign: 'center' }}>
               {[[compact(st.records_processed), 'Records'], [st.accuracy_percent == null ? '—' : `${st.accuracy_percent}%`, 'No corrections'], [compact(st.active_projects), 'Projects']].map(([v, l]) => (
                 <div key={l}>
-                  <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: '#0f172a' }}>{v}</p>
+                  <p style={{ margin: 0, fontSize: 18, fontWeight: 800, color: 'var(--tx-0f172a)' }}>{v}</p>
                   <p style={{ margin: '2px 0 0', fontSize: 11, color: '#94a3b8' }}>{l}</p>
                 </div>
               ))}

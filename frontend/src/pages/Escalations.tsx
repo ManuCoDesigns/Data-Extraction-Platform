@@ -67,7 +67,7 @@ export function EscalationsPage() {
             <AlertTriangle className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>
+            <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--tx-0f172a)', margin: 0 }}>
               Escalations
               {refreshing && <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 ml-2 align-middle animate-pulse" />}
             </h1>
@@ -78,14 +78,14 @@ export function EscalationsPage() {
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={() => setShowAll(s => !s)}
-            style={{ padding: '8px 16px', background: showAll ? '#eff6ff' : '#fff',
-              border: `1px solid ${showAll ? '#bfdbfe' : '#e2e8f0'}`, borderRadius: 10,
-              cursor: 'pointer', fontSize: 13, color: showAll ? '#2563eb' : '#64748b', fontWeight: 600, transition: 'all 0.15s' }}>
+            style={{ padding: '8px 16px', background: showAll ? 'var(--bg-eff6ff)' : 'var(--bg-fff)',
+              border: `1px solid ${showAll ? 'var(--bd-bfdbfe)' : 'var(--bd-e2e8f0)'}`, borderRadius: 10,
+              cursor: 'pointer', fontSize: 13, color: showAll ? 'var(--tx-2563eb)' : 'var(--tx-64748b)', fontWeight: 600, transition: 'all 0.15s' }}>
             {showAll ? 'Showing All' : 'Show Mine Only'}
           </button>
           <button onClick={() => load({ silent: true })}
-            style={{ padding: '8px 16px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 10,
-              cursor: 'pointer', fontSize: 13, color: '#64748b', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s' }}>
+            style={{ padding: '8px 16px', background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 10,
+              cursor: 'pointer', fontSize: 13, color: 'var(--tx-64748b)', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s' }}>
             <RefreshCw className={cn('w-3.5 h-3.5', refreshing && 'animate-spin')} /> Refresh
           </button>
         </div>
@@ -94,12 +94,12 @@ export function EscalationsPage() {
       {loading ? (
         <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>Loading…</div>
       ) : escalations.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
+        <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 16,
           padding: 60, textAlign: 'center' }}>
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-lg shadow-emerald-500/25 mx-auto mb-4">
             <CheckCircle2 className="w-7 h-7 text-white" />
           </div>
-          <p style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', margin: '0 0 6px' }}>
+          <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--tx-1e293b)', margin: '0 0 6px' }}>
             Nothing sent back
           </p>
           <p style={{ fontSize: 13, color: '#94a3b8', margin: 0 }}>
@@ -110,14 +110,14 @@ export function EscalationsPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {escalations.map((e: any) => (
             <div key={e.record_id} className="relative overflow-hidden" style={{
-              background: '#fff', border: '1px solid #fecaca', borderRadius: 14,
+              background: 'var(--bg-fff)', border: '1px solid var(--bd-fecaca)', borderRadius: 14,
               padding: '16px 18px 16px 21px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
             }}>
               <div className="absolute top-0 left-0 bottom-0 w-1 bg-gradient-to-b from-red-500 to-rose-600" />
               <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 10 }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
-                    <span style={{ fontSize: 14, fontWeight: 700, color: '#1e293b' }}>{e.source_name}</span>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tx-1e293b)' }}>{e.source_name}</span>
                     <span style={{ fontSize: 11, color: '#94a3b8' }}>· {e.project_name}</span>
                     {e.correction_count > 1 && (
                       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
@@ -127,30 +127,30 @@ export function EscalationsPage() {
                     )}
                   </div>
                   <p style={{ fontSize: 12, color: '#94a3b8', margin: 0 }}>
-                    Record: <span style={{ fontFamily: 'monospace', color: '#64748b' }}>{e.record_label}</span>
+                    Record: <span style={{ fontFamily: 'monospace', color: 'var(--tx-64748b)' }}>{e.record_label}</span>
                   </p>
                 </div>
                 <Link to={`/projects/${e.project_id}/sources/${e.source_id}`}
-                  style={{ fontSize: 12, fontWeight: 700, color: '#2563eb', textDecoration: 'none',
+                  style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-2563eb)', textDecoration: 'none',
                     display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap',
-                    padding: '6px 12px', borderRadius: 8, background: '#eff6ff', border: '1px solid #bfdbfe', transition: 'all 0.15s' }}>
+                    padding: '6px 12px', borderRadius: 8, background: 'var(--bg-eff6ff)', border: '1px solid var(--bd-bfdbfe)', transition: 'all 0.15s' }}>
                   Open <ArrowRight style={{ width: 12, height: 12 }} />
                 </Link>
               </div>
 
               {/* Feedback message */}
               {e.message && (
-                <div style={{ background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 10,
+                <div style={{ background: 'var(--bg-fef2f2)', border: '1px solid var(--bd-fecaca)', borderRadius: 10,
                   padding: '10px 14px', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                  <MessageSquare style={{ width: 15, height: 15, color: '#dc2626', flexShrink: 0, marginTop: 1 }} />
+                  <MessageSquare style={{ width: 15, height: 15, color: 'var(--tx-dc2626)', flexShrink: 0, marginTop: 1 }} />
                   <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: 13, color: '#7f1d1d', margin: 0, lineHeight: 1.5 }}>{e.message}</p>
+                    <p style={{ fontSize: 13, color: 'var(--tx-7f1d1d)', margin: 0, lineHeight: 1.5 }}>{e.message}</p>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6 }}>
                       {e.by && <Avatar name={e.by} />}
                       <span style={{ fontSize: 11, fontWeight: 600, color: '#991b1b' }}>{e.by}</span>
                       {e.role && (
-                        <span style={{ fontSize: 10, fontWeight: 700, color: e.role === 'admin' ? '#dc2626' : '#7c3aed',
-                          background: e.role === 'admin' ? '#fef2f2' : '#faf5ff',
+                        <span style={{ fontSize: 10, fontWeight: 700, color: e.role === 'admin' ? 'var(--tx-dc2626)' : 'var(--tx-7c3aed)',
+                          background: e.role === 'admin' ? 'var(--bg-fef2f2)' : 'var(--bg-faf5ff)',
                           padding: '1px 6px', borderRadius: 20, textTransform: 'capitalize' }}>
                           {e.role}
                         </span>
@@ -171,8 +171,8 @@ export function EscalationsPage() {
                   </summary>
                   <div style={{ marginTop: 6, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {e.all_messages.slice(0, -1).reverse().map((m: any, i: number) => (
-                      <div key={i} style={{ background: '#f8fafc', borderRadius: 8, padding: '8px 10px' }}>
-                        <p style={{ fontSize: 12, color: '#475569', margin: 0 }}>{m.comment}</p>
+                      <div key={i} style={{ background: 'var(--bg-f8fafc)', borderRadius: 8, padding: '8px 10px' }}>
+                        <p style={{ fontSize: 12, color: 'var(--tx-475569)', margin: 0 }}>{m.comment}</p>
                         <p style={{ fontSize: 10, color: '#94a3b8', margin: '3px 0 0' }}>
                           {m.user} · {m.field === '_general' ? 'General' : m.field}
                         </p>

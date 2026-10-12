@@ -135,7 +135,7 @@ export function ProjectDetailPage() {
 
       {/* Pipeline overview — driven by Sources (the current workflow), not
           the legacy Jobs system, which is empty for most projects now */}
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: '20px 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+      <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 16, padding: '20px 24px', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em', margin: '0 0 16px' }}>
           Pipeline Progress
         </p>
@@ -155,9 +155,9 @@ export function ProjectDetailPage() {
               <div className={cn('absolute top-0 left-0 right-0 h-1', accent)} />
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
                 <div className={cn('w-8 h-8 rounded-lg flex items-center justify-center text-sm bg-gradient-to-br shadow-sm', grad)}>{icon}</div>
-                <span style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', lineHeight: 1 }}>{value}</span>
+                <span style={{ fontSize: 26, fontWeight: 800, color: 'var(--tx-0f172a)', lineHeight: 1 }}>{value}</span>
               </div>
-              <p style={{ fontSize: 12, fontWeight: 700, color: '#374151', margin: 0 }}>{label}</p>
+              <p style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-374151)', margin: 0 }}>{label}</p>
               <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0' }}>{desc}</p>
             </div>
           ))}

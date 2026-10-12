@@ -215,11 +215,11 @@ export function ProjectsPage() {
 
   const statusColor = (p: Project) => {
     const s = (p as any).status ?? ''
-    if (s === 'active')   return { bg: '#ecfdf5', color: '#059669', label: 'Active' }
-    if (s === 'paused')   return { bg: '#fffbeb', color: '#d97706', label: 'Paused' }
-    if (s === 'archived') return { bg: '#f1f5f9', color: '#64748b', label: 'Archived' }
-    if (s === 'template') return { bg: '#faf5ff', color: '#7c3aed', label: 'Template' }
-    return { bg: '#eff6ff', color: '#2563eb', label: 'Active' }
+    if (s === 'active')   return { bg: 'var(--bg-ecfdf5)', color: 'var(--tx-059669)', label: 'Active' }
+    if (s === 'paused')   return { bg: 'var(--bg-fffbeb)', color: 'var(--tx-d97706)', label: 'Paused' }
+    if (s === 'archived') return { bg: 'var(--bg-f1f5f9)', color: 'var(--tx-64748b)', label: 'Archived' }
+    if (s === 'template') return { bg: 'var(--bg-faf5ff)', color: 'var(--tx-7c3aed)', label: 'Template' }
+    return { bg: 'var(--bg-eff6ff)', color: 'var(--tx-2563eb)', label: 'Active' }
   }
 
   return (
@@ -228,7 +228,7 @@ export function ProjectsPage() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 800, color: '#0f172a', margin: 0 }}>Projects</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 800, color: 'var(--tx-0f172a)', margin: 0 }}>Projects</h1>
           <p style={{ fontSize: 13, color: '#94a3b8', marginTop: 4 }}>
             {filteredProjects.length !== projects.length
               ? `${filteredProjects.length} of ${projects.length} project${projects.length !== 1 ? 's' : ''}`
@@ -239,7 +239,7 @@ export function ProjectsPage() {
           <button onClick={() => exportTimesheet()} disabled={exporting === 'all' || projects.length === 0}
             title="Download delivery timesheet for all projects" style={{
             display: 'flex', alignItems: 'center', gap: 7, padding: '9px 16px',
-            background: '#fff', color: '#374151', border: '1px solid #e2e8f0',
+            background: 'var(--bg-fff)', color: 'var(--tx-374151)', border: '1px solid var(--bd-e2e8f0)',
             borderRadius: 10, fontSize: 13, fontWeight: 600, transition: 'all 0.15s',
             cursor: exporting === 'all' ? 'not-allowed' : 'pointer', opacity: exporting === 'all' ? .6 : 1,
           }}>
@@ -261,13 +261,13 @@ export function ProjectsPage() {
       {/* Search + status filter */}
       {projects.length > 0 && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: '#f1f5f9', borderRadius: 10, padding: 3 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg-f1f5f9)', borderRadius: 10, padding: 3 }}>
             {(['all', 'active', 'paused', 'archived', 'template'] as const).map(s => (
               <button key={s} onClick={() => setStatusFilter(s)}
                 style={{ padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer',
                   fontSize: 12, fontWeight: 600, textTransform: 'capitalize', transition: 'all 0.15s',
-                  background: statusFilter === s ? '#fff' : 'transparent',
-                  color: statusFilter === s ? '#1d4ed8' : '#64748b',
+                  background: statusFilter === s ? 'var(--bg-fff)' : 'transparent',
+                  color: statusFilter === s ? 'var(--tx-1d4ed8)' : 'var(--tx-64748b)',
                   boxShadow: statusFilter === s ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>
                 {s}
               </button>
@@ -276,7 +276,7 @@ export function ProjectsPage() {
           <div style={{ position: 'relative', marginLeft: 'auto', width: 220 }}>
             <Search style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', width: 14, height: 14, color: '#94a3b8' }} />
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search projects…"
-              style={{ width: '100%', padding: '7px 10px 7px 32px', borderRadius: 10, border: '1px solid #e2e8f0',
+              style={{ width: '100%', padding: '7px 10px 7px 32px', borderRadius: 10, border: '1px solid var(--bd-e2e8f0)',
                 fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
             {search && (
               <button onClick={() => setSearch('')} style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
@@ -307,8 +307,8 @@ export function ProjectsPage() {
                   <Icon className="w-[18px] h-[18px]" />
                 </div>
               </div>
-              <p style={{ fontSize: 26, fontWeight: 800, color: '#0f172a', margin: 0, lineHeight: 1 }}>{value}</p>
-              <p style={{ fontSize: 12, fontWeight: 600, color: '#64748b', margin: '6px 0 0' }}>{label}</p>
+              <p style={{ fontSize: 26, fontWeight: 800, color: 'var(--tx-0f172a)', margin: 0, lineHeight: 1 }}>{value}</p>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--tx-64748b)', margin: '6px 0 0' }}>{label}</p>
             </div>
           ))}
         </div>
@@ -318,12 +318,12 @@ export function ProjectsPage() {
       {loading ? (
         <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>Loading projects…</div>
       ) : projects.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
+        <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 16,
           padding: 60, textAlign: 'center' }}>
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-gray-300 to-gray-400 flex items-center justify-center mx-auto mb-4 shadow-sm">
             <FolderKanban className="w-7 h-7 text-white" />
           </div>
-          <p style={{ fontSize: 16, fontWeight: 600, color: '#1e293b', margin: '0 0 6px' }}>No projects yet</p>
+          <p style={{ fontSize: 16, fontWeight: 600, color: 'var(--tx-1e293b)', margin: '0 0 6px' }}>No projects yet</p>
           <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 20px' }}>Create your first project to get started</p>
           {canManage && (
             <button onClick={() => setShowNew(true)} style={{
@@ -335,20 +335,20 @@ export function ProjectsPage() {
           )}
         </div>
       ) : filteredProjects.length === 0 ? (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, padding: 48, textAlign: 'center' }}>
-          <p style={{ fontSize: 14, fontWeight: 600, color: '#1e293b', margin: '0 0 4px' }}>No projects match your filters</p>
+        <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 16, padding: 48, textAlign: 'center' }}>
+          <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--tx-1e293b)', margin: '0 0 4px' }}>No projects match your filters</p>
           <button onClick={() => { setSearch(''); setStatusFilter('all') }}
-            style={{ fontSize: 12, color: '#2563eb', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', marginTop: 8 }}>
+            style={{ fontSize: 12, color: 'var(--tx-2563eb)', fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', marginTop: 8 }}>
             Clear search & filters
           </button>
         </div>
       ) : (
-        <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16,
+        <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 16,
           overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.04)' }}>
           <div style={{ overflowX: 'auto' }} className="scrollbar-thin">
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+              <tr style={{ background: 'var(--bg-f8fafc)', borderBottom: '2px solid var(--bd-e2e8f0)' }}>
                 {['Project','Status','Sources','Approved','Progress','Last Updated',''].map(h => (
                   <th key={h} style={{ padding: '11px 16px', textAlign: 'left', fontSize: 10,
                     fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.07em',
@@ -363,9 +363,9 @@ export function ProjectsPage() {
                 return (
                   <tr key={p.id}
                     onClick={() => navigate(`/projects/${p.id}/sources`)}
-                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-f8fafc)' }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'transparent' }}
-                    style={{ borderBottom: i < filteredProjects.length - 1 ? '1px solid #f8fafc' : 'none', transition: 'background 0.12s', cursor: 'pointer' }}>
+                    style={{ borderBottom: i < filteredProjects.length - 1 ? '1px solid var(--bd-f8fafc)' : 'none', transition: 'background 0.12s', cursor: 'pointer' }}>
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div className="bg-gradient-to-br from-brand-500 to-brand-700 shadow-sm"
@@ -374,7 +374,7 @@ export function ProjectsPage() {
                           <FolderKanban style={{ width: 16, height: 16, color: '#fff' }} />
                         </div>
                         <div>
-                          <p style={{ fontSize: 14, fontWeight: 600, color: '#1e293b', margin: 0 }}>{p.name}</p>
+                          <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--tx-1e293b)', margin: 0 }}>{p.name}</p>
                           {p.description && (
                             <p style={{ fontSize: 11, color: '#94a3b8', margin: '2px 0 0',
                               maxWidth: 280, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -388,23 +388,23 @@ export function ProjectsPage() {
                       <span style={{ fontSize: 11, fontWeight: 600, padding: '3px 9px',
                         borderRadius: 20, background: bg, color }}>{label}</span>
                     </td>
-                    <td style={{ padding: '14px 16px', fontSize: 14, fontWeight: 700, color: '#1e293b' }}>
+                    <td style={{ padding: '14px 16px', fontSize: 14, fontWeight: 700, color: 'var(--tx-1e293b)' }}>
                       {totalSources(p)}
                     </td>
                     <td style={{ padding: '14px 16px' }}>
-                      <span style={{ fontSize: 14, fontWeight: 600, color: '#059669' }}>
+                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--tx-059669)' }}>
                         {approvedSources(p)}
                       </span>
                     </td>
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <div style={{ background: '#e2e8f0', borderRadius: 99, height: 6, width: 80, overflow: 'hidden' }}>
+                        <div style={{ background: 'var(--bg-e2e8f0)', borderRadius: 99, height: 6, width: 80, overflow: 'hidden' }}>
                           <div style={{
                             background: progress === 100 ? 'linear-gradient(90deg,#10b981,#059669)' : 'linear-gradient(90deg,#3b82f6,#2563eb)',
                             height: '100%', width: `${progress}%`, borderRadius: 99, transition: 'width 0.4s ease' }} />
                         </div>
                         <span style={{ fontSize: 12, fontWeight: 600,
-                          color: progress === 100 ? '#059669' : '#2563eb' }}>
+                          color: progress === 100 ? 'var(--tx-059669)' : 'var(--tx-2563eb)' }}>
                           {progress}%
                         </span>
                       </div>
@@ -417,8 +417,8 @@ export function ProjectsPage() {
                         <button onClick={e => { e.stopPropagation(); exportTimesheet(p.id) }}
                           disabled={exporting === p.id}
                           title="Download delivery timesheet for this project"
-                          style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
-                            border: '1px solid #e2e8f0', color: '#64748b', transition: 'all 0.15s',
+                          style={{ padding: '5px 9px', borderRadius: 8, background: 'var(--bg-f8fafc)',
+                            border: '1px solid var(--bd-e2e8f0)', color: 'var(--tx-64748b)', transition: 'all 0.15s',
                             cursor: exporting === p.id ? 'not-allowed' : 'pointer',
                             opacity: exporting === p.id ? .6 : 1, display: 'flex', alignItems: 'center' }}>
                           <Download style={{ width: 13, height: 13 }} />
@@ -426,8 +426,8 @@ export function ProjectsPage() {
                         <button onClick={e => { e.stopPropagation(); exportPackage(p) }}
                           disabled={exportingPackage === p.id}
                           title="Download full package (Word cover doc + JSON records)"
-                          style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
-                            border: '1px solid #e2e8f0', color: '#64748b', transition: 'all 0.15s',
+                          style={{ padding: '5px 9px', borderRadius: 8, background: 'var(--bg-f8fafc)',
+                            border: '1px solid var(--bd-e2e8f0)', color: 'var(--tx-64748b)', transition: 'all 0.15s',
                             cursor: exportingPackage === p.id ? 'not-allowed' : 'pointer',
                             opacity: exportingPackage === p.id ? .6 : 1, display: 'flex', alignItems: 'center' }}>
                           <Package style={{ width: 13, height: 13 }} />
@@ -436,22 +436,22 @@ export function ProjectsPage() {
                           <>
                             <button onClick={e => { e.stopPropagation(); openMembers(p) }}
                               title="Manage members"
-                              style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
-                                border: '1px solid #e2e8f0', color: '#64748b', transition: 'all 0.15s',
+                              style={{ padding: '5px 9px', borderRadius: 8, background: 'var(--bg-f8fafc)',
+                                border: '1px solid var(--bd-e2e8f0)', color: 'var(--tx-64748b)', transition: 'all 0.15s',
                                 cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                               <Users style={{ width: 13, height: 13 }} />
                             </button>
                             <button onClick={e => { e.stopPropagation(); openEdit(p) }}
                               title="Edit project"
-                              style={{ padding: '5px 9px', borderRadius: 8, background: '#f8fafc',
-                                border: '1px solid #e2e8f0', color: '#64748b', transition: 'all 0.15s',
+                              style={{ padding: '5px 9px', borderRadius: 8, background: 'var(--bg-f8fafc)',
+                                border: '1px solid var(--bd-e2e8f0)', color: 'var(--tx-64748b)', transition: 'all 0.15s',
                                 cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                               <Edit3 style={{ width: 13, height: 13 }} />
                             </button>
                             <button onClick={e => { e.stopPropagation(); setDeleteProject(p) }}
                               title="Delete project"
-                              style={{ padding: '5px 9px', borderRadius: 8, background: '#fef2f2',
-                                border: '1px solid #fecaca', color: '#dc2626', transition: 'all 0.15s',
+                              style={{ padding: '5px 9px', borderRadius: 8, background: 'var(--bg-fef2f2)',
+                                border: '1px solid var(--bd-fecaca)', color: 'var(--tx-dc2626)', transition: 'all 0.15s',
                                 cursor: 'pointer', display: 'flex', alignItems: 'center' }}>
                               <Trash2 style={{ width: 13, height: 13 }} />
                             </button>
@@ -459,9 +459,9 @@ export function ProjectsPage() {
                         )}
                         <Link to={`/projects/${p.id}/sources`} onClick={e => e.stopPropagation()}
                           style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12,
-                            fontWeight: 700, color: '#2563eb', textDecoration: 'none', transition: 'all 0.15s',
+                            fontWeight: 700, color: 'var(--tx-2563eb)', textDecoration: 'none', transition: 'all 0.15s',
                             padding: '5px 12px', borderRadius: 8,
-                            background: '#eff6ff', border: '1px solid #bfdbfe' }}>
+                            background: 'var(--bg-eff6ff)', border: '1px solid var(--bd-bfdbfe)' }}>
                           Open <ArrowRight style={{ width: 12, height: 12 }} />
                         </Link>
                       </div>
@@ -479,14 +479,14 @@ export function ProjectsPage() {
       <Modal open={showNew} onClose={() => setShowNew(false)} title="New Project">
         <form onSubmit={create} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
               Project name *
             </label>
             <Input value={name} onChange={e => setName(e.target.value)}
               placeholder="e.g. WebTailBench 2026" required />
           </div>
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
               Description
             </label>
             <Textarea value={desc} onChange={e => setDesc(e.target.value)}
@@ -494,8 +494,8 @@ export function ProjectsPage() {
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8 }}>
             <button type="button" onClick={() => setShowNew(false)}
-              style={{ padding: '9px 18px', background: '#f1f5f9', border: 'none',
-                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#64748b' }}>
+              style={{ padding: '9px 18px', background: 'var(--bg-f1f5f9)', border: 'none',
+                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--tx-64748b)' }}>
               Cancel
             </button>
             <button type="submit" disabled={saving || !name.trim()}
@@ -513,19 +513,19 @@ export function ProjectsPage() {
       <Modal open={!!editProject} onClose={() => setEditProject(null)} title="Edit Project">
         <form onSubmit={handleEdit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
               Project name *
             </label>
             <Input value={editName} onChange={e => setEditName(e.target.value)} required />
           </div>
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
               Description
             </label>
             <Textarea value={editDesc} onChange={e => setEditDesc(e.target.value)} rows={3} />
           </div>
           <div>
-            <label style={{ fontSize: 13, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>
               Status
             </label>
             <Select value={editStatus} onChange={e => setEditStatus(e.target.value)}>
@@ -537,8 +537,8 @@ export function ProjectsPage() {
           </div>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 8 }}>
             <button type="button" onClick={() => setEditProject(null)}
-              style={{ padding: '9px 18px', background: '#f1f5f9', border: 'none',
-                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: '#64748b' }}>
+              style={{ padding: '9px 18px', background: 'var(--bg-f1f5f9)', border: 'none',
+                borderRadius: 10, fontSize: 13, fontWeight: 600, cursor: 'pointer', color: 'var(--tx-64748b)' }}>
               Cancel
             </button>
             <button type="submit" disabled={savingEdit || !editName.trim()}
@@ -575,20 +575,20 @@ export function ProjectsPage() {
                 <p style={{ fontSize: 13, color: '#94a3b8', textAlign: 'center', padding: '16px 0' }}>No members yet</p>
               ) : members.map((m: any) => (
                 <div key={m.user_id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px',
-                  background: '#f8fafc', borderRadius: 10, border: '1px solid #f1f5f9' }}>
+                  background: 'var(--bg-f8fafc)', borderRadius: 10, border: '1px solid var(--bd-f1f5f9)' }}>
                   <Avatar name={m.full_name} size="sm" />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0 }}>{m.full_name}</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-1e293b)', margin: 0 }}>{m.full_name}</p>
                     <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>{m.email}</p>
                   </div>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                    background: '#eff6ff', color: '#2563eb', textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
+                    background: 'var(--bg-eff6ff)', color: 'var(--tx-2563eb)', textTransform: 'capitalize', whiteSpace: 'nowrap' }}>
                     {String(m.role).replace(/_/g, ' ')}
                   </span>
                   <button onClick={() => handleRemoveMember(m.user_id)} disabled={removingMemberId === m.user_id}
                     title="Remove from project"
                     style={{ padding: 5, borderRadius: 8, background: 'none', border: 'none',
-                      color: '#dc2626', cursor: removingMemberId === m.user_id ? 'not-allowed' : 'pointer',
+                      color: 'var(--tx-dc2626)', cursor: removingMemberId === m.user_id ? 'not-allowed' : 'pointer',
                       opacity: removingMemberId === m.user_id ? .5 : 1, display: 'flex', alignItems: 'center' }}>
                     <Trash2 style={{ width: 13, height: 13 }} />
                   </button>
@@ -596,8 +596,8 @@ export function ProjectsPage() {
               ))}
             </div>
 
-            <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 14 }}>
-              <p style={{ fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8 }}>Add a member</p>
+            <div style={{ borderTop: '1px solid var(--bd-f1f5f9)', paddingTop: 14 }}>
+              <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--tx-374151)', marginBottom: 8 }}>Add a member</p>
               <div style={{ display: 'flex', gap: 8 }}>
                 <Select value={addUserId} onChange={e => setAddUserId(e.target.value)} style={{ flex: 1 }}>
                   <option value="">Select a person…</option>

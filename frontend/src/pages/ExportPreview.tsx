@@ -169,19 +169,19 @@ export function ExportPreviewPage() {
         value={searchQuery}
         onChange={e => setSearchQuery(e.target.value)}
         style={{
-          width: '100%', padding: '10px 16px', border: '1px solid #e2e8f0',
+          width: '100%', padding: '10px 16px', border: '1px solid var(--bd-e2e8f0)',
           borderRadius: 10, fontSize: 14, outline: 'none',
           boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
         }}
       />
 
       {/* Folder view */}
-      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+      <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 16, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
 
         {/* Project folder header */}
-        <div style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ background: 'var(--bg-f8fafc)', borderBottom: '2px solid var(--bd-e2e8f0)', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <Folder size={20} color="#f59e0b" fill="#fde68a" />
-          <span style={{ fontSize: 15, fontWeight: 700, color: '#1e293b', fontFamily: 'var(--font-mono)' }}>
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--tx-1e293b)', fontFamily: 'var(--font-mono)' }}>
             📂 {data.project_folder}/
           </span>
           <span style={{ fontSize: 12, color: '#94a3b8', marginLeft: 'auto' }}>
@@ -198,22 +198,22 @@ export function ExportPreviewPage() {
         {filteredSources.map((source, si) => {
           const isExpanded = expandedSources.has(source.source_id)
           return (
-            <div key={source.source_id} style={{ borderBottom: si < filteredSources.length - 1 ? '1px solid #f1f5f9' : 'none' }}>
+            <div key={source.source_id} style={{ borderBottom: si < filteredSources.length - 1 ? '1px solid var(--bd-f1f5f9)' : 'none' }}>
               {/* Source row */}
               <div
                 onClick={() => toggleSource(source.source_id)}
                 style={{
                   padding: '12px 20px 12px 28px', display: 'flex', alignItems: 'center',
-                  gap: 10, cursor: 'pointer', background: isExpanded ? '#f0fdf4' : '#fff',
+                  gap: 10, cursor: 'pointer', background: isExpanded ? 'var(--bg-f0fdf4)' : 'var(--bg-fff)',
                   transition: 'background 0.15s',
                 }}
-                onMouseEnter={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = '#f8fafc' }}
-                onMouseLeave={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = '#fff' }}
+                onMouseEnter={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = 'var(--bg-f8fafc)' }}
+                onMouseLeave={e => { if (!isExpanded) (e.currentTarget as HTMLElement).style.background = 'var(--bg-fff)' }}
               >
                 {isExpanded ? <ChevronDown size={14} color="#94a3b8" /> : <ChevronRight size={14} color="#94a3b8" />}
                 <Folder size={16} color={isExpanded ? '#10b981' : '#94a3b8'} />
-                <span style={{ fontSize: 13, fontWeight: 600, color: '#334155' }}>{source.source_name}</span>
-                <span style={{ fontSize: 10, background: '#ecfdf5', color: '#059669', border: '1px solid #6ee7b7', padding: '2px 8px', borderRadius: 20, fontWeight: 600 }}>✓ Approved</span>
+                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-334155)' }}>{source.source_name}</span>
+                <span style={{ fontSize: 10, background: 'var(--bg-ecfdf5)', color: 'var(--tx-059669)', border: '1px solid var(--bd-6ee7b7)', padding: '2px 8px', borderRadius: 20, fontWeight: 600 }}>✓ Approved</span>
                 <span style={{ fontSize: 12, color: '#94a3b8', marginLeft: 'auto' }}>
                   {source.record_count} record{source.record_count !== 1 ? 's' : ''}
                   {source.approved_at && ` · ${fmtDate(source.approved_at)}`}
@@ -228,7 +228,7 @@ export function ExportPreviewPage() {
                     <div
                       style={{
                         padding: '10px 20px 10px 56px', display: 'flex', alignItems: 'center',
-                        gap: 10, background: '#f9fafb', borderTop: '1px solid #f1f5f9',
+                        gap: 10, background: 'var(--bg-f9fafb)', borderTop: '1px solid var(--bd-f1f5f9)',
                         cursor: 'pointer',
                       }}
                     >
@@ -238,23 +238,23 @@ export function ExportPreviewPage() {
                       >
                         {isRecordExpanded ? <ChevronDown size={12} color="#94a3b8" /> : <ChevronRight size={12} color="#94a3b8" />}
                         <FileJson size={14} color="#6366f1" />
-                        <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: '#1e293b', fontWeight: 500 }}>
+                        <span style={{ fontSize: 12, fontFamily: 'var(--font-mono)', color: 'var(--tx-1e293b)', fontWeight: 500 }}>
                           {record.canonical_name}.json
                         </span>
                         {record.is_submitted && (
-                          <span style={{ fontSize: 10, background: '#ecfdf5', color: '#059669', border: '1px solid #6ee7b7', padding: '1px 6px', borderRadius: 20, fontWeight: 700 }}>
+                          <span style={{ fontSize: 10, background: 'var(--bg-ecfdf5)', color: 'var(--tx-059669)', border: '1px solid var(--bd-6ee7b7)', padding: '1px 6px', borderRadius: 20, fontWeight: 700 }}>
                             🚀 Submitted
                           </span>
                         )}
                         {!record.is_submitted && (
-                          <span style={{ fontSize: 10, background: '#eff6ff', color: '#3b82f6', border: '1px solid #93c5fd', padding: '1px 6px', borderRadius: 20 }}>
+                          <span style={{ fontSize: 10, background: 'var(--bg-eff6ff)', color: 'var(--tx-3b82f6)', border: '1px solid var(--bd-93c5fd)', padding: '1px 6px', borderRadius: 20 }}>
                             ✓ Approved
                           </span>
                         )}
                       </button>
                       <button
                         onClick={() => handleDownloadRecord(record)}
-                        style={{ padding: '3px 10px', background: '#fff', border: '1px solid #e2e8f0', borderRadius: 6, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, color: '#64748b', flexShrink: 0 }}
+                        style={{ padding: '3px 10px', background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 6, fontSize: 11, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4, color: 'var(--tx-64748b)', flexShrink: 0 }}
                         title={`Download ${record.canonical_name}.json`}
                       >
                         <Download size={11} /> .json
@@ -263,13 +263,13 @@ export function ExportPreviewPage() {
 
                     {/* Expanded JSON preview */}
                     {isRecordExpanded && (
-                      <div style={{ padding: '0 20px 12px 56px', background: '#f9fafb', borderTop: '1px solid #f1f5f9' }}>
+                      <div style={{ padding: '0 20px 12px 56px', background: 'var(--bg-f9fafb)', borderTop: '1px solid var(--bd-f1f5f9)' }}>
                         <div style={{ background: '#0f172a', borderRadius: 10, overflow: 'hidden' }}>
                           <div style={{ padding: '8px 16px', background: '#1e293b', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                             <span style={{ fontSize: 11, color: '#7dd3fc', fontFamily: 'var(--font-mono)' }}>
                               {record.canonical_name}.json
                             </span>
-                            <span style={{ fontSize: 10, color: '#475569' }}>
+                            <span style={{ fontSize: 10, color: 'var(--tx-475569)' }}>
                               {Object.keys(record.fields).length} fields
                             </span>
                           </div>
@@ -291,7 +291,7 @@ export function ExportPreviewPage() {
         })}
 
         {/* Footer */}
-        <div style={{ background: '#f8fafc', borderTop: '2px solid #e2e8f0', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ background: 'var(--bg-f8fafc)', borderTop: '2px solid var(--bd-e2e8f0)', padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <span style={{ fontSize: 12, color: '#94a3b8' }}>
             📂 {data.project_folder} · {data.total_records} files · combined.json + README.md included in ZIP
           </span>

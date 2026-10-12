@@ -905,7 +905,7 @@ function SourceDetailInner() {
             {(source as any).reset_count > 0 && (
               <span title="This source has been reset — the extraction timer was preserved through each reset"
                 style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20,
-                  background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa',
+                  background: 'var(--bg-fff7ed)', color: 'var(--tx-c2410c)', border: '1px solid var(--bd-fed7aa)',
                   display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <RotateCcw style={{ width: 11, height: 11 }} /> Reset ×{(source as any).reset_count}
               </span>
@@ -913,7 +913,7 @@ function SourceDetailInner() {
             {isFromXtrium && (
               <span title="This source was pulled from Xtrium Catalog IQ"
                 style={{ fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20,
-                  background: '#eff6ff', color: '#1d4ed8', border: '1px solid #bfdbfe',
+                  background: 'var(--bg-eff6ff)', color: 'var(--tx-1d4ed8)', border: '1px solid var(--bd-bfdbfe)',
                   display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                 <Link2 style={{ width: 11, height: 11 }} /> Xtrium Catalog IQ #{xtriumRefId}
               </span>
@@ -937,7 +937,7 @@ function SourceDetailInner() {
           )}
           {isExtractor && source.status !== 'approved' && (
             <Button variant="secondary" size="sm" onClick={() => setShowEscalate(true)}
-              style={{ color: '#b45309', borderColor: '#fde68a' }}>
+              style={{ color: 'var(--tx-b45309)', borderColor: 'var(--bd-fde68a)' }}>
               <AlertTriangle className="w-3.5 h-3.5" /> Escalate — No Data Found
             </Button>
           )}
@@ -1087,13 +1087,13 @@ function SourceDetailInner() {
 
       <PeerReviewPanel sourceId={source.id} onChanged={load} />
 
-      <div style={{ display: 'flex', gap: 4, padding: '4px', background: '#f1f5f9', borderRadius: 12, alignSelf: 'flex-start' }}>
+      <div style={{ display: 'flex', gap: 4, padding: '4px', background: 'var(--bg-f1f5f9)', borderRadius: 12, alignSelf: 'flex-start' }}>
         {((isFromXtrium ? ['records', 'files', 'details', 'sop'] : ['records', 'files', 'details']) as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '7px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
             fontSize: 13, fontWeight: 600, transition: 'all 0.15s',
-            background: tab === t ? '#fff' : 'transparent',
-            color: tab === t ? '#1d4ed8' : '#64748b',
+            background: tab === t ? 'var(--bg-fff)' : 'transparent',
+            color: tab === t ? 'var(--tx-1d4ed8)' : 'var(--tx-64748b)',
             boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
           }}>
             {t === 'records' ? `Records (${records.length})` : t === 'files' ? 'Files' : t === 'sop' ? 'SOP' : 'Details & Notes'}
@@ -1105,27 +1105,27 @@ function SourceDetailInner() {
         <div className="space-y-4">
 
           {(source.extraction_started_at || (source as any).llm_verification_started_at || source.review_started_at) && (
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 12,
+            <div style={{ background: 'var(--bg-f8fafc)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 12,
               padding: '10px 16px', marginBottom: 12, display: 'flex', alignItems: 'center',
               gap: 18, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                <Clock style={{ width: 13, height: 13, color: '#64748b' }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                <Clock style={{ width: 13, height: 13, color: 'var(--tx-64748b)' }} />
+                <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-64748b)', textTransform: 'uppercase', letterSpacing: '.04em' }}>
                   Time in pipeline
                 </span>
               </div>
               {[
-                { label: 'Extraction', start: source.extraction_started_at, end: source.extraction_completed_at, color: '#3b82f6' },
-                { label: 'LLM Verify', start: (source as any).llm_verification_started_at, end: (source as any).llm_verification_completed_at, color: '#059669' },
-                { label: 'Review', start: source.review_started_at, end: source.review_completed_at, color: '#7c3aed' },
+                { label: 'Extraction', start: source.extraction_started_at, end: source.extraction_completed_at, color: 'var(--tx-3b82f6)' },
+                { label: 'LLM Verify', start: (source as any).llm_verification_started_at, end: (source as any).llm_verification_completed_at, color: 'var(--tx-059669)' },
+                { label: 'Review', start: source.review_started_at, end: source.review_completed_at, color: 'var(--tx-7c3aed)' },
               ].map(({ label, start, end, color }) => {
                 const d = formatDuration(start, end)
                 if (!d) return null
                 return (
                   <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                     <div style={{ width: 6, height: 6, borderRadius: '50%', background: color }} />
-                    <span style={{ fontSize: 12, color: '#64748b' }}>{label}:</span>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: end ? '#1e293b' : color }}>
+                    <span style={{ fontSize: 12, color: 'var(--tx-64748b)' }}>{label}:</span>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: end ? 'var(--tx-1e293b)' : color }}>
                       {d}{!end && ' (ongoing)'}
                     </span>
                   </div>
@@ -1133,8 +1133,8 @@ function SourceDetailInner() {
               })}
               {source.extraction_started_at && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginLeft: 'auto' }}>
-                  <span style={{ fontSize: 12, color: '#64748b' }}>Total:</span>
-                  <span style={{ fontSize: 13, fontWeight: 800, color: source.approved_at ? '#059669' : '#0f172a' }}>
+                  <span style={{ fontSize: 12, color: 'var(--tx-64748b)' }}>Total:</span>
+                  <span style={{ fontSize: 13, fontWeight: 800, color: source.approved_at ? 'var(--tx-059669)' : 'var(--tx-0f172a)' }}>
                     {formatDuration(source.extraction_started_at, source.approved_at)}
                     {!source.approved_at && ' (ongoing)'}
                   </span>
@@ -1176,27 +1176,27 @@ function SourceDetailInner() {
                     const label = sourceFile ? sourceFile.split('/').pop()!.replace(/\.(json|csv|xlsx?|pdf|txt)$/i, '') : recordTitle(ef, r)
                     return (
                       <div key={r.id} onClick={() => { const idx = records.findIndex((x: any) => x.id === r.id); if (idx >= 0) setActiveRecordIndex(idx) }}
-                        style={{ background: '#fff', border: '1px solid #fecaca', borderRadius: 10,
+                        style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-fecaca)', borderRadius: 10,
                           padding: '10px 12px', cursor: 'pointer' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                          <span style={{ fontSize: 12, fontWeight: 700, color: '#1e293b' }}>{label}</span>
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--tx-1e293b)' }}>{label}</span>
                           {r.correction_count > 1 && (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: '#dc2626', background: '#fef2f2',
+                            <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--tx-dc2626)', background: 'var(--bg-fef2f2)',
                               padding: '1px 6px', borderRadius: 20 }}>×{r.correction_count}</span>
                           )}
                         </div>
                         {latest?.comment ? (
-                          <p style={{ fontSize: 12, color: '#7f1d1d', margin: 0 }}>
+                          <p style={{ fontSize: 12, color: 'var(--tx-7f1d1d)', margin: 0 }}>
                             "{latest.comment}" <span style={{ color: '#94a3b8' }}>— {latest.user}</span>
                           </p>
                         ) : r.review_note ? (
-                          <p style={{ fontSize: 12, color: '#7f1d1d', margin: 0 }}>"{r.review_note}"</p>
+                          <p style={{ fontSize: 12, color: 'var(--tx-7f1d1d)', margin: 0 }}>"{r.review_note}"</p>
                         ) : null}
                       </div>
                     )
                   })}
                   {escalated.length > 3 && (
-                    <Link to="/escalations" style={{ fontSize: 12, color: '#dc2626', fontWeight: 600, textDecoration: 'none' }}>
+                    <Link to="/escalations" style={{ fontSize: 12, color: 'var(--tx-dc2626)', fontWeight: 600, textDecoration: 'none' }}>
                       + {escalated.length - 3} more →
                     </Link>
                   )}
@@ -1219,16 +1219,16 @@ function SourceDetailInner() {
               </Button>
             </div>
           ) : records.length > 0 && (isReviewer || isAdmin) ? (
-            <div style={{ background: allRecordsApproved ? '#ecfdf5' : '#fffbeb', border: `1px solid ${allRecordsApproved ? '#6ee7b7' : '#fcd34d'}`, borderRadius: 12, padding: '14px 18px' }}>
+            <div style={{ background: allRecordsApproved ? 'var(--bg-ecfdf5)' : 'var(--bg-fffbeb)', border: `1px solid ${allRecordsApproved ? 'var(--bd-6ee7b7)' : 'var(--bd-fcd34d)'}`, borderRadius: 12, padding: '14px 18px' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: allRecordsApproved ? 10 : 8 }}>
                 <Eye size={16} color={allRecordsApproved ? '#059669' : '#d97706'} style={{ flexShrink: 0, marginTop: 1 }} />
                 <div style={{ flex: 1 }}>
-                  <p style={{ fontSize: 13, fontWeight: 700, color: allRecordsApproved ? '#065f46' : '#92400e', margin: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 700, color: allRecordsApproved ? 'var(--tx-065f46)' : 'var(--tx-92400e)', margin: 0 }}>
                     {allRecordsApproved
                       ? `All ${records.length} records approved — ready to approve source`
                       : `${pendingCount} record${pendingCount !== 1 ? 's' : ''} pending review · ${approvedCount} approved`}
                   </p>
-                  <p style={{ fontSize: 12, color: allRecordsApproved ? '#059669' : '#b45309', margin: '3px 0 0' }}>
+                  <p style={{ fontSize: 12, color: allRecordsApproved ? 'var(--tx-059669)' : 'var(--tx-b45309)', margin: '3px 0 0' }}>
                     {allRecordsApproved
                       ? 'Click "Approve Source" to mark this source as complete and unlock export.'
                       : 'Click any record below to open the review panel. Use ✓ Approve or ✗ Send Back on each record.'}
@@ -1364,9 +1364,9 @@ function SourceDetailInner() {
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
+                    <tr style={{ background: 'var(--bg-f8fafc)', borderBottom: '2px solid var(--bd-e2e8f0)' }}>
                       {['Record', ...(hasCompanyCols(records) ? ['Sites', 'Products'] : []), 'Schema', 'Web Check', 'Review', ''].map((h, i) => (
-                        <th key={h+i} style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
+                        <th key={h+i} style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: 'var(--tx-64748b)', textTransform: 'uppercase', letterSpacing: '0.08em', whiteSpace: 'nowrap' }}
                           className={['Sites', 'Products', 'Web Check'].includes(h) ? 'hidden md:table-cell' : ''}>
                           {h}
                         </th>
@@ -1380,7 +1380,7 @@ function SourceDetailInner() {
                         return (
                           <tr key={'folder-' + item.path}
                             onClick={() => toggleFolder(item.path)}
-                            style={{ cursor: 'pointer', background: '#f8fafc' }}
+                            style={{ cursor: 'pointer', background: 'var(--bg-f8fafc)' }}
                             className="hover:bg-gray-100 transition">
                             <td colSpan={hasCompanyCols(records) ? 7 : 5} style={{ padding: '7px 16px', paddingLeft: 16 + item.depth * 20 }}>
                               <div className="flex items-center gap-2">
@@ -1478,7 +1478,7 @@ function SourceDetailInner() {
                               {(r.correction_count ?? 0) > 0 && (
                                 <span style={{
                                   fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                                  background: '#fef2f2', color: '#dc2626', border: '1px solid #fecaca',
+                                  background: 'var(--bg-fef2f2)', color: 'var(--tx-dc2626)', border: '1px solid var(--bd-fecaca)',
                                   display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap',
                                 }}>
                                   ↩ Returned {r.correction_count}×
@@ -1489,7 +1489,7 @@ function SourceDetailInner() {
                                   onClick={e => { e.stopPropagation(); loadTimeline(r.id) }}
                                   style={{
                                     fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
-                                    background: '#faf5ff', color: '#7c3aed', border: '1px solid #e9d5ff',
+                                    background: 'var(--bg-faf5ff)', color: 'var(--tx-7c3aed)', border: '1px solid var(--bd-e9d5ff)',
                                     cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3,
                                   }}>
                                   💬 Feedback
@@ -1505,7 +1505,7 @@ function SourceDetailInner() {
                                 title="View full history and timing"
                                 style={{
                                   fontSize: 10, padding: '4px 9px', borderRadius: 8,
-                                  background: '#f8fafc', color: '#64748b', border: '1px solid #e2e8f0',
+                                  background: 'var(--bg-f8fafc)', color: 'var(--tx-64748b)', border: '1px solid var(--bd-e2e8f0)',
                                   cursor: 'pointer', whiteSpace: 'nowrap',
                                 }}>
                                 📋 History
@@ -1513,13 +1513,13 @@ function SourceDetailInner() {
                               {isAdmin && r.review_status === 'pending_admin_review' && (
                                 <span style={{
                                   fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20,
-                                  background: '#fffbeb', color: '#d97706', border: '1px solid #fde68a',
+                                  background: 'var(--bg-fffbeb)', color: 'var(--tx-d97706)', border: '1px solid var(--bd-fde68a)',
                                   whiteSpace: 'nowrap',
                                 }}>Needs your approval</span>
                               )}
                               <span style={{
                                 fontSize: 11, fontWeight: 600, padding: '4px 10px', borderRadius: 20,
-                                background: '#eff6ff', color: '#2563eb', border: '1px solid #bfdbfe',
+                                background: 'var(--bg-eff6ff)', color: 'var(--tx-2563eb)', border: '1px solid var(--bd-bfdbfe)',
                                 whiteSpace: 'nowrap',
                               }}>Open →</span>
                               {isExtractor && (
@@ -1544,14 +1544,14 @@ function SourceDetailInner() {
 
       {tab === 'files' && (
         <div className="space-y-4">
-          <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            <FileIcon style={{ width: 18, height: 18, color: '#2563eb', flexShrink: 0 }} />
+          <div style={{ background: 'var(--bg-eff6ff)', border: '1px solid var(--bd-bfdbfe)', borderRadius: 12, padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <FileIcon style={{ width: 18, height: 18, color: 'var(--tx-2563eb)', flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 200 }}>
               <p style={{ fontSize: 13, fontWeight: 700, color: '#1e3a8a', margin: 0 }}>
                 Exact original upload — {rawFiles.filter(f => !f.is_directory).length} file{rawFiles.filter(f => !f.is_directory).length !== 1 ? 's' : ''}
                 {rawFiles.some(f => f.is_directory) ? `, ${rawFiles.filter(f => f.is_directory).length} folder${rawFiles.filter(f => f.is_directory).length !== 1 ? 's' : ''}` : ''}
               </p>
-              <p style={{ fontSize: 12, color: '#1d4ed8', margin: '2px 0 0' }}>
+              <p style={{ fontSize: 12, color: 'var(--tx-1d4ed8)', margin: '2px 0 0' }}>
                 Every file exactly as uploaded, independent of what was turned into records — only some of these may be primary data.
               </p>
             </div>
@@ -1570,10 +1570,10 @@ function SourceDetailInner() {
               <div className="overflow-x-auto scrollbar-thin">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr style={{ background: '#f8fafc', borderBottom: '2px solid #e2e8f0' }}>
-                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Name</th>
-                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Review</th>
-                      <th style={{ textAlign: 'right', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Size</th>
+                    <tr style={{ background: 'var(--bg-f8fafc)', borderBottom: '2px solid var(--bd-e2e8f0)' }}>
+                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: 'var(--tx-64748b)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Name</th>
+                      <th style={{ textAlign: 'left', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: 'var(--tx-64748b)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Review</th>
+                      <th style={{ textAlign: 'right', padding: '10px 16px', fontSize: 10, fontWeight: 700, color: 'var(--tx-64748b)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Size</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-50">
@@ -1583,7 +1583,7 @@ function SourceDetailInner() {
                         return (
                           <tr key={'rawfolder-' + item.path}
                             onClick={() => toggleRawFolder(item.path)}
-                            style={{ cursor: 'pointer', background: '#f8fafc' }}
+                            style={{ cursor: 'pointer', background: 'var(--bg-f8fafc)' }}
                             className="hover:bg-gray-100 transition">
                             <td colSpan={3} style={{ padding: '7px 16px', paddingLeft: 16 + item.depth * 20 }}>
                               <div className="flex items-center gap-2">
@@ -1672,31 +1672,31 @@ function SourceDetailInner() {
       <Modal open={showEscalate} onClose={() => !escalating && setShowEscalate(false)} title="Escalate — No Data Found">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12,
-            background: 'linear-gradient(135deg,#fffbeb,#fef3c7)', border: '1px solid #fde68a',
+            background: 'linear-gradient(135deg,var(--bg-fffbeb),#fef3c7)', border: '1px solid var(--bd-fde68a)',
             borderRadius: 12, padding: '14px 16px' }}>
             <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0,
               background: 'linear-gradient(135deg,#f59e0b,#b45309)',
               display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <AlertTriangle className="w-4 h-4" color="#fff" />
             </div>
-            <p style={{ fontSize: 12.5, color: '#92400e', margin: 0, lineHeight: 1.5 }}>
+            <p style={{ fontSize: 12.5, color: 'var(--tx-92400e)', margin: 0, lineHeight: 1.5 }}>
               Per SOP-DS-003 Section 8 — for sources with nothing extractable.
               Goes through the same reviewer approval as a normal record.
             </p>
           </div>
 
           <div>
-            <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 8 }}>
+            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-374151)', display: 'block', marginBottom: 8 }}>
               Reason *
             </label>
             {loadingEscalationReasons ? (
               <div style={{ padding: '14px 12px', textAlign: 'center', fontSize: 12, color: '#94a3b8',
-                background: '#f8fafc', borderRadius: 10, border: '1px solid #f1f5f9' }}>
+                background: 'var(--bg-f8fafc)', borderRadius: 10, border: '1px solid var(--bd-f1f5f9)' }}>
                 Loading reasons…
               </div>
             ) : escalationReasons.length === 0 ? (
-              <p style={{ fontSize: 12, color: '#94a3b8', padding: '10px 12px', background: '#f8fafc',
-                borderRadius: 10, border: '1px solid #f1f5f9', margin: 0 }}>
+              <p style={{ fontSize: 12, color: '#94a3b8', padding: '10px 12px', background: 'var(--bg-f8fafc)',
+                borderRadius: 10, border: '1px solid var(--bd-f1f5f9)', margin: 0 }}>
                 No escalation reasons attached to this project yet — add some in the Resources tab.
               </p>
             ) : (
@@ -1708,9 +1708,9 @@ function SourceDetailInner() {
                       style={{
                         textAlign: 'left', padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
                         cursor: 'pointer', transition: 'all 0.12s',
-                        background: selected ? 'linear-gradient(135deg,#fffbeb,#fef3c7)' : '#fff',
-                        border: `1.5px solid ${selected ? '#f59e0b' : '#e2e8f0'}`,
-                        color: selected ? '#92400e' : '#374151',
+                        background: selected ? 'linear-gradient(135deg,var(--bg-fffbeb),#fef3c7)' : 'var(--bg-fff)',
+                        border: `1.5px solid ${selected ? '#f59e0b' : 'var(--bd-e2e8f0)'}`,
+                        color: selected ? 'var(--tx-92400e)' : 'var(--tx-374151)',
                         display: 'flex', alignItems: 'center', gap: 10,
                       }}>
                       <span style={{
@@ -1729,12 +1729,12 @@ function SourceDetailInner() {
           </div>
 
           <div>
-            <label style={{ fontSize: 13, fontWeight: 700, color: '#374151', display: 'block', marginBottom: 8 }}>
+            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-374151)', display: 'block', marginBottom: 8 }}>
               Note <span style={{ fontWeight: 500, color: '#94a3b8' }}>(optional)</span>
             </label>
             <textarea value={escalateNote} onChange={e => setEscalateNote(e.target.value)} rows={3}
               placeholder="Any extra context for the reviewer"
-              style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid #e2e8f0',
+              style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid var(--bd-e2e8f0)',
                 borderRadius: 10, outline: 'none', resize: 'vertical', boxSizing: 'border-box' }} />
           </div>
 
@@ -1884,10 +1884,10 @@ function SourceDetailInner() {
 
           {splitStatus && (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px',
-              background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 10 }}>
-              <div style={{ width: 14, height: 14, border: '2px solid #bfdbfe', borderTopColor: '#2563eb',
+              background: 'var(--bg-eff6ff)', border: '1px solid var(--bd-bfdbfe)', borderRadius: 10 }}>
+              <div style={{ width: 14, height: 14, border: '2px solid var(--bd-bfdbfe)', borderTopColor: '#2563eb',
                 borderRadius: '50%', animation: 'dep-spin 0.8s linear infinite' }} />
-              <span style={{ fontSize: 12, color: '#1d4ed8', fontWeight: 600 }}>{splitStatus}</span>
+              <span style={{ fontSize: 12, color: 'var(--tx-1d4ed8)', fontWeight: 600 }}>{splitStatus}</span>
               <style>{`@keyframes dep-spin{to{transform:rotate(360deg)}}`}</style>
             </div>
           )}
@@ -1895,14 +1895,14 @@ function SourceDetailInner() {
           {uploading && (
             <div style={{ padding: '0 0 4px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>
+                <span style={{ fontSize: 11, color: 'var(--tx-64748b)', fontWeight: 600 }}>
                   {uploadProgress < 100 ? 'Uploading…' : 'Processing on server…'}
                 </span>
-                <span style={{ fontSize: 11, color: '#64748b', fontWeight: 700 }}>
+                <span style={{ fontSize: 11, color: 'var(--tx-64748b)', fontWeight: 700 }}>
                   {uploadProgress < 100 ? `${uploadProgress}%` : ''}
                 </span>
               </div>
-              <div style={{ background: '#e2e8f0', borderRadius: 99, height: 6, overflow: 'hidden' }}>
+              <div style={{ background: 'var(--bg-e2e8f0)', borderRadius: 99, height: 6, overflow: 'hidden' }}>
                 <div style={{
                   background: uploadProgress < 100 ? '#2563eb' : '#8b5cf6',
                   height: '100%', width: uploadProgress < 100 ? `${uploadProgress}%` : '100%',
@@ -2009,7 +2009,7 @@ function SourceDetailInner() {
         </div>
       </Modal>
       <Modal open={showSchemaJson} onClose={() => setShowSchemaJson(false)} title={schemaDefinition?.name || 'Schema Definition'} size="lg">
-        <div style={{ height: 500, borderRadius: 8, overflow: 'hidden', border: '1px solid #e2e8f0' }}>
+        <div style={{ height: 500, borderRadius: 8, overflow: 'hidden', border: '1px solid var(--bd-e2e8f0)' }}>
           <textarea readOnly value={JSON.stringify(schemaDefinition, null, 2)}
             style={{ width: '100%', height: '100%', fontFamily: 'var(--font-mono)', fontSize: 12, padding: 16, border: 'none', outline: 'none', resize: 'none', background: '#0f172a', color: '#e2e8f0', lineHeight: 1.6 }} />
         </div>
@@ -2084,12 +2084,12 @@ function SourceDetailInner() {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex',
           alignItems: 'center', justifyContent: 'center', zIndex: 200, padding: 16 }}
           onClick={() => { setShowTimeline(null); setTimeline(null) }}>
-          <div style={{ background: '#fff', borderRadius: 16, padding: 24, maxWidth: 620, width: '100%',
+          <div style={{ background: 'var(--bg-fff)', borderRadius: 16, padding: 24, maxWidth: 620, width: '100%',
             maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
               <div>
-                <h3 style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', margin: 0 }}>Record Timeline</h3>
+                <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--tx-0f172a)', margin: 0 }}>Record Timeline</h3>
                 {timeline && (
                   <p style={{ fontSize: 12, color: '#94a3b8', margin: '3px 0 0' }}>
                     {timeline.revision_count} revision{timeline.revision_count !== 1 ? 's' : ''} · {timeline.correction_count} correction{timeline.correction_count !== 1 ? 's' : ''}
@@ -2107,15 +2107,15 @@ function SourceDetailInner() {
             ) : (
               <div>
                 {isAdmin && timeline.current_status === 'pending_admin_review' && (
-                  <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12,
+                  <div style={{ background: 'var(--bg-fffbeb)', border: '1px solid var(--bd-fde68a)', borderRadius: 12,
                     padding: '14px 16px', marginBottom: 18 }}>
-                    <p style={{ fontSize: 13, fontWeight: 700, color: '#92400e', margin: '0 0 8px' }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-92400e)', margin: '0 0 8px' }}>
                       ⚠ This record needs your final approval
                     </p>
                     <textarea value={adminNote} onChange={e => setAdminNote(e.target.value)}
                       placeholder="Optional note (visible in the timeline and export)"
                       rows={2} style={{ width: '100%', fontSize: 13, padding: '8px 10px', borderRadius: 8,
-                        border: '1px solid #fde68a', outline: 'none', resize: 'vertical', marginBottom: 10,
+                        border: '1px solid var(--bd-fde68a)', outline: 'none', resize: 'vertical', marginBottom: 10,
                         boxSizing: 'border-box' }} />
                     <div style={{ display: 'flex', gap: 8 }}>
                       <button onClick={() => handleAdminReview(showTimeline!, 'approve')} disabled={adminReviewing}
@@ -2125,8 +2125,8 @@ function SourceDetailInner() {
                         ✓ Approve — Fully Delivered
                       </button>
                       <button onClick={() => handleAdminReview(showTimeline!, 'return')} disabled={adminReviewing}
-                        style={{ flex: 1, padding: '8px 14px', background: '#fff', color: '#dc2626',
-                          border: '1px solid #fecaca', borderRadius: 8, fontSize: 13, fontWeight: 700,
+                        style={{ flex: 1, padding: '8px 14px', background: 'var(--bg-fff)', color: 'var(--tx-dc2626)',
+                          border: '1px solid var(--bd-fecaca)', borderRadius: 8, fontSize: 13, fontWeight: 700,
                           cursor: adminReviewing ? 'not-allowed' : 'pointer', opacity: adminReviewing ? .6 : 1 }}>
                         ↩ Return for Correction
                       </button>
@@ -2136,9 +2136,9 @@ function SourceDetailInner() {
 
                 <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
                   {[
-                    { label: 'Current', value: timeline.current_status.replace(/_/g, ' '), color: '#2563eb' },
-                    { label: 'Revisions', value: timeline.revision_count, color: '#7c3aed' },
-                    { label: 'Corrections', value: timeline.correction_count, color: '#dc2626' },
+                    { label: 'Current', value: timeline.current_status.replace(/_/g, ' '), color: 'var(--tx-2563eb)' },
+                    { label: 'Revisions', value: timeline.revision_count, color: 'var(--tx-7c3aed)' },
+                    { label: 'Corrections', value: timeline.correction_count, color: 'var(--tx-dc2626)' },
                   ].map(({ label, value, color }) => (
                     <div key={label} style={{ background: color + '15', border: `1px solid ${color}30`,
                       borderRadius: 10, padding: '8px 12px', textAlign: 'center', flex: 1 }}>
@@ -2149,16 +2149,16 @@ function SourceDetailInner() {
                 </div>
 
                 <div style={{ position: 'relative', marginBottom: 16 }}>
-                  <div style={{ position: 'absolute', left: 15, top: 0, bottom: 0, width: 2, background: '#e2e8f0' }} />
+                  <div style={{ position: 'absolute', left: 15, top: 0, bottom: 0, width: 2, background: 'var(--bg-e2e8f0)' }} />
                   {(timeline.events || []).map((ev: any, i: number) => (
                     <div key={i} style={{ display: 'flex', gap: 12, marginBottom: 14, position: 'relative' }}>
-                      <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#fff',
-                        border: '2px solid #e2e8f0', flexShrink: 0, display: 'flex', alignItems: 'center',
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--bg-fff)',
+                        border: '2px solid var(--bd-e2e8f0)', flexShrink: 0, display: 'flex', alignItems: 'center',
                         justifyContent: 'center', fontSize: 12, zIndex: 1 }}>
                         {ev.action.includes('approved') ? '✓' : ev.action.includes('returned') || ev.action.includes('rejected') ? '↩' : '→'}
                       </div>
                       <div style={{ flex: 1, paddingTop: 4 }}>
-                        <p style={{ fontSize: 13, fontWeight: 600, color: '#1e293b', margin: 0, textTransform: 'capitalize' }}>
+                        <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--tx-1e293b)', margin: 0, textTransform: 'capitalize' }}>
                           {ev.action.replace(/_/g, ' ')}
                         </p>
                         <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
@@ -2166,7 +2166,7 @@ function SourceDetailInner() {
                             {fmtDateTime(ev.timestamp)}
                           </span>
                           {ev.seconds_since_previous != null && (
-                            <span style={{ fontSize: 11, color: '#7c3aed', fontWeight: 600 }}>
+                            <span style={{ fontSize: 11, color: 'var(--tx-7c3aed)', fontWeight: 600 }}>
                               ⏱ {ev.seconds_since_previous < 60
                                 ? `${ev.seconds_since_previous}s`
                                 : ev.seconds_since_previous < 3600
@@ -2176,8 +2176,8 @@ function SourceDetailInner() {
                           )}
                         </div>
                         {ev.after_value?.note && (
-                          <p style={{ fontSize: 11, color: '#64748b', marginTop: 3,
-                            background: '#f8fafc', borderRadius: 6, padding: '4px 8px' }}>
+                          <p style={{ fontSize: 11, color: 'var(--tx-64748b)', marginTop: 3,
+                            background: 'var(--bg-f8fafc)', borderRadius: 6, padding: '4px 8px' }}>
                             💬 "{ev.after_value.note}"
                           </p>
                         )}
@@ -2190,24 +2190,24 @@ function SourceDetailInner() {
                 </div>
 
                 {timeline.reviewer_field_comments && Object.keys(timeline.reviewer_field_comments).length > 0 && (
-                  <div style={{ borderTop: '1px solid #f1f5f9', paddingTop: 16 }}>
-                    <p style={{ fontSize: 13, fontWeight: 700, color: '#0f172a', marginBottom: 10 }}>Field Comments</p>
+                  <div style={{ borderTop: '1px solid var(--bd-f1f5f9)', paddingTop: 16 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-0f172a)', marginBottom: 10 }}>Field Comments</p>
                     {Object.entries(timeline.reviewer_field_comments as Record<string, any[]>).map(([field, comments]) => (
                       <div key={field} style={{ marginBottom: 12 }}>
-                        <p style={{ fontSize: 11, fontWeight: 700, color: '#64748b', textTransform: 'uppercase',
+                        <p style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-64748b)', textTransform: 'uppercase',
                           letterSpacing: '.05em', marginBottom: 6 }}>
                           {field === '_general' ? 'General Notes' : field}
                         </p>
                         {comments.map((cm: any, i: number) => (
                           <div key={i} style={{
-                            background: cm.type === 'correction' || cm.type === 'rejection' ? '#fef2f2' : '#f0fdf4',
-                            border: `1px solid ${cm.type === 'correction' || cm.type === 'rejection' ? '#fecaca' : '#bbf7d0'}`,
+                            background: cm.type === 'correction' || cm.type === 'rejection' ? 'var(--bg-fef2f2)' : 'var(--bg-f0fdf4)',
+                            border: `1px solid ${cm.type === 'correction' || cm.type === 'rejection' ? 'var(--bd-fecaca)' : 'var(--bd-bbf7d0)'}`,
                             borderRadius: 10, padding: '8px 12px', marginBottom: 6,
                           }}>
                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                               <span style={{ fontSize: 10, fontWeight: 700,
-                                color: cm.role === 'admin' ? '#dc2626' : cm.role === 'reviewer' ? '#7c3aed' : '#2563eb',
-                                background: cm.role === 'admin' ? '#fef2f2' : cm.role === 'reviewer' ? '#faf5ff' : '#eff6ff',
+                                color: cm.role === 'admin' ? 'var(--tx-dc2626)' : cm.role === 'reviewer' ? 'var(--tx-7c3aed)' : 'var(--tx-2563eb)',
+                                background: cm.role === 'admin' ? 'var(--bg-fef2f2)' : cm.role === 'reviewer' ? 'var(--bg-faf5ff)' : 'var(--bg-eff6ff)',
                                 padding: '1px 6px', borderRadius: 20 }}>
                                 {cm.role || 'reviewer'}
                               </span>
@@ -2216,7 +2216,7 @@ function SourceDetailInner() {
                                 {cm.ts ? fmtDateTime(cm.ts) : ''}
                               </span>
                             </div>
-                            <p style={{ fontSize: 13, color: '#1e293b', margin: 0 }}>{cm.comment}</p>
+                            <p style={{ fontSize: 13, color: 'var(--tx-1e293b)', margin: 0 }}>{cm.comment}</p>
                           </div>
                         ))}
                       </div>
@@ -2240,9 +2240,9 @@ function SourceDetailInner() {
 
 function FileReviewBadge({ status }: { status?: string }) {
   const map: Record<string, { bg: string; color: string; label: string }> = {
-    pending:  { bg: '#f1f5f9', color: '#64748b', label: 'Not Reviewed' },
-    approved: { bg: '#ecfdf5', color: '#059669', label: 'Approved' },
-    rejected: { bg: '#fef2f2', color: '#dc2626', label: 'Rejected' },
+    pending:  { bg: 'var(--bg-f1f5f9)', color: 'var(--tx-64748b)', label: 'Not Reviewed' },
+    approved: { bg: 'var(--bg-ecfdf5)', color: 'var(--tx-059669)', label: 'Approved' },
+    rejected: { bg: 'var(--bg-fef2f2)', color: 'var(--tx-dc2626)', label: 'Rejected' },
   }
   const m = map[status ?? 'pending'] ?? map.pending
   return (
@@ -2283,25 +2283,25 @@ function CsvPreviewTable({ text }: { text: string }) {
   const rows = lines.slice(0, 200).map(l => l.split(','))
   const [header, ...body] = rows
   return (
-    <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'auto' }} className="scrollbar-thin">
+    <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 12, overflow: 'auto' }} className="scrollbar-thin">
       <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
         <thead>
-          <tr style={{ background: '#f8fafc' }}>
+          <tr style={{ background: 'var(--bg-f8fafc)' }}>
             {header.map((h, i) => (
-              <th key={i} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 700, color: '#64748b', borderBottom: '2px solid #e2e8f0', whiteSpace: 'nowrap' }}>{h}</th>
+              <th key={i} style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 700, color: 'var(--tx-64748b)', borderBottom: '2px solid var(--bd-e2e8f0)', whiteSpace: 'nowrap' }}>{h}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           {body.map((row, ri) => (
-            <tr key={ri} style={{ borderBottom: '1px solid #f1f5f9' }}>
-              {row.map((cell, ci) => <td key={ci} style={{ padding: '8px 12px', color: '#1e293b', whiteSpace: 'nowrap' }}>{cell}</td>)}
+            <tr key={ri} style={{ borderBottom: '1px solid var(--bd-f1f5f9)' }}>
+              {row.map((cell, ci) => <td key={ci} style={{ padding: '8px 12px', color: 'var(--tx-1e293b)', whiteSpace: 'nowrap' }}>{cell}</td>)}
             </tr>
           ))}
         </tbody>
       </table>
       {lines.length > 200 && (
-        <p style={{ padding: '8px 12px', fontSize: 11, color: '#94a3b8', borderTop: '1px solid #f1f5f9', margin: 0 }}>
+        <p style={{ padding: '8px 12px', fontSize: 11, color: '#94a3b8', borderTop: '1px solid var(--bd-f1f5f9)', margin: 0 }}>
           Showing first 200 rows of {lines.length}. Download Original for the full file.
         </p>
       )}
@@ -2349,25 +2349,25 @@ function FileViewer({ files, currentIndex, sourceId, isReviewer, onNavigate, onC
   const fileName = file.relative_path.split('/').filter(Boolean).pop() || file.relative_path
 
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: '#fff', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'var(--bg-fff)', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', borderBottom: '1px solid #e2e8f0', flexShrink: 0 }}>
-        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#64748b', padding: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 20px', borderBottom: '1px solid var(--bd-e2e8f0)', flexShrink: 0 }}>
+        <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--tx-64748b)', padding: 4 }}>
           <ArrowLeft className="w-5 h-5" />
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p className="truncate" style={{ fontSize: 14, fontWeight: 700, color: '#0f172a', margin: 0 }}>{fileName}</p>
+          <p className="truncate" style={{ fontSize: 14, fontWeight: 700, color: 'var(--tx-0f172a)', margin: 0 }}>{fileName}</p>
           <p className="truncate" style={{ fontSize: 11, color: '#94a3b8', margin: 0, fontFamily: 'monospace' }}>{file.relative_path}</p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <button onClick={() => onNavigate(Math.max(0, currentIndex - 1))} disabled={currentIndex === 0}
-            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#374151',
+            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--bd-e2e8f0)', background: 'var(--bg-fff)', fontSize: 12, fontWeight: 600, color: 'var(--tx-374151)',
               cursor: currentIndex === 0 ? 'not-allowed' : 'pointer', opacity: currentIndex === 0 ? 0.4 : 1 }}>
             ← Prev
           </button>
           <span style={{ fontSize: 12, color: '#94a3b8', minWidth: 50, textAlign: 'center' }}>{currentIndex + 1} / {files.length}</span>
           <button onClick={() => onNavigate(Math.min(files.length - 1, currentIndex + 1))} disabled={currentIndex === files.length - 1}
-            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid #e2e8f0', background: '#fff', fontSize: 12, fontWeight: 600, color: '#374151',
+            style={{ padding: '6px 12px', borderRadius: 8, border: '1px solid var(--bd-e2e8f0)', background: 'var(--bg-fff)', fontSize: 12, fontWeight: 600, color: 'var(--tx-374151)',
               cursor: currentIndex === files.length - 1 ? 'not-allowed' : 'pointer', opacity: currentIndex === files.length - 1 ? 0.4 : 1 }}>
             Next →
           </button>
@@ -2377,13 +2377,13 @@ function FileViewer({ files, currentIndex, sourceId, isReviewer, onNavigate, onC
       {/* Body */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         {/* Content preview */}
-        <div className="scrollbar-thin" style={{ flex: 1, overflow: 'auto', padding: 20, background: '#f8fafc' }}>
+        <div className="scrollbar-thin" style={{ flex: 1, overflow: 'auto', padding: 20, background: 'var(--bg-f8fafc)' }}>
           {loading ? (
             <div className="flex justify-center py-16"><Spinner className="w-6 h-6" /></div>
           ) : content?.kind === 'unsupported' ? (
             <div style={{ textAlign: 'center', padding: 60 }}>
               <FileIcon className="w-10 h-10 mx-auto text-gray-300 mb-3" />
-              <p style={{ fontSize: 14, color: '#64748b', fontWeight: 600, margin: 0 }}>Can't preview this file type</p>
+              <p style={{ fontSize: 14, color: 'var(--tx-64748b)', fontWeight: 600, margin: 0 }}>Can't preview this file type</p>
               <p style={{ fontSize: 12, color: '#94a3b8', marginTop: 4 }}>Use "Download Original" from the Files tab to view it.</p>
             </div>
           ) : content?.kind === 'json' ? (
@@ -2393,14 +2393,14 @@ function FileViewer({ files, currentIndex, sourceId, isReviewer, onNavigate, onC
           ) : content?.kind === 'csv' ? (
             <CsvPreviewTable text={content.content} />
           ) : (
-            <pre className="scrollbar-thin" style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, padding: 20, fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', color: '#1e293b', margin: 0, overflow: 'auto' }}>
+            <pre className="scrollbar-thin" style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 12, padding: 20, fontSize: 13, lineHeight: 1.7, whiteSpace: 'pre-wrap', color: 'var(--tx-1e293b)', margin: 0, overflow: 'auto' }}>
               {content?.content}
             </pre>
           )}
         </div>
 
         {/* Review panel */}
-        <div className="scrollbar-thin" style={{ width: 320, borderLeft: '1px solid #e2e8f0', padding: 20, overflowY: 'auto', flexShrink: 0 }}>
+        <div className="scrollbar-thin" style={{ width: 320, borderLeft: '1px solid var(--bd-e2e8f0)', padding: 20, overflowY: 'auto', flexShrink: 0 }}>
           <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '.05em', marginBottom: 10 }}>Review</p>
 
           <div style={{ marginBottom: 16 }}>
@@ -2408,20 +2408,20 @@ function FileViewer({ files, currentIndex, sourceId, isReviewer, onNavigate, onC
           </div>
 
           {file.reviewed_at && (
-            <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 10, padding: 12, marginBottom: 16 }}>
+            <div style={{ background: 'var(--bg-f8fafc)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
               <p style={{ fontSize: 11, color: '#94a3b8', margin: '0 0 4px' }}>
                 {file.review_status === 'approved' ? 'Approved' : 'Rejected'} {safeFromNow(file.reviewed_at)}
               </p>
-              {file.review_note && <p style={{ fontSize: 13, color: '#1e293b', margin: 0 }}>"{file.review_note}"</p>}
+              {file.review_note && <p style={{ fontSize: 13, color: 'var(--tx-1e293b)', margin: 0 }}>"{file.review_note}"</p>}
             </div>
           )}
 
           {isReviewer ? (
             <>
-              <label style={{ fontSize: 12, fontWeight: 600, color: '#374151', display: 'block', marginBottom: 6 }}>Note (optional)</label>
+              <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--tx-374151)', display: 'block', marginBottom: 6 }}>Note (optional)</label>
               <textarea value={reviewNote} onChange={e => setReviewNote(e.target.value)} rows={4}
                 placeholder="Any notes about this file…"
-                style={{ width: '100%', fontSize: 13, padding: '8px 10px', borderRadius: 8, border: '1px solid #e2e8f0', outline: 'none', resize: 'vertical', marginBottom: 12, boxSizing: 'border-box' }} />
+                style={{ width: '100%', fontSize: 13, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--bd-e2e8f0)', outline: 'none', resize: 'vertical', marginBottom: 12, boxSizing: 'border-box' }} />
               <div style={{ display: 'flex', gap: 8 }}>
                 <button onClick={() => handleReview('approve')} disabled={reviewing}
                   style={{ flex: 1, padding: '9px 14px', background: '#059669', color: '#fff', border: 'none', borderRadius: 8, fontSize: 13, fontWeight: 700,
@@ -2429,7 +2429,7 @@ function FileViewer({ files, currentIndex, sourceId, isReviewer, onNavigate, onC
                   ✓ Approve
                 </button>
                 <button onClick={() => handleReview('reject')} disabled={reviewing}
-                  style={{ flex: 1, padding: '9px 14px', background: '#fff', color: '#dc2626', border: '1px solid #fecaca', borderRadius: 8, fontSize: 13, fontWeight: 700,
+                  style={{ flex: 1, padding: '9px 14px', background: 'var(--bg-fff)', color: 'var(--tx-dc2626)', border: '1px solid var(--bd-fecaca)', borderRadius: 8, fontSize: 13, fontWeight: 700,
                     cursor: reviewing ? 'not-allowed' : 'pointer', opacity: reviewing ? .6 : 1 }}>
                   ✗ Reject
                 </button>
@@ -2439,7 +2439,7 @@ function FileViewer({ files, currentIndex, sourceId, isReviewer, onNavigate, onC
             <p style={{ fontSize: 12, color: '#94a3b8' }}>Only reviewers, QA leads, or admins can review files.</p>
           )}
 
-          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid #f1f5f9' }}>
+          <div style={{ marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--bd-f1f5f9)' }}>
             <p style={{ fontSize: 11, color: '#94a3b8', margin: 0 }}>Size: {file.size_bytes ? `${(file.size_bytes / 1024).toFixed(1)} KB` : '—'}</p>
           </div>
         </div>

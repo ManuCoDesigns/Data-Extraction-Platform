@@ -11,19 +11,19 @@ export function RecordRequiredBar({ fields, data }: { fields: SchemaFieldLite[];
   const done = c.missing.length === 0
   const pct = Math.round((c.filled / c.total) * 100)
   return (
-    <div style={{ background: done ? '#f0fdf4' : '#fffbeb', borderBottom: `1px solid ${done ? '#bbf7d0' : '#fde68a'}`, padding: '8px 24px', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0, flexWrap: 'wrap' }}
+    <div style={{ background: done ? 'var(--bg-f0fdf4)' : 'var(--bg-fffbeb)', borderBottom: `1px solid ${done ? 'var(--bd-bbf7d0)' : 'var(--bd-fde68a)'}`, padding: '8px 24px', display: 'flex', alignItems: 'center', gap: 14, flexShrink: 0, flexWrap: 'wrap' }}
       role="status" aria-label={`Required fields: ${c.filled} of ${c.total} filled`}>
-      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: done ? '#047857' : '#b45309' }}>
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: done ? 'var(--tx-047857)' : 'var(--tx-b45309)' }}>
         {done ? <CheckCircle2 size={14} /> : <CircleAlert size={14} />}
         Required fields {c.filled} of {c.total}
       </span>
       <span style={{ width: 120, height: 6, borderRadius: 6, background: done ? '#bbf7d0' : '#fde68a', overflow: 'hidden', flexShrink: 0 }}>
         <span style={{ display: 'block', height: '100%', width: `${pct}%`, background: done ? '#10b981' : '#f59e0b', transition: 'width .3s' }} />
       </span>
-      {done ? <span style={{ fontSize: 12, color: '#047857' }}>Every required field has a value.</span> : (
+      {done ? <span style={{ fontSize: 12, color: 'var(--tx-047857)' }}>Every required field has a value.</span> : (
         <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-          <span style={{ fontSize: 12, color: '#92400e' }}>Missing:</span>
-          {c.missing.map(m => <span key={m} style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: '#fff', border: '1px solid #fcd34d', color: '#92400e' }}>{label(m)}</span>)}
+          <span style={{ fontSize: 12, color: 'var(--tx-92400e)' }}>Missing:</span>
+          {c.missing.map(m => <span key={m} style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 20, background: 'var(--bg-fff)', border: '1px solid var(--bd-fcd34d)', color: 'var(--tx-92400e)' }}>{label(m)}</span>)}
         </span>
       )}
     </div>

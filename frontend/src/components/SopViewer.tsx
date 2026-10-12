@@ -289,7 +289,7 @@ export function SopViewer({ data }: { data: any }) {
     <div className="space-y-5 sop-print-root">
       <style>{PRINT_CSS}</style>
       <div className="sop-print-only" style={{ marginBottom: 10 }}>
-        <p style={{ margin: 0, fontSize: 12, color: '#374151' }}>
+        <p style={{ margin: 0, fontSize: 12, color: 'var(--tx-374151)' }}>
           {[data.source_name, data.item_id ? `Xtrium item #${data.item_id}` : null, data.website_url].filter(Boolean).join(' · ')}
         </p>
         <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9ca3af' }}>Saved {new Date().toLocaleString()}</p>

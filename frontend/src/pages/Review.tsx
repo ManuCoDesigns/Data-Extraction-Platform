@@ -174,9 +174,9 @@ export function ReviewPage() {
 
       {/* Status explanation banner */}
       {filter === 'pending' && allCounts.pending === 0 && allCounts.approved > 0 && (
-        <div style={{ background: '#ecfdf5', border: '1px solid #6ee7b7', borderRadius: 12, padding: '12px 16px', margin: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ background: 'var(--bg-ecfdf5)', border: '1px solid var(--bd-6ee7b7)', borderRadius: 12, padding: '12px 16px', margin: '0 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <CheckCircle size={16} color="#059669" />
-          <p style={{ fontSize: 13, color: '#065f46', margin: 0 }}>
+          <p style={{ fontSize: 13, color: 'var(--tx-065f46)', margin: 0 }}>
             No pending records — all {allCounts.approved} records have been approved! Click <strong>Approved</strong> above to view them, or go back to submit.
           </p>
         </div>

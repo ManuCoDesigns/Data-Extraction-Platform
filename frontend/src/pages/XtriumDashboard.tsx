@@ -11,14 +11,14 @@ import { fmtDateTime, fmtTime } from '@/lib/prefs'
 
 // ── Our own internal statuses ────────────────────────────────────────────────
 const STATUS_META: Record<string, { label: string; color: string }> = {
-  not_started:        { label: 'Not Started',       color: '#64748b' },
-  extracting:         { label: 'Extracting',        color: '#2563eb' },
-  needs_fixes:        { label: 'Needs Fixes',       color: '#d97706' },
+  not_started:        { label: 'Not Started',       color: 'var(--tx-64748b)' },
+  extracting:         { label: 'Extracting',        color: 'var(--tx-2563eb)' },
+  needs_fixes:        { label: 'Needs Fixes',       color: 'var(--tx-d97706)' },
   ready_for_review:   { label: 'Ready for Review',  color: '#4f46e5' },
-  in_review:          { label: 'In Review',         color: '#7c3aed' },
-  changes_requested:  { label: 'Changes Requested', color: '#dc2626' },
-  llm_verification:   { label: 'LLM Verification',  color: '#7c3aed' },
-  approved:           { label: 'Approved',          color: '#059669' },
+  in_review:          { label: 'In Review',         color: 'var(--tx-7c3aed)' },
+  changes_requested:  { label: 'Changes Requested', color: 'var(--tx-dc2626)' },
+  llm_verification:   { label: 'LLM Verification',  color: 'var(--tx-7c3aed)' },
+  approved:           { label: 'Approved',          color: 'var(--tx-059669)' },
 }
 
 const IN_PROGRESS_STATUSES = ['extracting', 'needs_fixes', 'ready_for_review', 'in_review', 'changes_requested', 'llm_verification']
@@ -715,7 +715,7 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound, onSync, 
   }, [onClose])
 
   const item = source.xtrium
-  const ours = STATUS_META[source.status] ?? { label: source.status, color: '#64748b' }
+  const ours = STATUS_META[source.status] ?? { label: source.status, color: 'var(--tx-64748b)' }
   // The full SOP has its own card and page, so its summary object isn't repeated in the field list.
   const extras = item ? Object.keys(item).filter(k => !KNOWN_KEYS.has(k) && k !== 'sop') : []
   const canSubmit = source.status === 'approved'
