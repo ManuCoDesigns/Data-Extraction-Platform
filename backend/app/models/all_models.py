@@ -717,3 +717,4 @@ class UserSettings(Base):
     totp_enabled = Column(Boolean, default=False, server_default="false", nullable=False)
     failed_logins = Column(Integer, default=0, server_default="0", nullable=False)
     locked_until = Column(DateTime(timezone=True), nullable=True)
+    prefs = Column(JSON, nullable=True)   # display choices: timezone, date_format, time_format

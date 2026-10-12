@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 from app.core.config import settings
@@ -51,6 +52,8 @@ app = FastAPI(
 # ─── CORS ─────────────────────────────────────────────────────────────────────
 _explicit_origins = [o.strip() for o in (settings.CORS_ORIGINS or []) if o.strip()]
 
+# Compress JSON responses: the sources list shrinks about tenfold, which matters on slow links.
+app.add_middleware(GZipMiddleware, minimum_size=1024)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_explicit_origins,

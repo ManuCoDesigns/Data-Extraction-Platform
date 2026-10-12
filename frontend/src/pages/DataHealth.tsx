@@ -33,22 +33,24 @@ export function LinkChip({ status, detail }: { status: LinkStatus; detail?: stri
 export function DataHealthPage() {
   const { user } = useAuthStore()
   const isLead = ['org_admin', 'project_admin', 'qa_lead'].some(r => user?.roles?.includes(r))
-  const [tab, setTab] = useState<'links' | 'dups'>('links')
+  const [tab, setTab] = useState<'links' | 'dups' | 'srcdups'>('links')
   const [projects, setProjects] = useState<any[]>([])
   const [project, setProject] = useState('')
   const [links, setLinks] = useState<LinkRow[]>([])
   const [dups, setDups] = useState<any[]>([])
+  const [srcDups, setSrcDups] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<LinkStatus | 'all'>('all')
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null)
 
   const load = useCallback(async () => {
     try {
-      const [l, d] = await Promise.all([
+      const [l, d, sd] = await Promise.all([
         enhApi.links(project || undefined),
         isLead ? enhApi.duplicates(project || undefined) : Promise.resolve({ groups: [] }),
+        isLead ? enhApi.duplicateSources(project || undefined) : Promise.resolve({ groups: [] }),
       ])
-      setLinks(l.items); setDups(d.groups)
+      setLinks(l.items); setDups(d.groups); setSrcDups(sd.groups)
     } catch { toast.error("Couldn't load data health") } finally { setLoading(false) }
   }, [project, isLead])
 
@@ -116,7 +118,8 @@ export function DataHealthPage() {
 
       <Tabs value={tab} onChange={setTab} items={[
         { key: 'links', label: 'Links', count: problems, tone: problems ? 'red' : 'gray' },
-        ...(isLead ? [{ key: 'dups' as const, label: 'Duplicates', count: dups.length, tone: (dups.length ? 'amber' : 'gray') as Tone }] : []),
+        ...(isLead ? [{ key: 'srcdups' as const, label: 'Duplicate sources', count: srcDups.length, tone: (srcDups.length ? 'amber' : 'gray') as Tone }] : []),
+        ...(isLead ? [{ key: 'dups' as const, label: 'Duplicate records', count: dups.length, tone: (dups.length ? 'amber' : 'gray') as Tone }] : []),
       ]} />
 
       {loading ? <Skeletons rows={5} /> : tab === 'links' ? (
@@ -185,6 +188,34 @@ export function DataHealthPage() {
           <p className="text-xs text-gray-400 m-0 flex items-start gap-1.5"><ShieldAlert className="w-3.5 h-3.5 mt-0.5 shrink-0" />
             The check works like a quick visit from our server. Some sites refuse it even though they open in a browser, so open a flagged link yourself and use <b>Mark as</b> when the check is wrong. Marks are kept until you re-check everything.</p>
         </>
+      ) : tab === 'srcdups' ? (
+        <Panel flush title="Companies that look like they were added twice" subtitle="Same website, or the same name once endings like Ltd, Inc and N.V. are ignored. Keep one and remove or merge the other before extraction starts.">
+          {srcDups.length === 0 ? <Blank icon={<CheckCircle2 className="w-5 h-5" />} title="No duplicate sources" text="No two sources you can see share a website or a company name." /> : (
+            <ul className="divide-y divide-gray-50 m-0 p-0 list-none">
+              {srcDups.map(g => (
+                <li key={g.items.map((i: any) => i.source_id).join()} className="px-5 py-4">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <Copy className="w-4 h-4 text-amber-500" />
+                    <span className="text-sm font-semibold text-gray-900">{g.items[0]?.name ?? g.key}</span>
+                    {g.reasons.map((r: string) => <Chip key={r} tone={r === 'same website' ? 'red' : 'amber'}>{r}</Chip>)}
+                    <span className="text-xs text-gray-400 tabular-nums">{g.count} sources</span>
+                  </div>
+                  <ul className="m-0 mt-2.5 p-0 list-none space-y-1.5">
+                    {g.items.map((i: any) => (
+                      <li key={i.source_id} className="flex items-center gap-2 text-sm flex-wrap">
+                        <Link to={`/projects/${i.project_id}/sources/${i.source_id}`} className="font-medium text-gray-800 hover:text-brand-600">{i.name}</Link>
+                        {i.item_no && <span className="text-xs text-gray-400">item #{i.item_no}</span>}
+                        <span className="text-xs text-gray-400">{String(i.status).replace(/_/g, ' ')}</span>
+                        {i.extractor && <span className="text-xs text-gray-400">· {i.extractor}</span>}
+                        {i.website && <span className="text-xs text-gray-400 truncate max-w-[16rem]">{i.website}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
       ) : (
         <Panel flush title="Names that appear more than once" subtitle="Across sources, or twice inside one source. Check whether they are real duplicates before sending.">
           {dups.length === 0 ? <Blank icon={<CheckCircle2 className="w-5 h-5" />} title="No duplicates found" text="No record name appears twice in the sources you can see." /> : (

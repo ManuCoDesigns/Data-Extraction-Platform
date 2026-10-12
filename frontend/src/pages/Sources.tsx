@@ -14,6 +14,9 @@ import { SourcesWorkbench } from '@/components/SourcesWorkbench'
 import { enhApi } from '@/api/client'
 import { saveNav } from '@/lib/sourceNav'
 import { isPeerOf } from '@/lib/peers'
+import { SavedViews } from '@/components/enh/SavedViews'
+import { toCsv, downloadText } from '@/lib/csv'
+import { fmtDateTime } from '@/lib/prefs'
 
 const STATUS_META: Record<SourceStatus, { label: string; color: 'gray' | 'amber' | 'red' | 'blue' | 'purple' | 'green' | 'indigo' }> = {
   not_started:       { label: 'Not Started',       color: 'gray' },
@@ -195,6 +198,21 @@ export function SourcesPage() {
     writeSavedState(view, { search, projectFilter: isGlobal ? projectFilter : '', mineOnly })
   }, [view, search, projectFilter, mineOnly])
 
+  const exportCsv = () => {
+    const proj = Object.fromEntries(projects.map(p => [p.id, p.name]))
+    const head = ['Source', 'Project', 'Status', 'Extractor', 'Reviewer', 'Peer reviews', 'Website', 'Link check', 'Records', 'Valid', 'Approved', 'Xtrium item', 'Last updated']
+    const rows = filtered.map(s => [
+      s.name, proj[s.project_id] ?? project?.name ?? '', String(s.status).replace(/_/g, ' '),
+      s.assigned_extractor_name ?? '', s.assigned_reviewer_name ?? '',
+      s.peer_total ? `${s.peer_submitted ?? 0} of ${s.peer_total} submitted` : '',
+      s.website_url ?? '', linkStatus[s.id] ?? '',
+      s.total_records, s.valid_records, s.approved_records,
+      (s as any).external_ref_id ?? '', fmtDateTime((s as any).updated_at),
+    ])
+    downloadText(`sources_${new Date().toISOString().slice(0, 10)}.csv`, toCsv(head, rows))
+    toast.success(`Exported ${rows.length} source${rows.length === 1 ? '' : 's'}`)
+  }
+
   const handleDeleteSource = async () => {
     if (!deleteSource) return
     setDeleting(true)
@@ -321,6 +339,13 @@ export function SourcesPage() {
             {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
           </Select>
         )}
+
+        <SavedViews
+          current={{ view, search, projectFilter: isGlobal ? projectFilter : '', mineOnly }}
+          onApply={v => { setView(v.view as any); setSearch(v.search); if (isGlobal) setProjectFilter(v.projectFilter); setMineOnly(v.mineOnly) }}
+          exportCount={filtered.length}
+          onExport={exportCsv}
+        />
 
         <div className="relative ml-auto">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-400" />

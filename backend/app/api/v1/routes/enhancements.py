@@ -13,8 +13,8 @@ from app.core.security import get_current_user, verify_password
 from app.core.source_access import project_scopes, restrict_sources_query, is_org_admin
 from app.db.session import get_db
 from app.models.all_models import (
-    AuditLog, ClientQuestion, Project, ProjectMember, Source, SourceLinkCheck, SourcePeerReview,
-    SourceStatus, User, UserSettings,
+    AuditAction, AuditLog, ClientQuestion, ExtractedRecord, ExtractionJob, Project, ProjectMember, ReviewStatus, Source, SourceLinkCheck,
+    SourcePeerReview, SourceStatus, User, UserSettings,
 )
 from app.services import enh
 
@@ -137,6 +137,13 @@ def mark_link(source_id: str, body: LinkMark, db: Session = Depends(get_db), use
 def duplicates(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _need_lead(user)
     groups = enh.find_duplicates(db, user, project_id)
+    return {"groups": groups, "total": len(groups)}
+
+
+@router.get("/duplicates/sources")
+def duplicate_sources(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    groups = enh.find_duplicate_sources(db, user, project_id)
     return {"groups": groups, "total": len(groups)}
 
 
@@ -378,9 +385,13 @@ def stats_me(days: int = Query(30, ge=1, le=365), db: Session = Depends(get_db),
 
 class BulkBody(BaseModel):
     source_ids: list[str]
-    action: str                      # assign_extractor | unassign_extractor | add_peers | remove_peers
+    action: str                      # assign_extractor | unassign_extractor | add_peers | remove_peers | send_back | approve
     user_id: str | None = None
     user_ids: list[str] | None = None
+    note: str | None = None          # required for send_back: the extractor sees it
+
+
+REVIEW_STAGES = {SourceStatus.READY_FOR_REVIEW, SourceStatus.IN_REVIEW, SourceStatus.LLM_VERIFICATION}
 
 
 def _eligible(db, source: Source, u: User) -> str | None:
@@ -411,13 +422,50 @@ def bulk(body: BulkBody, db: Session = Depends(get_db), user: User = Depends(get
     elif body.action in ("add_peers", "remove_peers"):
         if not ids:
             raise HTTPException(status_code=422, detail="Choose at least one person.")
-    elif body.action != "unassign_extractor":
+    elif body.action == "send_back":
+        if len((body.note or "").strip()) < 3:
+            raise HTTPException(status_code=422, detail="Write a short note so the extractor knows what to fix.")
+    elif body.action not in ("unassign_extractor", "approve"):
         raise HTTPException(status_code=422, detail="Unknown action.")
     people = {u.id: u for u in db.query(User).filter(User.id.in_(ids), User.is_active == True).all()} if ids else {}  # noqa: E712
 
     for s in sources:
         if s.status == SourceStatus.APPROVED:
             results.append({"source_id": s.id, "ok": False, "reason": "Already approved"})
+            continue
+        if body.action == "send_back":
+            if s.status not in REVIEW_STAGES:
+                results.append({"source_id": s.id, "ok": False, "reason": "Only work that has been delivered for review can be sent back"})
+                continue
+            from app.api.v1.routes.sources import _reset_peer_reviews
+            s.status = SourceStatus.CHANGES_REQUESTED
+            _reset_peer_reviews(s)
+            if s.assigned_extractor_id:
+                notify(db, s.assigned_extractor_id, f"Sent back for fixes: '{s.name}'", body.note.strip(), src_link(s), "sent_back", ACTION)
+            db.add(AuditLog(user_id=user.id, project_id=s.project_id, action=AuditAction.SOURCE_STATUS_CHANGED,
+                            after_value={"source_id": s.id, "to": "changes_requested", "note": body.note.strip(), "bulk": True}))
+            results.append({"source_id": s.id, "ok": True})
+            continue
+        if body.action == "approve":
+            from app.api.v1.routes.sources import approve_source
+            if s.status not in REVIEW_STAGES:
+                results.append({"source_id": s.id, "ok": False, "reason": "Not at the review stage yet"})
+                continue
+            waiting = [r for r in s.peer_reviews if r.status != "submitted"]
+            if waiting:
+                results.append({"source_id": s.id, "ok": False, "reason": f"Waiting for {len(waiting)} peer review{'s' if len(waiting) > 1 else ''}"})
+                continue
+            open_recs = (db.query(ExtractedRecord).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+                         .filter(ExtractionJob.source_id == s.id, ExtractedRecord.review_status != ReviewStatus.APPROVED).count())
+            if open_recs:
+                results.append({"source_id": s.id, "ok": False, "reason": f"{open_recs} record{'s' if open_recs > 1 else ''} not approved yet. Open it to approve or override"})
+                continue
+            try:
+                approve_source(s.id, db, user)     # same rules and audit trail as approving one source
+                results.append({"source_id": s.id, "ok": True})
+            except HTTPException as e:
+                db.rollback()
+                results.append({"source_id": s.id, "ok": False, "reason": str(e.detail)})
             continue
         if body.action == "assign_extractor":
             bad = _eligible(db, s, target)
@@ -490,10 +538,16 @@ def people(project_id: str | None = None, db: Session = Depends(get_db), user: U
 
 # ─── My settings and two-step sign-in ────────────────────────────────────────
 
+DEFAULT_PREFS = {"timezone": "Africa/Nairobi", "date_format": "DMY", "time_format": "24h"}
+DATE_FORMATS = {"DMY", "MDY", "YMD"}
+TIME_FORMATS = {"12h", "24h"}
+
+
 def _settings_out(db, user):
     s = _settings(db, user.id)
     return {"email_alerts": s.email_alerts, "email_digest": s.email_digest, "totp_enabled": s.totp_enabled,
-            "email_configured": mail_enabled(), "is_lead": _lead(user), "email": user.email}
+            "email_configured": mail_enabled(), "is_lead": _lead(user), "email": user.email,
+            "prefs": {**DEFAULT_PREFS, **(s.prefs or {})}}
 
 
 @router.get("/me/settings")
@@ -506,6 +560,27 @@ def my_settings(db: Session = Depends(get_db), user: User = Depends(get_current_
 class SettingsIn(BaseModel):
     email_alerts: bool | None = None
     email_digest: bool | None = None
+    prefs: dict | None = None
+
+
+def _clean_prefs(raw: dict, current: dict) -> dict:
+    out = {**DEFAULT_PREFS, **(current or {})}
+    if "timezone" in raw:
+        from zoneinfo import ZoneInfo
+        try:
+            ZoneInfo(str(raw["timezone"]))
+        except Exception:
+            raise HTTPException(status_code=422, detail="That timezone isn't recognised.")
+        out["timezone"] = str(raw["timezone"])
+    if "date_format" in raw:
+        if raw["date_format"] not in DATE_FORMATS:
+            raise HTTPException(status_code=422, detail="Pick a date format from the list.")
+        out["date_format"] = raw["date_format"]
+    if "time_format" in raw:
+        if raw["time_format"] not in TIME_FORMATS:
+            raise HTTPException(status_code=422, detail="Pick 12-hour or 24-hour time.")
+        out["time_format"] = raw["time_format"]
+    return out
 
 
 @router.put("/me/settings")
@@ -515,6 +590,8 @@ def update_settings(body: SettingsIn, db: Session = Depends(get_db), user: User 
         s.email_alerts = body.email_alerts
     if body.email_digest is not None:
         s.email_digest = body.email_digest
+    if body.prefs is not None:
+        s.prefs = _clean_prefs(body.prefs, s.prefs)
     db.commit()
     return _settings_out(db, user)
 

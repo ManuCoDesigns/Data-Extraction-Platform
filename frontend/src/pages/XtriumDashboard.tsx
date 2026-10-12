@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { xtriumApi } from '@/api/client'
 import { cn, toast } from '@/components/ui'
+import { fmtDateTime, fmtTime } from '@/lib/prefs'
 
 // ── Our own internal statuses ────────────────────────────────────────────────
 const STATUS_META: Record<string, { label: string; color: string }> = {
@@ -264,7 +265,7 @@ function timeAgo(iso: string | null) {
 function formatDate(iso: string | null) {
   if (!iso) return null
   const d = parseTs(iso)
-  return isNaN(d.getTime()) ? iso : d.toLocaleString()
+  return isNaN(d.getTime()) ? iso : fmtDateTime(d)
 }
 
 function dayLabel(iso: string): string {
@@ -279,7 +280,7 @@ function dayLabel(iso: string): string {
 
 function clockTime(iso: string): string {
   const d = parseTs(iso)
-  return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return isNaN(d.getTime()) ? '' : fmtTime(d)
 }
 
 // ── Xtrium's fields, in the order and wording Xtrium uses ────────────────────

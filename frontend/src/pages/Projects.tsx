@@ -6,6 +6,7 @@ import { Modal, Input, Textarea, Select, ConfirmDialog, Avatar, toast, cn } from
 import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
 import type { Project } from '@/types'
+import { fmtDate } from '@/lib/prefs'
 
 export function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([])
@@ -409,7 +410,7 @@ export function ProjectsPage() {
                       </div>
                     </td>
                     <td style={{ padding: '14px 16px', fontSize: 12, color: '#94a3b8' }}>
-                      {p.updated_at ? new Date(p.updated_at).toLocaleDateString() : '—'}
+                      {fmtDate(p.updated_at)}
                     </td>
                     <td style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end' }}>

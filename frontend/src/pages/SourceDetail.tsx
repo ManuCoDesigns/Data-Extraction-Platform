@@ -22,6 +22,7 @@ import type { Source, SourceStatus, Project, Schema, User } from '@/types'
 import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
 import { format, formatDistanceToNow } from 'date-fns'
+import { fmtDateTime } from '@/lib/prefs'
 
 const STATUS_META: Record<SourceStatus, { label: string; color: 'gray'|'amber'|'red'|'blue'|'purple'|'green'|'indigo' }> = {
   not_started:       { label: 'Not Started',      color: 'gray' },
@@ -2162,7 +2163,7 @@ function SourceDetailInner() {
                         </p>
                         <div style={{ display: 'flex', gap: 8, marginTop: 2 }}>
                           <span style={{ fontSize: 11, color: '#94a3b8' }}>
-                            {ev.timestamp ? new Date(ev.timestamp).toLocaleString() : '—'}
+                            {fmtDateTime(ev.timestamp)}
                           </span>
                           {ev.seconds_since_previous != null && (
                             <span style={{ fontSize: 11, color: '#7c3aed', fontWeight: 600 }}>
@@ -2212,7 +2213,7 @@ function SourceDetailInner() {
                               </span>
                               <span style={{ fontSize: 11, color: '#94a3b8' }}>{cm.user}</span>
                               <span style={{ fontSize: 11, color: '#94a3b8', marginLeft: 'auto' }}>
-                                {cm.ts ? new Date(cm.ts).toLocaleString() : ''}
+                                {cm.ts ? fmtDateTime(cm.ts) : ''}
                               </span>
                             </div>
                             <p style={{ fontSize: 13, color: '#1e293b', margin: 0 }}>{cm.comment}</p>

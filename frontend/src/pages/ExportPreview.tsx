@@ -14,6 +14,7 @@ import { useParams, Link } from 'react-router-dom'
 import { Download, ChevronRight, ChevronDown, CheckCircle, Folder, FileJson, ArrowLeft, RefreshCw } from 'lucide-react'
 import { projectsApi } from '@/api/client'
 import { Button, Spinner, EmptyState, Badge, toast } from '@/components/ui'
+import { fmtDate } from '@/lib/prefs'
 
 interface PreviewRecord {
   record_id: string
@@ -215,7 +216,7 @@ export function ExportPreviewPage() {
                 <span style={{ fontSize: 10, background: '#ecfdf5', color: '#059669', border: '1px solid #6ee7b7', padding: '2px 8px', borderRadius: 20, fontWeight: 600 }}>✓ Approved</span>
                 <span style={{ fontSize: 12, color: '#94a3b8', marginLeft: 'auto' }}>
                   {source.record_count} record{source.record_count !== 1 ? 's' : ''}
-                  {source.approved_at && ` · ${new Date(source.approved_at).toLocaleDateString()}`}
+                  {source.approved_at && ` · ${fmtDate(source.approved_at)}`}
                 </span>
               </div>
 

@@ -9,6 +9,7 @@ import { Card, Badge, Avatar, Button, Skeleton as UiSkeleton, safeFromNow, cn } 
 import { useAuthStore } from '@/store/auth'
 import { WorkDashboard } from './WorkDashboard'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell } from 'recharts'
+import { fmtTime } from '@/lib/prefs'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 function greeting() {
@@ -280,7 +281,7 @@ function AdminDashboard() {
   return (
     <div className="px-7 py-6 max-w-[1200px] mx-auto">
       <DashboardHeader
-        subtitle={`Platform overview · Updated ${ts.toLocaleTimeString()}`}
+        subtitle={`Platform overview · Updated ${fmtTime(ts)}`}
         ctaLabel="All Sources" ctaTo="/sources" ctaIcon={<Database className="w-3.5 h-3.5" />}
         onRefresh={() => load({ silent: true })} refreshing={refreshing}
       />

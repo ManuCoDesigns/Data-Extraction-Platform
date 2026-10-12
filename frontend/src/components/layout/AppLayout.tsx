@@ -1,6 +1,7 @@
 import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
 import { useEffect, useState, useRef } from 'react'
+import { usePrefs } from '@/lib/prefs'
 import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
@@ -36,6 +37,7 @@ export function AppLayout() {
   const isTeamLead       = ['org_admin', 'project_admin', 'qa_lead'].some(r => user?.roles?.includes(r))
 
   useEffect(() => { fetchMe() }, [])
+  useEffect(() => { if (user?.id) usePrefs.getState().load() }, [user?.id])
   useEffect(() => { setMobileOpen(false) }, [location.pathname])
 
   useEffect(() => {

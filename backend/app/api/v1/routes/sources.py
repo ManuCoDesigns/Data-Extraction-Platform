@@ -2409,10 +2409,17 @@ def export_timesheet(
             u = db.query(User).filter(User.id == s.assigned_extractor_id).first()
             extractor_name = u.full_name if u else ""
 
-        reviewer_name = ""
+        # Every peer reviewer, not just the first one (old single-reviewer sources still work).
+        reviewer_names: list[str] = []
+        for pr in (getattr(s, "peer_reviews", None) or []):
+            pu = db.query(User).filter(User.id == pr.user_id).first()
+            if pu and pu.full_name not in reviewer_names:
+                reviewer_names.append(pu.full_name)
         if getattr(s, "assigned_reviewer_id", None):
             u = db.query(User).filter(User.id == s.assigned_reviewer_id).first()
-            reviewer_name = u.full_name if u else ""
+            if u and u.full_name not in reviewer_names:
+                reviewer_names.insert(0, u.full_name)
+        reviewer_name = ", ".join(reviewer_names)
 
         admin_name = ""
         if approved:
@@ -2482,7 +2489,7 @@ def export_timesheet(
             "Source": 38, "Status": 16, "Extraction Started": 18,
             "Extraction Duration": 18, "LLM Verification Duration": 20, "Review Duration": 16,
             "Delivered At": 18, "Total Duration": 16, "Resets": 10, "Total Records": 14, "Approved Records": 16,
-            "Extractor": 20, "Reviewer": 20, "Admin Approved By": 20,
+            "Extractor": 20, "Reviewer": 32, "Admin Approved By": 20,
         })
         _style_sheet(writer, df_corrections, "Corrections & Feedback", "DC2626", {
             "Source": 34, "Record": 24, "Times Returned": 14, "Field": 20,

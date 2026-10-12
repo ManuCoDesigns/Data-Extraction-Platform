@@ -7,7 +7,7 @@ import { useAuthStore } from '@/store/auth'
 
 interface P {
   user_id: string; name: string; email?: string; ext_assigned: number; ext_open: number; ext_delivered: number
-  records: number; returned: number; first_pass_rate: number | null; avg_extract_hours: number | null
+  records: number; returned: number; sent_back_recent?: number; sent_back_prev?: number; trend?: 'better' | 'worse' | 'same'; first_pass_rate: number | null; avg_extract_hours: number | null
   peer_assigned: number; peer_submitted: number; peer_pending: number; avg_peer_hours: number | null
 }
 const hrs = (h: number | null) => (h === null ? '-' : h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${h} h` : `${Math.round(h / 24)} days`)
@@ -104,7 +104,7 @@ export function InsightsPage() {
                         <th className="font-medium px-5 py-2.5">Person</th>
                         {view === 'extract' ? (<>
                           <th className="font-medium px-3 py-2.5 text-right">Delivered</th><th className="font-medium px-3 py-2.5 text-right">Open</th>
-                          <th className="font-medium px-3 py-2.5 w-44">First pass</th><th className="font-medium px-3 py-2.5 text-right pr-5">Avg time</th>
+                          <th className="font-medium px-3 py-2.5 w-64">First pass</th><th className="font-medium px-3 py-2.5 text-right pr-5">Avg time</th>
                         </>) : (<>
                           <th className="font-medium px-3 py-2.5 text-right">Done</th><th className="font-medium px-3 py-2.5 text-right">Waiting</th>
                           <th className="font-medium px-3 py-2.5 w-44">Completed</th><th className="font-medium px-3 py-2.5 text-right pr-5">Avg response</th>
@@ -120,7 +120,12 @@ export function InsightsPage() {
                             {view === 'extract' ? (<>
                               <td className="px-3 py-3 text-right tabular-nums font-semibold text-emerald-600">{r.ext_delivered}</td>
                               <td className="px-3 py-3 text-right tabular-nums text-gray-600">{r.ext_open}</td>
-                              <td className="px-3 py-3"><span className="flex items-center gap-2"><Bar value={r.first_pass_rate ?? 0} tone={rateTone(r.first_pass_rate)} /><span className="text-xs tabular-nums text-gray-500 w-11 text-right">{r.first_pass_rate === null ? '-' : `${r.first_pass_rate}%`}</span></span></td>
+                              <td className="px-3 py-3"><span className="flex items-center gap-2"><Bar value={r.first_pass_rate ?? 0} tone={rateTone(r.first_pass_rate)} /><span className="text-xs tabular-nums text-gray-500 w-11 text-right">{r.first_pass_rate === null ? '-' : `${r.first_pass_rate}%`}</span>
+                                {r.trend && r.trend !== 'same' && (
+                                  <Chip tone={r.trend === 'better' ? 'green' : 'red'} title={`Records sent back: ${r.sent_back_recent} in the last 14 days, ${r.sent_back_prev} in the 14 days before`}>
+                                    {r.trend === 'better' ? 'Improving' : 'More sent back'}
+                                  </Chip>
+                                )}</span></td>
                               <td className="px-3 py-3 text-right pr-5 tabular-nums text-gray-600">{hrs(r.avg_extract_hours)}</td>
                             </>) : (<>
                               <td className="px-3 py-3 text-right tabular-nums font-semibold text-indigo-600">{r.peer_submitted}</td>

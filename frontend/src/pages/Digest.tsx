@@ -101,6 +101,9 @@ export function DigestPage() {
                                 <span className={cn('text-xs tabular-nums w-14 text-right shrink-0', i.level === 'red' ? 'text-red-600 font-semibold' : i.level === 'amber' ? 'text-amber-600 font-semibold' : 'text-gray-400')}>{dayLabel(i.days)}</span>
                               </li>
                             ))}
+                            {p.count > p.items.length && (
+                              <li className="text-xs text-gray-400 pt-1">and {p.count - p.items.length} more, shorter waits</li>
+                            )}
                           </ul>
                         )}
                       </li>

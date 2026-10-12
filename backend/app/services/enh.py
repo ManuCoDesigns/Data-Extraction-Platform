@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 from app.core.notify import notify, admin_user_ids, src_link, ACTION, INFO
 from app.core.source_access import restrict_sources_query
 from app.models.all_models import (
-    ExtractedRecord, ExtractionJob, Project, ReminderLog, ReviewStatus, Source, SourceLinkCheck,
+    AuditAction, AuditLog, ExtractedRecord, ExtractionJob, Project, ReminderLog, ReviewStatus, Source, SourceLinkCheck,
     SourcePeerReview, SourceStatus, User,
 )
 
@@ -221,6 +221,70 @@ def find_duplicates(db: Session, user: User, project_id: str | None, limit: int 
     return out[:limit]
 
 
+# ─── Same company imported twice (source level) ──────────────────────────────
+
+_CORP_WORDS = {"ltd", "limited", "inc", "incorporated", "plc", "corp", "corporation", "llc", "llp", "gmbh", "sa", "nv", "ag",
+               "co", "company", "holding", "holdings", "group", "the", "bv", "spa", "pty", "oy", "ab", "as", "sarl", "ltda"}
+
+
+def company_key(name) -> str:
+    """Name with punctuation and legal endings removed, so 'ASML Holding N.V.' and 'asml' match."""
+    text = str(name or "").lower().replace("&", " and ").replace(".", "").replace("'", "")   # N.V. -> nv
+    words = re.sub(r"[^a-z0-9 ]+", " ", text).split()
+    core = [w for w in words if w not in _CORP_WORDS]
+    return " ".join(core or words)
+
+
+def site_key(url) -> str:
+    u = str(url or "").strip().lower()
+    if not u:
+        return ""
+    u = re.sub(r"^[a-z]+://", "", u)
+    host = u.split("/")[0].split("?")[0].split(":")[0]
+    host = re.sub(r"^www\d*\.", "", host)
+    return host
+
+
+def find_duplicate_sources(db: Session, user: User, project_id: str | None, limit: int = 100) -> list[dict]:
+    """Sources that look like the same company: same website, or same name once legal endings are ignored."""
+    q = db.query(Source)
+    q = restrict_sources_query(q, user, db)
+    if project_id:
+        q = q.filter(Source.project_id == project_id)
+    srcs = q.all()
+    by_site: dict[str, list] = defaultdict(list)
+    by_name: dict[str, list] = defaultdict(list)
+    for s in srcs:
+        sk, nk = site_key(s.website_url), company_key(s.name)
+        if sk and "." in sk:
+            by_site[sk].append(s)
+        if nk:
+            by_name[nk].append(s)
+
+    owner_ids = {s.assigned_extractor_id for s in srcs if s.assigned_extractor_id}
+    names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(owner_ids)).all()} if owner_ids else {}
+    groups: dict[frozenset, dict] = {}
+    for key, items, why in [(k, v, "same name") for k, v in by_name.items()] + [(k, v, "same website") for k, v in by_site.items()]:
+        if len(items) < 2:
+            continue
+        ids = frozenset(i.id for i in items)
+        if ids in groups:
+            if why not in groups[ids]["reasons"]:
+                groups[ids]["reasons"].append(why)
+            continue
+        groups[ids] = {
+            "key": key, "reasons": [why], "count": len(items),
+            "items": [{
+                "source_id": i.id, "project_id": i.project_id, "name": i.name, "website": i.website_url,
+                "status": i.status.value, "item_no": i.external_ref_id,
+                "extractor": names.get(i.assigned_extractor_id),
+                "created_at": i.created_at,
+            } for i in sorted(items, key=lambda x: aware(x.created_at) or now_utc())],
+        }
+    out = sorted(groups.values(), key=lambda g: (-g["count"], g["key"]))[:limit]
+    return out
+
+
 # ─── Where is each source waiting? (digest, reminders) ───────────────────────
 
 def stage_since(s: Source):
@@ -303,6 +367,7 @@ def build_digest(db: Session, user: User, project_id: str | None = None) -> dict
     for p in plist:
         p["count"] = len(p["items"])
         p["items"].sort(key=lambda i: -i["days"])
+        p["items"] = p["items"][:40]          # longest-waiting first; "count" keeps the true total
         p["level"] = level_for(p["oldest_days"])
 
     now = now_utc()
@@ -450,9 +515,30 @@ def people_stats(db: Session, since: datetime, project_id: str | None = None, on
             else:
                 r["peer_pending"] += 1
 
+    # Direction of travel: records sent back in the last 14 days against the 14 before.
+    now = now_utc()
+    recent_from, prev_from = now - timedelta(days=14), now - timedelta(days=28)
+    owner = {s.id: s.assigned_extractor_id for s in sources}
+    trend_rows = (db.query(ExtractionJob.source_id, AuditLog.timestamp)
+                  .join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
+                  .join(AuditLog, AuditLog.record_id == ExtractedRecord.id)
+                  .filter(ExtractionJob.source_id.in_(sids), AuditLog.action == AuditAction.RECORD_REJECTED,
+                          AuditLog.timestamp >= prev_from).all())
+    sent_recent: Counter = Counter()
+    sent_prev: Counter = Counter()
+    for sid, ts in trend_rows:
+        uid = owner.get(sid)
+        if not uid:
+            continue
+        (sent_recent if aware(ts) >= recent_from else sent_prev)[uid] += 1
+
     out = []
     for r in by.values():
         eh, ph = r.pop("ext_hours"), r.pop("peer_hours")
+        r["sent_back_recent"] = sent_recent.get(r["user_id"], 0)
+        r["sent_back_prev"] = sent_prev.get(r["user_id"], 0)
+        r["trend"] = ("worse" if r["sent_back_recent"] > r["sent_back_prev"]
+                      else "better" if r["sent_back_recent"] < r["sent_back_prev"] else "same")
         r["avg_extract_hours"] = round(sum(eh) / len(eh), 1) if eh else None
         r["avg_peer_hours"] = round(sum(ph) / len(ph), 1) if ph else None
         r["first_pass_rate"] = round(100 * (1 - r["returned"] / r["records"]), 1) if r["records"] else None

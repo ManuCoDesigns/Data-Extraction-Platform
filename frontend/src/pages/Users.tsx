@@ -4,6 +4,7 @@ import { usersApi, enhApi } from '@/api/client'
 import { Modal, Input, Select, ConfirmDialog, toast, cn } from '@/components/ui'
 import { useCapability } from '@/lib/permissions'
 import type { User } from '@/types'
+import { fmtDate } from '@/lib/prefs'
 
 const ROLE_META: Record<string, { label: string; color: string; bg: string; grad: string }> = {
   org_admin:         { label: 'Org Admin',     color: '#dc2626', bg: '#fef2f2', grad: 'linear-gradient(135deg,#ef4444,#b91c1c)' },
@@ -307,7 +308,7 @@ export function UsersPage() {
                         </span>
                       </td>
                       <td style={{ padding: '14px 16px', fontSize: 12, color: '#94a3b8', whiteSpace: 'nowrap' }}>
-                        {(u as any).created_at ? new Date((u as any).created_at).toLocaleDateString() : '—'}
+                        {fmtDate((u as any).created_at)}
                       </td>
                       <td style={{ padding: '14px 16px' }}>
                         {canManage && (
