@@ -210,7 +210,8 @@ export function JsonRecordViewer({
   const isApproved = record.review_status === 'approved'
   const isRejected = record.review_status === 'rejected'
 
-  const companyName = String(localFields.company_name || localFields.material_name || 'Record')
+  const companyName = String(localFields.company_name || localFields.material_name || localFields.segment_name
+    || localFields.supplier_name || localFields.name || localFields.title || 'Record')
   const website = localFields.website as string | null
 
   const progressPct = Math.round(((currentIndex + 1) / allRecords.length) * 100)

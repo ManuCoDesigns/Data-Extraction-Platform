@@ -807,6 +807,7 @@ export function SourceDetailPage() {
     return (
       <div style={{ position: 'fixed', inset: 0, zIndex: 9999, overflow: 'hidden' }}>
         <JsonRecordViewer
+          key={records[activeRecordIndex].id}
           record={records[activeRecordIndex]}
           allRecords={records}
           currentIndex={activeRecordIndex}
