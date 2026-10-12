@@ -4,7 +4,7 @@ from app.db.session import get_db
 from app.core.security import (
     verify_password, create_access_token, create_refresh_token, decode_token, get_current_user
 )
-from app.models.all_models import User, AuditLog, AuditAction, ExtractedRecord, Project, ProjectStatus, ReviewStatus
+from app.models.all_models import User, AuditLog, AuditAction, ExtractedRecord, Project, ProjectStatus, ReviewStatus, Source, SourceStatus
 from app.schemas.api_schemas import LoginRequest, TokenResponse, RefreshRequest, UserOut
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -32,7 +32,14 @@ def public_stats(db: Session = Depends(get_db)):
         ).one()
         reviewed = int(approved) + int(rejected)
         projects = db.query(func.count(Project.id)).filter(Project.status == ProjectStatus.ACTIVE).scalar() or 0
+        delivered = db.query(func.count(Source.id)).filter(Source.status == SourceStatus.APPROVED).scalar() or 0
+        last = db.query(func.max(ExtractedRecord.updated_at)).scalar()
+        if last is not None and last.tzinfo is None:
+            from datetime import timezone as _tz
+            last = last.replace(tzinfo=_tz.utc)
         data = {
+            "sources_delivered": int(delivered),
+            "last_activity_at": last.isoformat() if last else None,
             "records_processed": int(total),
             # share of reviewed records that were approved exactly as extracted, no corrections
             "accuracy_percent": round(100.0 * int(clean) / reviewed, 1) if reviewed else None,
@@ -40,7 +47,7 @@ def public_stats(db: Session = Depends(get_db)):
         }
     except Exception:
         db.rollback()
-        data = {"records_processed": None, "accuracy_percent": None, "active_projects": None}
+        data = {"records_processed": None, "accuracy_percent": None, "active_projects": None, "sources_delivered": None, "last_activity_at": None}
     _PUBLIC_CACHE.update(at=now, data=data)
     return data
 
