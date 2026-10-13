@@ -157,3 +157,28 @@ html { background: var(--page); }
 .dark .glass { background: rgba(17,24,39,.85); }
 .dark ::selection { background: rgba(99,102,241,.45); }
 .dark pre, .dark code { color-scheme: dark; }
+
+/* ── Dark mode gap fixes: very dark text shades, pale gradient stops, light rings ── */
+.dark .text-amber-950, .dark .text-yellow-950, .dark .text-orange-950 { color: #fde68a; }
+.dark .text-emerald-950, .dark .text-green-950 { color: #a7f3d0; }
+.dark .text-red-950, .dark .text-rose-950 { color: #fecaca; }
+.dark .text-blue-950, .dark .text-indigo-950 { color: #c7d2fe; }
+.dark .text-purple-950, .dark .text-violet-950 { color: #ddd6fe; }
+.dark .from-brand-50 { --tw-gradient-from: rgba(99,102,241,.16) var(--tw-gradient-from-position); --tw-gradient-to: rgba(99,102,241,0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+.dark .to-indigo-50 { --tw-gradient-to: rgba(99,102,241,.1) var(--tw-gradient-to-position); }
+.dark .to-purple-50 { --tw-gradient-to: rgba(168,85,247,.1) var(--tw-gradient-to-position); }
+.dark .ring-amber-100, .dark .ring-amber-200, .dark .ring-amber-300 { --tw-ring-color: rgba(251,191,36,.3); }
+.dark .ring-emerald-100, .dark .ring-emerald-200, .dark .ring-emerald-300 { --tw-ring-color: rgba(52,211,153,.3); }
+.dark .ring-red-100, .dark .ring-red-200 { --tw-ring-color: rgba(248,113,113,.3); }
+.dark .ring-blue-200, .dark .ring-blue-300, .dark .ring-indigo-200, .dark .ring-indigo-300, .dark .ring-brand-100, .dark .ring-brand-200 { --tw-ring-color: rgba(129,140,248,.35); }
+.dark .ring-purple-100, .dark .ring-purple-200, .dark .ring-purple-300 { --tw-ring-color: rgba(192,132,252,.3); }
+/* The notification banner is always a bright gradient: keep its text and Open button the same as in light mode */
+.dark [data-banner] .bg-white { background-color: #fff; color: #111827; }
+.dark [data-banner] { color: #fff; }
+/* Pale tints with an opacity suffix (bg-red-50/50 and so on) */
+.dark .bg-amber-50\/40, .dark .bg-amber-50\/70 { background-color: rgba(245,158,11,.1); }
+.dark .bg-indigo-50\/40 { background-color: rgba(99,102,241,.1); }
+.dark .bg-violet-50\/70 { background-color: rgba(139,92,246,.12); }
+.dark .bg-red-50\/30, .dark .bg-red-50\/50, .dark .bg-red-50\/70 { background-color: rgba(239,68,68,.1); }
+.dark .text-red-700\/80 { color: #fca5a5; }
+.dark .text-sky-800\/80 { color: #7dd3fc; }
