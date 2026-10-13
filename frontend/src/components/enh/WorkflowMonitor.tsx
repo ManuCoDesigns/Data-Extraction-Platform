@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Bell, Download, Search } from 'lucide-react'
+import { Bell, ClipboardCopy, Download, Search } from 'lucide-react'
 import { enhApi } from '@/api/client'
 import { Avatar, Button, cn, toast } from '@/components/ui'
+import { buildSummary, copyText } from '@/components/enh/summaryText'
 import { Blank, Chip, Panel, Skeletons, Tile, type Tone, shortAgo } from '@/components/enh/kit'
 
 type Stage = 'not_started' | 'extracting' | 'needs_fixes' | 'peer_review' | 'signoff' | 'delivered'
@@ -113,6 +114,7 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
   const [limit, setLimit] = useState(30)
   const [reminded, setReminded] = useState<Set<string>>(new Set())
   const [nudging, setNudging] = useState(false)
+  const [withNames, setWithNames] = useState(() => { try { return localStorage.getItem('dep_summary_names') === '1' } catch { return false } })
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -141,6 +143,19 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
     } catch (e: any) { toast.error(e?.response?.data?.detail || "Couldn't send the reminder") } finally { setNudging(false) }
   }
 
+  const copySummary = async () => {
+    if (!data) return
+    const text = buildSummary({
+      scope: project ? (projects.find(p => p.id === project)?.name ?? 'Selected project') : 'All projects', days, withNames,
+      stages: STAGES.map(s => ({ label: s.label, count: data.stages[s.key] ?? 0 })), totals: data.totals,
+      projects: data.projects.map(p => ({ name: p.name, sources: p.sources, delivered: p.stages.delivered ?? 0, records: p.records, approved: p.approved })),
+      stuck: (data.sources ?? []).filter(r => r.stage !== 'delivered' && (r.days_in_stage ?? 0) >= 7).map(r => ({ name: r.name, project: r.project, days: r.days_in_stage ?? 0 })),
+      people: people.filter(p => p.ext_open || p.peer_pending || p.ext_delivered).map(p => ({ name: p.name, extracting: p.ext_open, waiting: p.peer_pending, delivered: p.ext_delivered })),
+    })
+    if (await copyText(text)) toast.success('Summary copied. Paste it into Slack or an email.')
+    else toast.error("Couldn't copy. Select the text yourself or try again.")
+  }
+
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
     const head = ['Source', 'Item', 'Project', 'Stage', 'Extractor', 'Peer reviews done', 'Peer reviews total', 'Records', 'Valid', 'Approved', 'Sent back', 'Days in stage']
@@ -162,7 +177,14 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
       <section aria-label="Where every source is">
         <div className="flex items-center justify-between gap-3 mb-2 flex-wrap">
           <h2 className="text-sm font-bold text-gray-900 m-0">Where every source is <span className="font-normal text-gray-400">· {t.sources} sources, {t.percent}% delivered</span></h2>
-          {stage && <button type="button" onClick={() => setStage('')} className="text-xs font-semibold text-brand-600 hover:underline">Show all stages</button>}
+          <div className="flex items-center gap-3 flex-wrap">
+            {stage && <button type="button" onClick={() => setStage('')} className="text-xs font-semibold text-brand-600 hover:underline">Show all stages</button>}
+            <label className="flex items-center gap-1.5 text-xs text-gray-500 cursor-pointer select-none">
+              <input type="checkbox" checked={withNames} onChange={e => { setWithNames(e.target.checked); try { localStorage.setItem('dep_summary_names', e.target.checked ? '1' : '0') } catch { /* ignore */ } }} />
+              Include names
+            </label>
+            <Button variant="secondary" size="sm" onClick={copySummary}><ClipboardCopy className="w-4 h-4" /> Copy summary</Button>
+          </div>
         </div>
         <StageBar stages={data.stages} total={t.sources} className="h-3 mb-3" />
         <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
