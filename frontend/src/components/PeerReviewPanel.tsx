@@ -5,7 +5,7 @@ import { Avatar, Button, Card, Spinner, Textarea, cn, safeFromNow, toast } from 
 
 interface Peer { user_id: string; name?: string | null; status: string; submitted_at?: string | null; mine: boolean; comment?: string | null }
 interface Candidate { user_id: string; name: string; email: string; role: string; assigned: boolean }
-interface Detail { peers: Peer[]; total: number; submitted: number; gated: boolean; can_manage: boolean; can_submit: boolean; candidates: Candidate[] }
+interface Detail { peers: Peer[]; total: number; submitted: number; gated: boolean; can_manage: boolean; can_submit: boolean; comments_locked?: boolean; candidates: Candidate[] }
 
 const roleLabel = (r: string) => (r === 'pipeline_operator' ? 'Extractor' : r === 'reviewer' ? 'Reviewer' : r.replace(/_/g, ' '))
 
@@ -134,7 +134,7 @@ export function PeerReviewPanel({ sourceId, onChanged }: { sourceId: string; onC
                     {p.status !== 'submitted' && <span className="block text-[11px] text-gray-400 mt-1">Earlier comment. Sent back, so this review needs another look.</span>}
                   </p>
                 ) : p.status === 'submitted' ? (
-                  <p className="text-xs text-gray-400 mt-1 mb-0">Comment is only shown to admins and the extractor.</p>
+                  <p className="text-xs text-gray-400 mt-1 mb-0">{d.comments_locked ? 'Hidden until you submit your own review, so every review stays independent.' : 'Comment is only shown to admins, the extractor and reviewers who have finished their own review.'}</p>
                 ) : null}
               </div>
             </li>
@@ -145,7 +145,7 @@ export function PeerReviewPanel({ sourceId, onChanged }: { sourceId: string; onC
       {d.can_submit && (
         <div className="px-5 py-4 border-t border-gray-100 bg-indigo-50/40 space-y-3">
           <p className="text-sm font-semibold text-gray-900 m-0">Finish your peer review</p>
-          <p className="text-xs text-gray-500 m-0">Check the records against the source, approve or send back what you need to, then say what you found. You can't finish without a comment.</p>
+          <p className="text-xs text-gray-500 m-0">Check the records against the source, approve or send back what you need to, then say what you found. You can't finish without a comment. Other reviewers' comments stay hidden until you submit yours.</p>
           <Textarea rows={3} value={comment} onChange={e => { setComment(e.target.value); if (err) setErr('') }} error={err}
             placeholder="What did you check, and what did you find?" aria-label="Peer review comment" />
           <Button size="sm" loading={sending} onClick={send} disabled={!comment.trim()}>Submit my review</Button>

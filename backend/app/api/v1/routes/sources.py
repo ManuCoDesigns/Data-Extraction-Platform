@@ -1852,10 +1852,12 @@ def _peer_detail(source: Source, user: User, db: Session) -> dict:
     manager = bool(roles & {"org_admin", "project_admin", "qa_lead"})
     is_extractor = source.assigned_extractor_id == user.id
     peers, mine_pending = [], False
+    # A peer reads the others' comments only after finishing their own review, so every review stays independent.
+    viewer_done = any(r.user_id == user.id and r.status == "submitted" for r in source.peer_reviews)
     for r in source.peer_reviews:
         mine = r.user_id == user.id
         mine_pending = mine_pending or (mine and r.status != "submitted")
-        show = manager or is_extractor or mine
+        show = manager or is_extractor or mine or (viewer_done and r.status == "submitted")
         peers.append({
             "user_id": r.user_id, "name": r.user.full_name if r.user else None, "status": r.status,
             "submitted_at": r.submitted_at, "mine": mine, "comment": r.comment if show else None,
@@ -1864,6 +1866,7 @@ def _peer_detail(source: Source, user: User, db: Session) -> dict:
         "peers": peers, "total": len(peers),
         "submitted": sum(1 for p in peers if p["status"] == "submitted"),
         "gated": bool(peers),
+        "comments_locked": bool(mine_pending and not manager and not is_extractor and len(peers) > 1),
         "can_manage": _can_manage_source(user, source),
         "can_submit": mine_pending and source.status not in (SourceStatus.NOT_STARTED, SourceStatus.EXTRACTING, SourceStatus.APPROVED),
         "candidates": [],

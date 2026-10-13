@@ -730,6 +730,8 @@ class SourceMessage(Base):
     source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     body = Column(Text, nullable=False)
+    # Whose private thread this is: one reviewer talking with the extractor. None = extractor and admins only.
+    thread_user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), default=now_utc, index=True)
 
     user = relationship("User", foreign_keys=[user_id])

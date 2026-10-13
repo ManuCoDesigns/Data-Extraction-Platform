@@ -452,7 +452,7 @@ export const enhApi = {
   audit: (params: Record<string, string | number | undefined>) => api.get('/enh/audit', { params }).then(r => r.data),
   peopleStats: (days = 30, projectId?: string) => api.get('/enh/stats/people', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
   messages: (sourceId: string) => api.get(`/enh/sources/${sourceId}/messages`).then(r => r.data),
-  postMessage: (sourceId: string, body: string) => api.post(`/enh/sources/${sourceId}/messages`, { body }).then(r => r.data),
+  postMessage: (sourceId: string, body: string, to_user_id?: string) => api.post(`/enh/sources/${sourceId}/messages`, { body, to_user_id }).then(r => r.data),
   markMessagesRead: (sourceId: string) => api.post(`/enh/sources/${sourceId}/messages/read`).then(r => r.data),
   deleteMessage: (id: string) => api.delete(`/enh/messages/${id}`).then(r => r.data),
   inbox: () => api.get('/enh/messages/inbox').then(r => r.data),
