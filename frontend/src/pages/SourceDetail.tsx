@@ -9,6 +9,7 @@ import { XtriumNoticesBanner } from '@/components/XtriumNoticesBanner'
 import { PeerReviewPanel } from '@/components/PeerReviewPanel'
 import { isPeerOf } from '@/lib/peers'
 import { AskClientModal } from '@/components/enh/AskClient'
+import { SourceActivity } from '@/components/enh/SourceActivity'
 import { SourceRequiredCard } from '@/components/enh/RequiredFields'
 import { LinkChip } from '@/pages/DataHealth'
 import {
@@ -1086,6 +1087,8 @@ function SourceDetailInner() {
       </Card>
 
       <PeerReviewPanel sourceId={source.id} onChanged={load} />
+
+      <SourceActivity sourceId={source.id} refreshKey={source.updated_at} />
 
       <div style={{ display: 'flex', gap: 4, padding: '4px', background: 'var(--bg-f1f5f9)', borderRadius: 12, alignSelf: 'flex-start' }}>
         {((isFromXtrium ? ['records', 'files', 'details', 'sop'] : ['records', 'files', 'details']) as Tab[]).map(t => (

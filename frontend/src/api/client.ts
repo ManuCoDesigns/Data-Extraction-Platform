@@ -451,6 +451,7 @@ export const enhApi = {
   runReminders: () => api.post('/enh/reminders/run').then(r => r.data),
   audit: (params: Record<string, string | number | undefined>) => api.get('/enh/audit', { params }).then(r => r.data),
   peopleStats: (days = 30, projectId?: string) => api.get('/enh/stats/people', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
+  sourceActivity: (sourceId: string) => api.get(`/enh/sources/${sourceId}/activity`).then(r => r.data as { items: { id: string; at: string; who: string; text: string; tone: string; detail?: string | null }[]; more: boolean }),
   nudge: (source_ids: string[]) => api.post('/enh/nudge', { source_ids }).then(r => r.data as { sent: number; skipped: { source_id: string; reason: string }[] }),
   monitor: (days = 30, projectId?: string) => api.get('/enh/monitor', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
   myStats: (days = 30) => api.get('/enh/stats/me', { params: { days } }).then(r => r.data),

@@ -957,3 +957,60 @@ def nudge_sources(body: NudgeBody, db: Session = Depends(get_db), user: User = D
             skipped.append({"source_id": s.id, "reason": "Reminded in the last 24 hours" if who else "Nobody to remind"})
     db.commit()
     return {"sent": sent, "skipped": skipped}
+
+
+# ─── Activity on one source ──────────────────────────────────────────────────
+
+_ACTIVITY = {
+    "source_created": ("added this source", "gray"),
+    "source_assigned": ("changed who is assigned", "blue"),
+    "source_data_uploaded": ("uploaded data", "blue"),
+    "source_record_fixed": ("fixed a record", "amber"),
+    "source_status_changed": ("moved the source", "purple"),
+    "source_approved": ("approved the source", "green"),
+    "source_reset": ("reset the source", "red"),
+    "record_rejected": ("sent a record back", "amber"),
+    "record_approved": ("approved a record", "green"),
+    "record_admin_reviewed": ("signed off a record", "green"),
+    "record_returned_for_correction": ("returned a record for correction", "amber"),
+    "record_sent_to_admin": ("sent a record to the admin", "purple"),
+    "record_revision_started": ("started revising a record", "blue"),
+    "record_escalated": ("escalated a record", "red"),
+    "record_submitted": ("submitted a record", "green"),
+    "field_overridden": ("changed a field", "amber"),
+}
+
+
+def _activity_detail(action: str, after: dict | None) -> str | None:
+    a = after or {}
+    if action == "source_data_uploaded":
+        bits = [a.get("file"), f"{a['rows']} rows" if a.get("rows") is not None else None]
+        return ", ".join(str(b) for b in bits if b) or None
+    if action in ("record_rejected", "record_returned_for_correction", "record_escalated"):
+        return (a.get("note") or a.get("reason") or None)
+    if action == "source_status_changed" and (a.get("from") or a.get("to")):
+        return f"{str(a.get('from') or '').replace('_', ' ')} to {str(a.get('to') or '').replace('_', ' ')}".strip()
+    if action == "source_assigned":
+        return a.get("peer_reviewers") or None
+    if action == "source_approved" and a.get("records") is not None:
+        return f"{a['records']} records"
+    return None
+
+
+@router.get("/sources/{source_id}/activity")
+def source_activity(source_id: str, limit: int = Query(40, ge=1, le=200),
+                    db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """What happened to one source, newest first. Anyone who can open the source can read it."""
+    src = _visible_sources(db, user).filter(Source.id == source_id).first()
+    if not src:
+        raise HTTPException(status_code=404, detail="Source not found.")
+    rows = (db.query(AuditLog).filter(AuditLog.source_id == source_id)
+            .order_by(AuditLog.timestamp.desc()).limit(limit + 1).all())
+    names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_({r.user_id for r in rows if r.user_id})).all()} if rows else {}
+    items = []
+    for r in rows[:limit]:
+        key = r.action.value if hasattr(r.action, "value") else str(r.action)
+        text, tone = _ACTIVITY.get(key, (key.replace("_", " "), "gray"))
+        items.append({"id": r.id, "at": r.timestamp, "who": names.get(r.user_id) or "System", "text": text, "tone": tone,
+                      "detail": _activity_detail(key, r.after_value if isinstance(r.after_value, dict) else None)})
+    return {"items": items, "more": len(rows) > limit}
