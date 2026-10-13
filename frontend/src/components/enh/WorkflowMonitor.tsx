@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Download, Search } from 'lucide-react'
+import { Bell, Download, Search } from 'lucide-react'
 import { enhApi } from '@/api/client'
 import { Avatar, Button, cn, toast } from '@/components/ui'
 import { Blank, Chip, Panel, Skeletons, Tile, type Tone, shortAgo } from '@/components/enh/kit'
@@ -111,6 +111,8 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
   const [stage, setStage] = useState<Stage | ''>('')
   const [q, setQ] = useState('')
   const [limit, setLimit] = useState(30)
+  const [reminded, setReminded] = useState<Set<string>>(new Set())
+  const [nudging, setNudging] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -126,6 +128,18 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
     const nq = q.trim().toLowerCase()
     return (data?.sources ?? []).filter(r => (!stage || r.stage === stage) && (!nq || `${r.name} ${r.extractor ?? ''} ${r.project ?? ''} ${r.item_no ?? ''}`.toLowerCase().includes(nq)))
   }, [data, stage, q])
+
+  const stuck = useMemo(() => rows.filter(r => r.stage !== 'delivered' && (r.days_in_stage ?? 0) >= 7 && (r.stage !== 'not_started' || r.extractor)), [rows])
+  const remind = async (ids: string[]) => {
+    if (!ids.length || nudging) return
+    setNudging(true)
+    try {
+      const res = await enhApi.nudge(ids)
+      setReminded(prev => new Set([...prev, ...ids]))
+      if (res.sent) toast.success(`Reminder sent to ${res.sent} ${res.sent === 1 ? 'person' : 'people'}`)
+      else toast.info(res.skipped[0]?.reason ? `Nobody reminded: ${res.skipped[0].reason}` : 'Nobody to remind')
+    } catch (e: any) { toast.error(e?.response?.data?.detail || "Couldn't send the reminder") } finally { setNudging(false) }
+  }
 
   const exportCsv = () => {
     const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`
@@ -227,6 +241,7 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
           <label className="relative"><Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input value={q} onChange={e => { setQ(e.target.value); setLimit(30) }} placeholder="Search" aria-label="Search sources"
               className="text-sm border border-gray-200 rounded-xl pl-8 pr-3 py-1.5 w-40 focus:outline-none focus:ring-2 focus:ring-brand-200" /></label>
+          {stuck.length > 0 && <Button variant="secondary" size="sm" loading={nudging} onClick={() => { if (window.confirm(`Send a reminder for ${stuck.length} ${stuck.length === 1 ? 'source' : 'sources'} that have waited 7+ days? People are only reminded once a day.`)) remind(stuck.map(r => r.source_id)) }}><Bell className="w-4 h-4" /> Remind {stuck.length} stuck</Button>}
           <Button variant="secondary" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="w-4 h-4" /> CSV</Button>
         </div>}>
         {rows.length === 0 ? <Blank title="No sources match" text="Clear the stage filter or the search." /> : (
@@ -251,7 +266,11 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
                       <td className="px-3 py-3 text-right tabular-nums text-gray-600">{r.records ? <>{r.valid}<span className="text-gray-300"> / {r.records}</span></> : <span className="text-gray-300">0</span>}</td>
                       <td className="px-3 py-3 text-right tabular-nums text-emerald-600 font-semibold">{r.approved || <span className="text-gray-300 font-normal">0</span>}</td>
                       <td className="px-3 py-3 text-right tabular-nums">{r.sent_back ? <Chip tone="amber">{r.sent_back}</Chip> : <span className="text-gray-300">0</span>}</td>
-                      <td className="px-3 py-3 text-right pr-5 tabular-nums">{r.stage === 'delivered' ? <span className="text-gray-300">-</span> : <span className={cn(late ? 'text-red-600 font-semibold' : 'text-gray-500')}>{r.days_in_stage === null ? '-' : r.days_in_stage < 1 ? 'today' : `${r.days_in_stage} d`}</span>}</td>
+                      <td className="px-3 py-3 text-right pr-5 tabular-nums whitespace-nowrap">{r.stage === 'delivered' ? <span className="text-gray-300">-</span> : <>
+                        {(r.days_in_stage ?? 0) >= 3 && (r.stage !== 'not_started' || r.extractor) && (reminded.has(r.source_id)
+                          ? <span className="text-xs text-emerald-600 mr-2">Reminded</span>
+                          : <button type="button" onClick={() => remind([r.source_id])} disabled={nudging} title="Remind whoever has this source" className="text-xs font-semibold text-brand-600 hover:underline mr-2 disabled:opacity-50">Remind</button>)}
+                        <span className={cn(late ? 'text-red-600 font-semibold' : 'text-gray-500')}>{r.days_in_stage === null ? '-' : r.days_in_stage < 1 ? 'today' : `${r.days_in_stage} d`}</span></>}</td>
                     </tr>
                   )
                 })}

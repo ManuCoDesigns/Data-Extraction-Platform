@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { setServerDown } from '@/lib/net'
 
 const BASE_URL = import.meta.env.VITE_API_URL || '/api/v1'
 
@@ -35,10 +36,28 @@ function redirectToLogin() {
   }
 }
 
+const RETRY_STATUS = new Set([502, 503, 504])
+const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
+
 api.interceptors.response.use(
-  (res) => res,
+  (res) => { setServerDown(false); return res },
   async (error) => {
     const original = error.config
+    if (axios.isCancel(error)) return Promise.reject(error)
+
+    // The server is waking up or briefly unreachable: retry reads twice, then tell the person.
+    const unreachable = !error.response || RETRY_STATUS.has(error.response.status)
+    if (unreachable && original) {
+      const isRead = (original.method || 'get').toLowerCase() === 'get'
+      original._net = (original._net || 0) + 1
+      if (isRead && original._net <= 2) {
+        await sleep(700 * 2 ** (original._net - 1))
+        return api(original)
+      }
+      setServerDown(true)
+    } else if (error.response) {
+      setServerDown(false)
+    }
 
     // Don't retry non-401 errors or requests that already retried
     if (!error.response || error.response.status !== 401 || original._retry) {
@@ -432,6 +451,7 @@ export const enhApi = {
   runReminders: () => api.post('/enh/reminders/run').then(r => r.data),
   audit: (params: Record<string, string | number | undefined>) => api.get('/enh/audit', { params }).then(r => r.data),
   peopleStats: (days = 30, projectId?: string) => api.get('/enh/stats/people', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
+  nudge: (source_ids: string[]) => api.post('/enh/nudge', { source_ids }).then(r => r.data as { sent: number; skipped: { source_id: string; reason: string }[] }),
   monitor: (days = 30, projectId?: string) => api.get('/enh/monitor', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
   myStats: (days = 30) => api.get('/enh/stats/me', { params: { days } }).then(r => r.data),
   people: (projectId?: string) => api.get('/enh/people', { params: { project_id: projectId || undefined } }).then(r => r.data),

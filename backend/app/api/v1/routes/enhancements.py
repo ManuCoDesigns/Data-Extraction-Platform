@@ -14,7 +14,7 @@ from app.core.source_access import project_scopes, restrict_sources_query, is_or
 from app.db.session import get_db
 from app.models.all_models import (
     AuditAction, AuditLog, ClientQuestion, ExtractedRecord, ExtractionJob, Project, ProjectMember, ReviewStatus, Source, SourceLinkCheck,
-    SourcePeerReview, SourceStatus, User, UserSettings,
+    Notification, SourcePeerReview, SourceStatus, User, UserSettings,
 )
 from app.services import enh
 
@@ -898,3 +898,62 @@ def totp_admin_reset(uid: str, db: Session = Depends(get_db), user: User = Depen
     s.totp_enabled, s.totp_secret, s.failed_logins, s.locked_until = False, None, 0, None
     db.commit()
     return {"ok": True}
+
+
+# ─── Reminders for stuck sources ─────────────────────────────────────────────
+
+class NudgeBody(BaseModel):
+    source_ids: list[str]
+
+
+@router.post("/nudge")
+def nudge_sources(body: NudgeBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Remind whoever is holding each source: the extractor, the peers who have not submitted,
+    or the admins when it only needs sign-off. One reminder per person per source per day."""
+    _need_lead(user)
+    ids = list(dict.fromkeys(str(i) for i in body.source_ids))[:100]
+    if not ids:
+        raise HTTPException(status_code=422, detail="Pick at least one source.")
+    sources = _visible_sources(db, user).filter(Source.id.in_(ids)).all()
+    found = {s.id for s in sources}
+    skipped = [{"source_id": i, "reason": "Not found"} for i in ids if i not in found]
+    now = enh.now_utc()
+    day_ago = now - timedelta(hours=24)
+    sent = 0
+    for s in sources:
+        peers = list(s.peer_reviews)
+        done = sum(1 for p in peers if p.status == "submitted")
+        stage = _monitor_stage(s, done, len(peers))
+        if stage == "delivered":
+            skipped.append({"source_id": s.id, "reason": "Already delivered"}); continue
+        if stage in ("not_started", "extracting", "needs_fixes"):
+            who = [s.assigned_extractor_id] if s.assigned_extractor_id else []
+            what = "Please send this source back for review." if stage != "needs_fixes" else "A reviewer sent changes back. Please fix and resubmit."
+            if stage == "not_started":
+                what = "This source is waiting for you to start."
+            if not who:
+                skipped.append({"source_id": s.id, "reason": "No extractor assigned"}); continue
+        elif stage == "peer_review":
+            who = [p.user_id for p in peers if p.status != "submitted"]
+            what = "Your peer review is still waiting."
+        else:
+            who = list(admin_user_ids(db, s.project_id))
+            what = "All peer reviews are in. It is ready for your sign-off."
+        link = src_link(s)
+        n_for_src = 0
+        for uid in who:
+            if uid == user.id:
+                continue
+            recent = (db.query(Notification.id).filter(Notification.user_id == uid, Notification.kind == "nudge",
+                                                       Notification.link == link, Notification.created_at >= day_ago).first())
+            if recent:
+                continue
+            title = f"Reminder: {s.name}"
+            if notify(db, uid, title, f"{user.full_name} is checking in. {what}", link, kind="nudge", priority=ACTION, dedupe=False):
+                n_for_src += 1
+        if n_for_src:
+            sent += n_for_src
+        else:
+            skipped.append({"source_id": s.id, "reason": "Reminded in the last 24 hours" if who else "Nobody to remind"})
+    db.commit()
+    return {"sent": sent, "skipped": skipped}

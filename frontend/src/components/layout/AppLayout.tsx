@@ -18,6 +18,8 @@ import { IdleGuard } from '@/components/enh/IdleGuard'
 import { CommandPalette } from '@/components/enh/CommandPalette'
 import { enhApi } from '@/api/client'
 import { UndoBanner } from '@/components/enh/UndoBanner'
+import { ConnectionBanner } from '@/components/enh/ConnectionBanner'
+import { ErrorBoundary } from '@/components/enh/ErrorBoundary'
 import { useTheme } from '@/lib/theme'
 import { recordVisit } from '@/lib/recent'
 import { ShortcutsHelp } from '@/components/enh/ShortcutsHelp'
@@ -461,7 +463,8 @@ export function AppLayout() {
             onViewAll={() => navigate('/notifications')}
           />
         )}
-        <Outlet />
+        <ConnectionBanner />
+        <ErrorBoundary resetKey={location.pathname}><Outlet /></ErrorBoundary>
       </main>
 
       <ToastContainer />
