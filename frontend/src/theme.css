@@ -2,6 +2,11 @@
    Dark values are applied when <html> has the "dark" class (see lib/theme.ts). */
 :root {
   color-scheme: light;
+  --bg-fef3c7: #fef3c7;
+  --bg-f3e8ff: #f3e8ff;
+  --bg-f0f9ff: #f0f9ff;
+  --bd-fee2e2: #fee2e2;
+  --bd-ede9fe: #ede9fe;
   --page: #f8fafc;
   --gray-50: 249 250 251; --gray-100: 243 244 246; --gray-200: 229 231 235; --gray-300: 209 213 219; --gray-400: 156 163 175;
   --gray-500: 107 114 128; --gray-600: 75 85 99; --gray-700: 55 65 81; --gray-800: 31 41 55; --gray-900: 17 24 39;
@@ -63,6 +68,11 @@
 }
 .dark {
   color-scheme: dark;
+  --bg-fef3c7: rgba(245,158,11,.2);
+  --bg-f3e8ff: rgba(168,85,247,.18);
+  --bg-f0f9ff: rgba(14,165,233,.12);
+  --bd-fee2e2: rgba(248,113,113,.3);
+  --bd-ede9fe: rgba(167,139,250,.3);
   --page: #0b1120;
   --gray-50: 23 32 51; --gray-100: 28 38 56; --gray-200: 38 50 72; --gray-300: 54 67 89; --gray-400: 122 136 160;
   --gray-500: 148 163 184; --gray-600: 168 181 201; --gray-700: 195 205 219; --gray-800: 219 226 236; --gray-900: 241 245 249;

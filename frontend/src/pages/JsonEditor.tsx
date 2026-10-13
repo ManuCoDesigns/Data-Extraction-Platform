@@ -221,7 +221,7 @@ export function JsonEditor({ record, sourceId, canEdit, onSave, onClose }: Props
         <div style={{ flex: 1 }} />
 
         {/* Role badge */}
-        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: canEdit ? 'var(--bg-ecfdf5)' : '#f0f9ff', color: canEdit ? 'var(--tx-059669)' : '#0369a1', border: `1px solid ${canEdit ? 'var(--bd-6ee7b7)' : '#7dd3fc'}`, fontWeight: 700 }}>
+        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 20, background: canEdit ? 'var(--bg-ecfdf5)' : 'var(--bg-f0f9ff)', color: canEdit ? 'var(--tx-059669)' : '#0369a1', border: `1px solid ${canEdit ? 'var(--bd-6ee7b7)' : '#7dd3fc'}`, fontWeight: 700 }}>
           {canEdit ? '✏ Extractor — Editable' : '👁 Reviewer — Read Only'}
         </span>
 

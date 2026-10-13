@@ -669,6 +669,8 @@ def list_escalations(
             record_label = r.extracted_fields.get("_source_file")
             if record_label:
                 record_label = record_label.split("/")[-1]
+        if not record_label and getattr(r, "is_escalation_only", False):
+            record_label = f"No data found: {r.escalation_reason or 'escalated'}"
         record_label = record_label or (r.canonical_name or r.id[:8])
 
         escalations.append({
@@ -3231,6 +3233,13 @@ def escalate_no_data(
 
     if not payload.reason.strip():
         raise HTTPException(status_code=422, detail="A reason is required")
+
+    already = (db.query(ExtractedRecord.id)
+               .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+               .filter(ExtractionJob.source_id == source.id, ExtractedRecord.is_escalation_only == True,  # noqa: E712
+                       ExtractedRecord.review_status.in_([ReviewStatus.PENDING, ReviewStatus.PENDING_ADMIN_REVIEW])).first())
+    if already:
+        raise HTTPException(status_code=409, detail="This source is already escalated and waiting for a reviewer.")
 
     job = ExtractionJob(
         project_id=source.project_id, source_id=source.id, schema_id=source.schema_id,

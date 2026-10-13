@@ -1667,87 +1667,8 @@ function SourceDetailInner() {
         </div>
       )}
 
+
       <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Add extracted data to this source.">
-
-      <Modal open={showEscalate} onClose={() => !escalating && setShowEscalate(false)} title="Escalate — No Data Found">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12,
-            background: 'linear-gradient(135deg,var(--bg-fffbeb),#fef3c7)', border: '1px solid var(--bd-fde68a)',
-            borderRadius: 12, padding: '14px 16px' }}>
-            <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-              background: 'linear-gradient(135deg,#f59e0b,#b45309)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <AlertTriangle className="w-4 h-4" color="#fff" />
-            </div>
-            <p style={{ fontSize: 12.5, color: 'var(--tx-92400e)', margin: 0, lineHeight: 1.5 }}>
-              Per SOP-DS-003 Section 8 — for sources with nothing extractable.
-              Goes through the same reviewer approval as a normal record.
-            </p>
-          </div>
-
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-374151)', display: 'block', marginBottom: 8 }}>
-              Reason *
-            </label>
-            {loadingEscalationReasons ? (
-              <div style={{ padding: '14px 12px', textAlign: 'center', fontSize: 12, color: '#94a3b8',
-                background: 'var(--bg-f8fafc)', borderRadius: 10, border: '1px solid var(--bd-f1f5f9)' }}>
-                Loading reasons…
-              </div>
-            ) : escalationReasons.length === 0 ? (
-              <p style={{ fontSize: 12, color: '#94a3b8', padding: '10px 12px', background: 'var(--bg-f8fafc)',
-                borderRadius: 10, border: '1px solid var(--bd-f1f5f9)', margin: 0 }}>
-                No escalation reasons attached to this project yet — add some in the Resources tab.
-              </p>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {escalationReasons.map(r => {
-                  const selected = escalateReason === r
-                  return (
-                    <button key={r} type="button" onClick={() => setEscalateReason(r)}
-                      style={{
-                        textAlign: 'left', padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
-                        cursor: 'pointer', transition: 'all 0.12s',
-                        background: selected ? 'linear-gradient(135deg,var(--bg-fffbeb),#fef3c7)' : 'var(--bg-fff)',
-                        border: `1.5px solid ${selected ? '#f59e0b' : 'var(--bd-e2e8f0)'}`,
-                        color: selected ? 'var(--tx-92400e)' : 'var(--tx-374151)',
-                        display: 'flex', alignItems: 'center', gap: 10,
-                      }}>
-                      <span style={{
-                        width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
-                        border: `2px solid ${selected ? '#f59e0b' : '#cbd5e1'}`,
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      }}>
-                        {selected && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b' }} />}
-                      </span>
-                      {r}
-                    </button>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          <div>
-            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-374151)', display: 'block', marginBottom: 8 }}>
-              Note <span style={{ fontWeight: 500, color: '#94a3b8' }}>(optional)</span>
-            </label>
-            <textarea value={escalateNote} onChange={e => setEscalateNote(e.target.value)} rows={3}
-              placeholder="Any extra context for the reviewer"
-              style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid var(--bd-e2e8f0)',
-                borderRadius: 10, outline: 'none', resize: 'vertical', boxSizing: 'border-box' }} />
-          </div>
-
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
-            <Button variant="secondary" onClick={() => setShowEscalate(false)} disabled={escalating}>Cancel</Button>
-            <Button onClick={handleEscalateNoData} loading={escalating} disabled={!escalateReason}
-              style={{ background: 'linear-gradient(135deg,#f59e0b,#b45309)', border: 'none',
-                boxShadow: escalateReason ? '0 3px 10px rgba(245,158,11,0.3)' : 'none' }}>
-              <AlertTriangle className="w-3.5 h-3.5" /> Submit Escalation
-            </Button>
-          </div>
-        </div>
-      </Modal>
         <form onSubmit={handleUpload} className="flex flex-col" style={{ maxHeight: '72vh' }}>
 
           <div className="overflow-y-auto scrollbar-thin -mx-6 px-6 space-y-4" style={{ paddingBottom: 4 }}>
@@ -1924,6 +1845,86 @@ function SourceDetailInner() {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      <Modal open={showEscalate} onClose={() => !escalating && setShowEscalate(false)} title="Escalate — No Data Found">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12,
+            background: 'linear-gradient(135deg,var(--bg-fffbeb),var(--bg-fef3c7))', border: '1px solid var(--bd-fde68a)',
+            borderRadius: 12, padding: '14px 16px' }}>
+            <div style={{ width: 36, height: 36, borderRadius: 10, flexShrink: 0,
+              background: 'linear-gradient(135deg,#f59e0b,#b45309)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <AlertTriangle className="w-4 h-4" color="#fff" />
+            </div>
+            <p style={{ fontSize: 12.5, color: 'var(--tx-92400e)', margin: 0, lineHeight: 1.5 }}>
+              Per SOP-DS-003 Section 8 — for sources with nothing extractable.
+              Goes through the same reviewer approval as a normal record.
+            </p>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-374151)', display: 'block', marginBottom: 8 }}>
+              Reason *
+            </label>
+            {loadingEscalationReasons ? (
+              <div style={{ padding: '14px 12px', textAlign: 'center', fontSize: 12, color: '#94a3b8',
+                background: 'var(--bg-f8fafc)', borderRadius: 10, border: '1px solid var(--bd-f1f5f9)' }}>
+                Loading reasons…
+              </div>
+            ) : escalationReasons.length === 0 ? (
+              <p style={{ fontSize: 12, color: '#94a3b8', padding: '10px 12px', background: 'var(--bg-f8fafc)',
+                borderRadius: 10, border: '1px solid var(--bd-f1f5f9)', margin: 0 }}>
+                No escalation reasons attached to this project yet — add some in the Resources tab.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {escalationReasons.map(r => {
+                  const selected = escalateReason === r
+                  return (
+                    <button key={r} type="button" onClick={() => setEscalateReason(r)}
+                      style={{
+                        textAlign: 'left', padding: '10px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                        cursor: 'pointer', transition: 'all 0.12s',
+                        background: selected ? 'linear-gradient(135deg,var(--bg-fffbeb),var(--bg-fef3c7))' : 'var(--bg-fff)',
+                        border: `1.5px solid ${selected ? '#f59e0b' : 'var(--bd-e2e8f0)'}`,
+                        color: selected ? 'var(--tx-92400e)' : 'var(--tx-374151)',
+                        display: 'flex', alignItems: 'center', gap: 10,
+                      }}>
+                      <span style={{
+                        width: 16, height: 16, borderRadius: '50%', flexShrink: 0,
+                        border: `2px solid ${selected ? '#f59e0b' : '#cbd5e1'}`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      }}>
+                        {selected && <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#f59e0b' }} />}
+                      </span>
+                      {r}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+
+          <div>
+            <label style={{ fontSize: 13, fontWeight: 700, color: 'var(--tx-374151)', display: 'block', marginBottom: 8 }}>
+              Note <span style={{ fontWeight: 500, color: '#94a3b8' }}>(optional)</span>
+            </label>
+            <textarea value={escalateNote} onChange={e => setEscalateNote(e.target.value)} rows={3}
+              placeholder="Any extra context for the reviewer"
+              style={{ width: '100%', padding: '10px 12px', fontSize: 13, border: '1px solid var(--bd-e2e8f0)',
+                borderRadius: 10, outline: 'none', resize: 'vertical', boxSizing: 'border-box' }} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', paddingTop: 4 }}>
+            <Button variant="secondary" onClick={() => setShowEscalate(false)} disabled={escalating}>Cancel</Button>
+            <Button onClick={handleEscalateNoData} loading={escalating} disabled={!escalateReason}
+              style={{ background: 'linear-gradient(135deg,#f59e0b,#b45309)', border: 'none',
+                boxShadow: escalateReason ? '0 3px 10px rgba(245,158,11,0.3)' : 'none' }}>
+              <AlertTriangle className="w-3.5 h-3.5" /> Submit Escalation
+            </Button>
+          </div>
+        </div>
       </Modal>
 
       <Modal open={!!editRecord} onClose={() => setEditRecord(null)} title="Fix Record" size="md">
@@ -2256,6 +2257,7 @@ function FileReviewBadge({ status }: { status?: string }) {
 const RECORD_TITLE_KEYS = ['segment_name', 'company_name', 'material_name', 'supplier_name', 'product_name', 'entity_name', 'name', 'title', 'canonical_name', 'label']
 const RECORD_TITLE_SKIP = new Set(['data_origin', 'method', 'retrieved_at', 'source_url', 'url', 'notes', 'description'])
 function recordTitle(ef: Record<string, any> | undefined, r: any): string {
+  if (r?.is_escalation_only) return `No data found: ${r.escalation_reason || 'escalated'}`
   for (const k of RECORD_TITLE_KEYS) {
     const v = ef?.[k]
     if (typeof v === 'string' && v.trim()) return v.trim()

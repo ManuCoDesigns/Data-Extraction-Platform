@@ -85,7 +85,7 @@ function EditField({ label, value, field, onSave, required, isExtra }: {
         <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
           {label}
           {required && <span style={{ color: 'var(--tx-ef4444)' }}>*</span>}
-          {isExtra && <span style={{ fontSize: 9, padding: '0 5px', borderRadius: 3, background: '#f3e8ff', color: 'var(--tx-7c3aed)', border: '1px solid var(--bd-e9d5ff)' }}>extra</span>}
+          {isExtra && <span style={{ fontSize: 9, padding: '0 5px', borderRadius: 3, background: 'var(--bg-f3e8ff)', color: 'var(--tx-7c3aed)', border: '1px solid var(--bd-e9d5ff)' }}>extra</span>}
         </p>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -430,7 +430,7 @@ export function JsonRecordViewer({
           <div style={{ flex: 1, overflow: 'auto', padding: '32px', display: 'flex', justifyContent: 'center' }} className="scrollbar-thin">
             <div style={{ maxWidth: 560, width: '100%' }}>
               <div style={{
-                background: isSchemaUncertainty ? 'linear-gradient(135deg,var(--bg-fffbeb),#fef3c7)' : 'var(--bg-fff)',
+                background: isSchemaUncertainty ? 'linear-gradient(135deg,var(--bg-fffbeb),var(--bg-fef3c7))' : 'var(--bg-fff)',
                 border: `1px solid ${isSchemaUncertainty ? 'var(--bd-fde68a)' : 'var(--bd-e2e8f0)'}`,
                 borderRadius: 16, padding: 28, boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
               }}>
@@ -470,7 +470,7 @@ export function JsonRecordViewer({
 
           {/* Validation errors */}
           {(errors.length > 0 || webFlags.length > 0) && (
-            <div style={{ position: 'relative', background: 'var(--bg-fff)', border: '1px solid #fee2e2', borderRadius: 14, padding: '16px 20px 16px 22px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
+            <div style={{ position: 'relative', background: 'var(--bg-fff)', border: '1px solid var(--bd-fee2e2)', borderRadius: 14, padding: '16px 20px 16px 22px', boxShadow: '0 1px 3px rgba(0,0,0,0.05)', overflow: 'hidden' }}>
               <div style={{ position: 'absolute', top: 0, left: 0, bottom: 0, width: 4, background: 'linear-gradient(180deg,#ef4444,#dc2626)' }} />
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
                 <div style={{ width: 22, height: 22, borderRadius: 7, background: 'linear-gradient(135deg,#ef4444,#dc2626)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
@@ -564,7 +564,7 @@ export function JsonRecordViewer({
             <div style={{ background: 'var(--bg-faf5ff)', border: '1px solid var(--bd-e9d5ff)', borderRadius: 14, padding: '16px 20px' }}>
               <SectionHeader icon="✨" label={`Extras${extrasSource ? ` · ${extrasSource}` : ''}`} grad="linear-gradient(135deg,#a855f7,#7c3aed)" />
               {Object.entries(extras[0]).map(([k, v]) => v != null && (
-                <div key={k} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid #ede9fe' }}>
+                <div key={k} style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '1px solid var(--bd-ede9fe)' }}>
                   <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-7c3aed)', minWidth: 160, flexShrink: 0, fontFamily: 'var(--font-mono)', textTransform: 'none' }}>{k}</span>
                   <span style={{ fontSize: 12, color: 'var(--tx-374151)', lineHeight: 1.5 }}>{String(v)}</span>
                 </div>
@@ -663,7 +663,7 @@ export function JsonRecordViewer({
           {/* Annual Production */}
           {annualProd.length > 0 && (
             <div style={{ background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.05)' }}>
-              <div style={{ padding: '14px 20px', background: 'linear-gradient(135deg,var(--bg-fffbeb),#fef3c7)', borderBottom: '1px solid var(--bd-fde68a)' }}>
+              <div style={{ padding: '14px 20px', background: 'linear-gradient(135deg,var(--bg-fffbeb),var(--bg-fef3c7))', borderBottom: '1px solid var(--bd-fde68a)' }}>
                 <SectionHeader icon="📊" label="Annual Production" grad="linear-gradient(135deg,#f59e0b,#d97706)" />
               </div>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
