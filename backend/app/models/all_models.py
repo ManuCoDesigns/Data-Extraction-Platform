@@ -718,3 +718,29 @@ class UserSettings(Base):
     failed_logins = Column(Integer, default=0, server_default="0", nullable=False)
     locked_until = Column(DateTime(timezone=True), nullable=True)
     prefs = Column(JSON, nullable=True)   # display choices: timezone, date_format, time_format
+
+
+# ─── Source conversations ────────────────────────────────────────────────────
+
+class SourceMessage(Base):
+    """One chat message on a source, between its extractor, its reviewers and the admins."""
+    __tablename__ = "source_messages"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    body = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=now_utc, index=True)
+
+    user = relationship("User", foreign_keys=[user_id])
+
+
+class SourceMessageRead(Base):
+    """When each person last read a source's conversation, so we can show what is new."""
+    __tablename__ = "source_message_reads"
+    __table_args__ = (UniqueConstraint("source_id", "user_id", name="uq_source_message_reads_source_user"),)
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    last_read_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)

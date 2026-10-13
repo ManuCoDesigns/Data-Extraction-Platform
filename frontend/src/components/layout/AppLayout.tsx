@@ -6,7 +6,7 @@ import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
   Menu, X, Shield, Activity, AlertTriangle,
-  Zap, HeartPulse, CircleHelp, CalendarCheck, PackageCheck, ChartColumn, History, Search, PanelLeftClose, PanelLeftOpen, Sun, Moon,
+  Zap, HeartPulse, CircleHelp, MessageCircle, CalendarCheck, PackageCheck, ChartColumn, History, Search, PanelLeftClose, PanelLeftOpen, Sun, Moon,
 } from 'lucide-react'
 import { cn, ToastContainer, toast } from '@/components/ui'
 import { notificationsApi, sourcesApi } from '@/api/client'
@@ -34,7 +34,7 @@ export function AppLayout() {
   const [mobileOpen, setMobileOpen] = useState(false)
   const notifRef = useRef<HTMLDivElement>(null)
   const [escalationCount, setEscalationCount] = useState(0)
-  const [counts, setCounts] = useState({ open_questions: 0, link_problems: 0 })
+  const [counts, setCounts] = useState({ open_questions: 0, link_problems: 0, unread_messages: 0 })
   const [paletteOpen, setPaletteOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
   const [collapsed, setCollapsed] = useState(() => { try { return localStorage.getItem('dep_sidebar') === 'mini' } catch { return false } })
@@ -193,6 +193,7 @@ export function AppLayout() {
     { to: '/workload',    icon: Activity,        label: 'Team Workload', show: isTeamLead },
     { to: '/digest',      icon: CalendarCheck,   label: 'Daily Digest', show: isTeamLead },
     { to: '/delivery',    icon: PackageCheck,    label: 'Delivery Summary', show: isTeamLead },
+    { to: '/messages',   icon: MessageCircle,   label: 'Messages',     show: true, badge: counts.unread_messages },
     { to: '/data-health', icon: HeartPulse,      label: 'Data Health',  show: true, badge: counts.link_problems, badgeColor: '#d97706' },
     { to: '/client-questions', icon: CircleHelp, label: 'Client Questions', show: true, badge: counts.open_questions, badgeColor: '#d97706' },
     { to: '/insights',    icon: ChartColumn,     label: isTeamLead ? 'Insights' : 'My Stats', show: true },

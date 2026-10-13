@@ -14,7 +14,7 @@ from app.core.source_access import project_scopes, restrict_sources_query, is_or
 from app.db.session import get_db
 from app.models.all_models import (
     AuditAction, AuditLog, ClientQuestion, ExtractedRecord, ExtractionJob, Project, ProjectMember, ReviewStatus, Source, SourceLinkCheck,
-    Notification, SourcePeerReview, SourceStatus, User, UserSettings,
+    Notification, SourceMessage, SourceMessageRead, SourcePeerReview, SourceStatus, User, UserSettings,
 )
 from app.services import enh
 
@@ -155,7 +155,8 @@ def nav_counts(db: Session = Depends(get_db), user: User = Depends(get_current_u
     vis = _visible_sources(db, user).filter(Source.status != SourceStatus.APPROVED).with_entities(Source.id)
     bad = (db.query(func.count(SourceLinkCheck.source_id))
            .filter(SourceLinkCheck.source_id.in_(vis), SourceLinkCheck.status.in_(("login", "blocked", "dead"))).scalar())
-    return {"open_questions": int(open_q or 0), "link_problems": int(bad or 0)}
+    unread = sum(t["unread"] for _, t in _inbox_rows(db, user))
+    return {"open_questions": int(open_q or 0), "link_problems": int(bad or 0), "unread_messages": int(unread)}
 
 
 # ─── Delivery summary (for the client conversation) ─────────────────────────
@@ -1014,3 +1015,179 @@ def source_activity(source_id: str, limit: int = Query(40, ge=1, le=200),
         items.append({"id": r.id, "at": r.timestamp, "who": names.get(r.user_id) or "System", "text": text, "tone": tone,
                       "detail": _activity_detail(key, r.after_value if isinstance(r.after_value, dict) else None)})
     return {"items": items, "more": len(rows) > limit}
+
+
+# ─── Conversations on a source ───────────────────────────────────────────────
+
+MSG_MAX = 2000
+
+
+def _participant_ids(s: Source) -> set:
+    ids = {p.user_id for p in s.peer_reviews}
+    for x in (s.assigned_extractor_id, s.assigned_reviewer_id):
+        if x:
+            ids.add(x)
+    return ids
+
+
+def _can_chat(user: User, s: Source) -> bool:
+    """Admins and QA leads can join any conversation they can see. Everyone else needs to be on the source."""
+    return _lead(user) or user.id in _participant_ids(s)
+
+
+def _chat_source(db: Session, user: User, source_id: str) -> Source:
+    s = _visible_sources(db, user).filter(Source.id == source_id).first()
+    if not s or not _can_chat(user, s):
+        raise HTTPException(status_code=404, detail="Source not found.")
+    return s
+
+
+def _sender_role(db: Session, s: Source, uid: str | None, roles_by_user: dict) -> str:
+    if uid and uid == s.assigned_extractor_id:
+        return "Extractor"
+    if uid and any(p.user_id == uid for p in s.peer_reviews):
+        return "Peer reviewer"
+    if uid and uid == s.assigned_reviewer_id:
+        return "Reviewer"
+    r = roles_by_user.get(uid, set())
+    if "org_admin" in r:
+        return "Admin"
+    if r & LEAD_ROLES:
+        return "Lead"
+    return "Team"
+
+
+def _roles_map(db: Session, uids: set) -> dict:
+    out: dict = {}
+    if not uids:
+        return out
+    from app.models.all_models import UserRoleAssignment
+    for ra in db.query(UserRoleAssignment).filter(UserRoleAssignment.user_id.in_(uids)).all():
+        out.setdefault(ra.user_id, set()).add(ra.role.value)
+    return out
+
+
+def _last_read(db: Session, source_id: str, uid: str):
+    r = db.query(SourceMessageRead.last_read_at).filter(SourceMessageRead.source_id == source_id, SourceMessageRead.user_id == uid).first()
+    return r[0] if r else None
+
+
+def _aware(dt):
+    return dt if (dt is None or dt.tzinfo) else dt.replace(tzinfo=timezone.utc)
+
+
+@router.get("/sources/{source_id}/messages")
+def source_messages(source_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    s = _chat_source(db, user, source_id)
+    rows = db.query(SourceMessage).filter(SourceMessage.source_id == s.id).order_by(SourceMessage.created_at.asc()).limit(300).all()
+    uids = {m.user_id for m in rows if m.user_id}
+    names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(uids)).all()} if uids else {}
+    rmap = _roles_map(db, uids)
+    seen = _aware(_last_read(db, s.id, user.id))
+    items = [{"id": m.id, "who": names.get(m.user_id) or "Former member", "role": _sender_role(db, s, m.user_id, rmap), "body": m.body,
+              "at": m.created_at, "mine": m.user_id == user.id,
+              "new": bool(m.user_id != user.id and (seen is None or _aware(m.created_at) > seen))} for m in rows]
+    pids = _participant_ids(s)
+    people = []
+    if pids:
+        pn = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(pids)).all()}
+        prm = _roles_map(db, set(pids))
+        people = [{"name": pn.get(i, "Member"), "role": _sender_role(db, s, i, prm)} for i in pids if i in pn]
+    can_post = "read_only" not in _roles(user) or _lead(user)
+    return {"items": items, "people": people, "can_post": can_post, "closed": s.status == SourceStatus.APPROVED}
+
+
+@router.post("/sources/{source_id}/messages/read")
+def source_messages_read(source_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    s = _chat_source(db, user, source_id)
+    row = db.query(SourceMessageRead).filter(SourceMessageRead.source_id == s.id, SourceMessageRead.user_id == user.id).first()
+    now = enh.now_utc()
+    if row:
+        row.last_read_at = now
+    else:
+        db.add(SourceMessageRead(source_id=s.id, user_id=user.id, last_read_at=now))
+    # Their chat notice for this source is answered by reading it.
+    link = src_link(s)
+    for n in db.query(Notification).filter(Notification.user_id == user.id, Notification.kind == "message", Notification.link == link,
+                                           Notification.is_read == False).all():  # noqa: E712
+        n.is_read = True
+    db.commit()
+    return {"ok": True}
+
+
+class MessageBody(BaseModel):
+    body: str
+
+
+@router.post("/sources/{source_id}/messages")
+def post_source_message(source_id: str, body: MessageBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    s = _chat_source(db, user, source_id)
+    if "read_only" in _roles(user) and not _lead(user):
+        raise HTTPException(status_code=403, detail="Your role can read but not write.")
+    text = (body.body or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Write a message first.")
+    if len(text) > MSG_MAX:
+        raise HTTPException(status_code=422, detail=f"Keep messages under {MSG_MAX} characters.")
+    m = SourceMessage(source_id=s.id, user_id=user.id, body=text)
+    db.add(m)
+    db.flush()
+    # Posting counts as having read everything so far.
+    row = db.query(SourceMessageRead).filter(SourceMessageRead.source_id == s.id, SourceMessageRead.user_id == user.id).first()
+    now = enh.now_utc()
+    if row:
+        row.last_read_at = now
+    else:
+        db.add(SourceMessageRead(source_id=s.id, user_id=user.id, last_read_at=now))
+    snippet = text if len(text) <= 140 else text[:137] + "..."
+    for uid in _participant_ids(s) - {user.id}:
+        notify(db, uid, f"New message: {s.name}", f"{user.full_name}: {snippet}", src_link(s), kind="message", priority=INFO)
+    db.commit()
+    return {"id": m.id, "at": m.created_at}
+
+
+@router.delete("/messages/{message_id}")
+def delete_source_message(message_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    m = db.query(SourceMessage).filter(SourceMessage.id == message_id).first()
+    if not m:
+        raise HTTPException(status_code=404, detail="Message not found.")
+    s = _chat_source(db, user, m.source_id)
+    if m.user_id != user.id and not (_roles(user) & {"org_admin", "project_admin"}):
+        raise HTTPException(status_code=403, detail="You can only delete your own messages.")
+    db.delete(m)
+    db.commit()
+    return {"ok": True}
+
+
+def _inbox_rows(db: Session, user: User, limit: int = 100):
+    """One row per source conversation the person can open, newest first, with how many messages are new for them."""
+    vis = {s.id: s for s in _visible_sources(db, user).all()}
+    if not vis:
+        return []
+    ids = list(vis)
+    msgs = db.query(SourceMessage).filter(SourceMessage.source_id.in_(ids)).order_by(SourceMessage.created_at.desc()).all()
+    reads = {r.source_id: _aware(r.last_read_at) for r in db.query(SourceMessageRead).filter(SourceMessageRead.user_id == user.id, SourceMessageRead.source_id.in_(ids)).all()}
+    by: dict = {}
+    for m in msgs:
+        s = vis[m.source_id]
+        if not _can_chat(user, s):
+            continue
+        t = by.setdefault(m.source_id, {"last": m, "count": 0, "unread": 0})
+        t["count"] += 1
+        seen = reads.get(m.source_id)
+        if m.user_id != user.id and (seen is None or _aware(m.created_at) > seen):
+            t["unread"] += 1
+    rows = sorted(by.items(), key=lambda kv: kv[1]["last"].created_at, reverse=True)[:limit]
+    return [(vis[sid], t) for sid, t in rows]
+
+
+@router.get("/messages/inbox")
+def messages_inbox(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    rows = _inbox_rows(db, user)
+    uids = {t["last"].user_id for _, t in rows if t["last"].user_id}
+    names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(uids)).all()} if uids else {}
+    pnames = {p.id: p.name for p in db.query(Project).filter(Project.id.in_({s.project_id for s, _ in rows})).all()} if rows else {}
+    return {"threads": [{"source_id": s.id, "project_id": s.project_id, "source": s.name, "project": pnames.get(s.project_id, ""),
+                         "last_body": t["last"].body[:160], "last_who": names.get(t["last"].user_id) or "Former member",
+                         "last_at": t["last"].created_at, "count": t["count"], "unread": t["unread"], "stage": s.status.value} for s, t in rows],
+            "unread": sum(t["unread"] for _, t in rows)}

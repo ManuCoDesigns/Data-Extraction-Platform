@@ -10,6 +10,7 @@ import { PeerReviewPanel } from '@/components/PeerReviewPanel'
 import { isPeerOf } from '@/lib/peers'
 import { AskClientModal } from '@/components/enh/AskClient'
 import { SourceActivity } from '@/components/enh/SourceActivity'
+import { SourceChat } from '@/components/enh/SourceChat'
 import { SourceRequiredCard } from '@/components/enh/RequiredFields'
 import { LinkChip } from '@/pages/DataHealth'
 import {
@@ -1087,6 +1088,8 @@ function SourceDetailInner() {
       </Card>
 
       <PeerReviewPanel sourceId={source.id} onChanged={load} />
+
+      <SourceChat sourceId={source.id} />
 
       <SourceActivity sourceId={source.id} refreshKey={source.updated_at} />
 

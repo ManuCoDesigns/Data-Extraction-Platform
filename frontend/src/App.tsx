@@ -26,6 +26,7 @@ import { DigestPage } from '@/pages/Digest'
 import { AuditTrailPage } from '@/pages/AuditTrail'
 import { DeliveryPage } from '@/pages/Delivery'
 import { InsightsPage } from '@/pages/Insights'
+import { MessagesPage } from '@/pages/Messages'
 import { useAuthStore } from '@/store/auth'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -152,6 +153,7 @@ export function App() {
           <Route path="data-health" element={<DataHealthPage />} />
           <Route path="client-questions" element={<ClientQuestionsPage />} />
           <Route path="insights" element={<InsightsPage />} />
+          <Route path="messages" element={<MessagesPage />} />
           <Route path="digest" element={<RequireTeamLead><DigestPage /></RequireTeamLead>} />
           <Route path="delivery" element={<RequireTeamLead><DeliveryPage /></RequireTeamLead>} />
           <Route path="audit" element={<RequireTeamLead><AuditTrailPage /></RequireTeamLead>} />
