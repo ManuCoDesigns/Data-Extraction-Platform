@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Download, RefreshCw, Trophy } from 'lucide-react'
 import { enhApi, projectsApi } from '@/api/client'
 import { Avatar, Button, cn, toast } from '@/components/ui'
-import { Blank, Chip, PageHeader, Panel, SelectBox, Skeletons, Tile, type Tone, PAGE, shortAgo } from '@/components/enh/kit'
+import { Blank, Chip, PageHeader, Panel, SelectBox, Skeletons, Tabs, Tile, type Tone, PAGE, shortAgo } from '@/components/enh/kit'
+import { WorkflowMonitor } from '@/components/enh/WorkflowMonitor'
 import { useAuthStore } from '@/store/auth'
 
 interface P {
@@ -28,6 +29,8 @@ export function InsightsPage() {
   const [me, setMe] = useState<P | null>(null)
   const [loading, setLoading] = useState(true)
   const [view, setView] = useState<'extract' | 'peer'>('extract')
+  const [tab, setTab] = useState<'overview' | 'people'>(() => { try { return localStorage.getItem('dep_insights_tab') === 'people' ? 'people' : 'overview' } catch { return 'overview' } })
+  const pickTab = (t: 'overview' | 'people') => { setTab(t); try { localStorage.setItem('dep_insights_tab', t) } catch { /* ignore */ } }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -54,7 +57,7 @@ export function InsightsPage() {
   return (
     <div className={PAGE}>
       <PageHeader title="Insights"
-        subtitle={isLead ? 'How work is moving: deliveries, how often records pass the first review, and how fast peers respond.' : 'Your own numbers: what you delivered, how often it passed review first time, and how quickly you responded.'}
+        subtitle={isLead ? 'Follow every project from extraction to delivery, and see how the team is doing.' : 'Your own numbers: what you delivered, how often it passed review first time, and how quickly you responded.'}
         actions={<>
           {isLead && projects.length > 1 && (
             <SelectBox label="Project" value={project} onChange={setProject}>
@@ -69,7 +72,13 @@ export function InsightsPage() {
           {isLead && <Button variant="secondary" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="w-4 h-4" /> Download CSV</Button>}
         </>} />
 
-      {loading ? <Skeletons rows={5} /> : (
+      {isLead && (
+        <Tabs value={tab} onChange={pickTab} items={[{ key: 'overview', label: 'Project overview' }, { key: 'people', label: 'People' }]} />
+      )}
+
+      {isLead && tab === 'overview' ? (
+        <WorkflowMonitor project={project} days={Number(days)} projects={projects} onPickProject={setProject} />
+      ) : loading ? <Skeletons rows={5} /> : (
         <>
           {(me || !isLead) && <section aria-label="Your numbers">
             <h2 className="text-sm font-bold text-gray-900 mb-3">Your numbers</h2>

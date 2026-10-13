@@ -432,6 +432,7 @@ export const enhApi = {
   runReminders: () => api.post('/enh/reminders/run').then(r => r.data),
   audit: (params: Record<string, string | number | undefined>) => api.get('/enh/audit', { params }).then(r => r.data),
   peopleStats: (days = 30, projectId?: string) => api.get('/enh/stats/people', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
+  monitor: (days = 30, projectId?: string) => api.get('/enh/monitor', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
   myStats: (days = 30) => api.get('/enh/stats/me', { params: { days } }).then(r => r.data),
   people: (projectId?: string) => api.get('/enh/people', { params: { project_id: projectId || undefined } }).then(r => r.data),
   bulkUndo: (snapshots: any[]) => api.post('/enh/sources/bulk/undo', { snapshots }).then(r => r.data),

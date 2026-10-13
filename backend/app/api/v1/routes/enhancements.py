@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.core.mailer import enabled as mail_enabled, send_now
@@ -218,6 +218,128 @@ def delivery_summary(project_id: str | None = None, db: Session = Depends(get_db
                    "delivered_this_week": sum(1 for d in delivered if d["approved_at"] and enh.aware(d["approved_at"]) >= week)},
         "stages": stages, "delivered": delivered[:300], "delivered_count": len(delivered),
         "waiting_on_client": waiting, "cant_open": cant_open,
+    }
+
+
+# ─── Workflow monitor (whole project at a glance) ────────────────────────────
+
+MONITOR_STAGES = ["not_started", "extracting", "needs_fixes", "peer_review", "signoff", "delivered"]
+
+
+def _monitor_stage(s: Source, peers_done: int, peers_total: int) -> str:
+    st = s.status
+    if st == SourceStatus.APPROVED:
+        return "delivered"
+    if st == SourceStatus.NOT_STARTED:
+        return "not_started"
+    if st == SourceStatus.EXTRACTING:
+        return "extracting"
+    if st in (SourceStatus.NEEDS_FIXES, SourceStatus.CHANGES_REQUESTED):
+        return "needs_fixes"
+    if peers_total and peers_done >= peers_total:
+        return "signoff"
+    return "peer_review"
+
+
+@router.get("/monitor")
+def workflow_monitor(project_id: str | None = None, days: int = Query(30, ge=1, le=365),
+                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Where every source in the chosen project (or all projects) is in the workflow, who has it,
+    how much was extracted, reviewed, sent back and delivered, and how activity moved over time."""
+    _need_lead(user)
+    srcs = _visible_sources(db, user, project_id).all()
+    now = enh.now_utc()
+    since = now - timedelta(days=days)
+    empty = {"generated_at": now, "days": days, "project_id": project_id, "stages": {k: 0 for k in MONITOR_STAGES},
+             "totals": {}, "series": {"buckets": [], "extracted": [], "peer_submitted": [], "sent_back": [], "delivered": []},
+             "projects": [], "sources": []}
+    if not srcs:
+        return empty
+    ids = [s.id for s in srcs]
+    pnames = {p.id: p.name for p in db.query(Project).filter(Project.id.in_({s.project_id for s in srcs})).all()}
+    uids = {s.assigned_extractor_id for s in srcs if s.assigned_extractor_id}
+    unames = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(uids)).all()} if uids else {}
+
+    # Records per source: total, valid, approved, sent back at least once.
+    rec = {}
+    for sid, total, valid, approved, returned in (
+        db.query(ExtractionJob.source_id, func.count(ExtractedRecord.id),
+                 func.coalesce(func.sum(case((ExtractedRecord.is_schema_valid == True, 1), else_=0)), 0),  # noqa: E712
+                 func.coalesce(func.sum(case((ExtractedRecord.review_status == ReviewStatus.APPROVED, 1), else_=0)), 0),
+                 func.coalesce(func.sum(case((ExtractedRecord.correction_count > 0, 1), else_=0)), 0))
+        .join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
+        .filter(ExtractionJob.source_id.in_(ids), ExtractedRecord.is_escalation_only == False)  # noqa: E712
+        .group_by(ExtractionJob.source_id).all()
+    ):
+        rec[sid] = (int(total), int(valid), int(approved), int(returned))
+
+    stages = {k: 0 for k in MONITOR_STAGES}
+    rows, by_project = [], {}
+    for s in srcs:
+        pr = list(s.peer_reviews)
+        done = sum(1 for p in pr if p.status == "submitted")
+        stage = _monitor_stage(s, done, len(pr))
+        stages[stage] += 1
+        total, valid, approved, returned = rec.get(s.id, (0, 0, 0, 0))
+        upd = enh.aware(s.updated_at) if s.updated_at else None
+        rows.append({
+            "source_id": s.id, "project_id": s.project_id, "project": pnames.get(s.project_id), "name": s.name,
+            "item_no": s.external_ref_id, "stage": stage, "extractor": unames.get(s.assigned_extractor_id),
+            "peers_done": done, "peers_total": len(pr), "records": total, "valid": valid, "approved": approved, "sent_back": returned,
+            "days_in_stage": max(0, (now - upd).days) if upd else None, "updated_at": s.updated_at,
+            "submitted_to_client": bool(getattr(s, "xtrium_submitted_at", None)),
+        })
+        pj = by_project.setdefault(s.project_id, {"project_id": s.project_id, "name": pnames.get(s.project_id), "sources": 0,
+                                                  "stages": {k: 0 for k in MONITOR_STAGES}, "records": 0, "approved": 0, "sent_back": 0,
+                                                  "peers_done": 0, "peers_total": 0, "last_activity": None})
+        pj["sources"] += 1; pj["stages"][stage] += 1; pj["records"] += total; pj["approved"] += approved; pj["sent_back"] += returned
+        pj["peers_done"] += done; pj["peers_total"] += len(pr)
+        if upd and (pj["last_activity"] is None or upd > pj["last_activity"]):
+            pj["last_activity"] = upd
+    rows.sort(key=lambda r: (MONITOR_STAGES.index(r["stage"]) == len(MONITOR_STAGES) - 1, -(r["days_in_stage"] or 0)))
+
+    # Activity per day (per week for a year view).
+    step = 1 if days <= 90 else 7
+    first = (since.replace(hour=0, minute=0, second=0, microsecond=0))
+    n = (days // step) + 1
+    buckets = [first + timedelta(days=step * i) for i in range(n)]
+    def idx(ts):
+        ts = enh.aware(ts)
+        if ts is None or ts < first:
+            return None
+        i = int((ts - first).days // step)
+        return i if 0 <= i < n else None
+    series = {k: [0] * n for k in ("extracted", "peer_submitted", "sent_back", "delivered")}
+    for (ts,) in (db.query(ExtractedRecord.created_at).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+                  .filter(ExtractionJob.source_id.in_(ids), ExtractedRecord.is_escalation_only == False,  # noqa: E712
+                          ExtractedRecord.created_at >= first).all()):
+        i = idx(ts)
+        if i is not None: series["extracted"][i] += 1
+    for (ts,) in db.query(SourcePeerReview.submitted_at).filter(SourcePeerReview.source_id.in_(ids), SourcePeerReview.submitted_at >= first).all():
+        i = idx(ts)
+        if i is not None: series["peer_submitted"][i] += 1
+    for (ts,) in (db.query(AuditLog.timestamp).join(ExtractedRecord, AuditLog.record_id == ExtractedRecord.id)
+                  .join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+                  .filter(ExtractionJob.source_id.in_(ids), AuditLog.action == AuditAction.RECORD_REJECTED, AuditLog.timestamp >= first).all()):
+        i = idx(ts)
+        if i is not None: series["sent_back"][i] += 1
+    for s in srcs:
+        if s.status == SourceStatus.APPROVED and s.approved_at:
+            i = idx(s.approved_at)
+            if i is not None: series["delivered"][i] += 1
+
+    tot_rec = sum(v[0] for v in rec.values()); tot_app = sum(v[2] for v in rec.values()); tot_ret = sum(v[3] for v in rec.values())
+    peers_total = sum(r["peers_total"] for r in rows); peers_done = sum(r["peers_done"] for r in rows)
+    stuck = sum(1 for r in rows if r["stage"] != "delivered" and (r["days_in_stage"] or 0) >= 7)
+    return {
+        "generated_at": now, "days": days, "project_id": project_id, "stages": stages,
+        "totals": {"sources": len(srcs), "delivered": stages["delivered"], "percent": round(100 * stages["delivered"] / len(srcs)),
+                   "records": tot_rec, "records_approved": tot_app, "records_sent_back": tot_ret,
+                   "peers_done": peers_done, "peers_total": peers_total, "stuck": stuck,
+                   "submitted_to_client": sum(1 for r in rows if r["submitted_to_client"])},
+        "series": {"buckets": [b.date().isoformat() for b in buckets], "step_days": step, **series},
+        "projects": sorted(by_project.values(), key=lambda p: (p["name"] or "").lower()),
+        "sources": rows[:600],
     }
 
 
