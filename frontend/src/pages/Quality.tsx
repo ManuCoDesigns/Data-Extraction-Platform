@@ -8,7 +8,7 @@ const scoreTone = (v: number | null | undefined): Tone => (v === null || v === u
 const show = (v: unknown) => (v === null || v === undefined || v === '' ? '(empty)' : typeof v === 'object' ? JSON.stringify(v) : String(v))
 const err = (e: any, d: string) => e?.response?.data?.detail || d
 
-type Tab = 'scores' | 'findings' | 'audit'
+type Tab = 'scores' | 'sop' | 'findings' | 'audit'
 
 export function QualityPage() {
   const [sources, setSources] = useState<any[] | null>(null)
@@ -23,7 +23,7 @@ export function QualityPage() {
     <div className={PAGE}>
       <PageHeader title="Quality" subtitle="How accurate the delivered data is, how many errors reviewers caught, and how many got through. Scores come from errors that were checked and from fields an admin verified against the real source." />
       <div className="flex items-center gap-3 flex-wrap">
-        <Tabs value={tab} onChange={setTab} items={[{ key: 'scores', label: 'Scores' }, { key: 'findings', label: 'Errors logged', count: (sources ?? []).reduce((n, s) => n + s.open_findings, 0) }, { key: 'audit', label: 'Check against source' }]} />
+        <Tabs value={tab} onChange={setTab} items={[{ key: 'scores', label: 'Scores' }, { key: 'sop', label: 'SOP check' }, { key: 'findings', label: 'Errors logged', count: (sources ?? []).reduce((n, s) => n + s.open_findings, 0) }, { key: 'audit', label: 'Check against source' }]} />
         <SelectBox label="Source" value={sourceId} onChange={setSourceId}>
           <option value="">All sources</option>
           {(sources ?? []).map(s => <option key={s.source_id} value={s.source_id}>{s.name}{s.open_findings ? ` (${s.open_findings} open)` : ''}</option>)}
@@ -35,6 +35,7 @@ export function QualityPage() {
         )}
       </div>
       {tab === 'scores' && <Scores sourceId={sourceId} days={Number(days)} />}
+      {tab === 'sop' && <SopCheck sourceId={sourceId} onPick={id => setSourceId(id)} />}
       {tab === 'findings' && <Findings sourceId={sourceId} source={src} />}
       {tab === 'audit' && <Audit sourceId={sourceId} />}
     </div>
@@ -206,6 +207,73 @@ function Audit({ sourceId }: { sourceId: string }) {
           </ul>
         </Panel>
       )}
+    </div>
+  )
+}
+
+function SopCheck({ sourceId, onPick }: { sourceId: string; onPick: (id: string) => void }) {
+  const [ov, setOv] = useState<any[] | null>(null)
+  const [d, setD] = useState<any>(null)
+  useEffect(() => { setOv(null); setD(null); if (sourceId) qualityApi.sopCheck(sourceId).then(setD).catch(() => setD({ error: true })); else qualityApi.sopOverview().then(r => setOv(r.items)).catch(() => setOv([])) }, [sourceId])
+
+  if (!sourceId) {
+    if (!ov) return <Skeletons rows={4} />
+    if (ov.length === 0) return <Blank title="No sources to check yet" text="Sources show here once work has started on them." />
+    return (
+      <Panel title="Do the records follow each source's SOP?" subtitle="A record follows the SOP when every field the SOP requires is filled in. Open a source to see which fields fall short.">
+        <ul className="m-0 p-0 list-none divide-y divide-gray-50">
+          {ov.map(x => (
+            <li key={x.source_id} className="py-2.5 flex items-center gap-3 flex-wrap">
+              <button type="button" onClick={() => onPick(x.source_id)} className="text-sm font-semibold text-gray-900 hover:underline text-left flex-1 min-w-[160px]">{x.name}</button>
+              {x.sop_code && <Chip tone="indigo">{x.sop_code}</Chip>}
+              {x.known ? <><span className="text-sm text-gray-500 tabular-nums">{x.compliant} of {x.records} records</span><Chip tone={scoreTone(x.rate)}>{pc(x.rate)}</Chip></> : <Chip tone="gray">No SOP saved</Chip>}
+            </li>
+          ))}
+        </ul>
+      </Panel>
+    )
+  }
+  if (!d) return <Skeletons rows={4} />
+  if (d.error) return <Blank title="Couldn't run the SOP check" text="Check your connection and try again." />
+  if (!d.known) return <Blank title="No SOP saved for this source" text="Open the source's SOP once so a copy is saved. After that the check can run." />
+  return (
+    <div className="space-y-5">
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
+        <Tile label="Follow the SOP" value={pc(d.rate)} tone={scoreTone(d.rate)} hint={`${d.compliant} of ${d.records} records have every required field`} />
+        <Tile label="Records falling short" value={d.failing_total} tone={d.failing_total ? 'amber' : 'green'} hint="Missing at least one required field" />
+        <Tile label="Required fields" value={d.required.length} hint={d.sop_code ?? ''} />
+        <Tile label="Fields not in the SOP" value={d.extra_fields.length} tone={d.extra_fields.length ? 'amber' : 'gray'} hint="Filled in but not listed by the SOP" />
+      </div>
+      <div className="grid gap-5 lg:grid-cols-2">
+        <Panel title="Required fields" subtitle="How often each one is filled in, weakest first">
+          <ul className="m-0 p-0 list-none space-y-2">
+            {d.by_field.map((f: any) => (
+              <li key={f.field} className="text-sm">
+                <div className="flex justify-between"><span className="text-gray-800">{f.field}</span><span className="tabular-nums text-gray-600">{f.filled} filled · {f.missing} missing</span></div>
+                <div className="h-1.5 rounded-full bg-gray-100 mt-1"><div className={`h-1.5 rounded-full ${f.pct >= 90 ? 'bg-emerald-500' : f.pct >= 75 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${f.pct ?? 0}%` }} /></div>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+        <Panel title="Fields the SOP does not list">
+          {d.extra_fields.length === 0 ? <Blank title="None" text="Every filled field is one the SOP asks for." /> : (
+            <ul className="m-0 p-0 list-none space-y-1.5">{d.extra_fields.map((f: any) => <li key={f.field} className="flex justify-between text-sm"><span className="text-gray-800">{f.field}</span><span className="tabular-nums text-gray-600">{f.count} record{f.count === 1 ? '' : 's'}</span></li>)}</ul>
+          )}
+        </Panel>
+      </div>
+      <Panel title="Records falling short" subtitle={d.failing_total > d.failing.length ? `Showing ${d.failing.length} of ${d.failing_total}. Use "Run system checks" in Errors logged to log all of them.` : 'Use "Run system checks" in Errors logged to log these as findings.'}>
+        {d.failing.length === 0 ? <Blank title="Every record follows the SOP" /> : (
+          <ul className="m-0 p-0 list-none divide-y divide-gray-50">
+            {d.failing.map((r: any) => (
+              <li key={r.record_id} className="py-2 text-sm flex items-center gap-2 flex-wrap">
+                <span className="font-semibold text-gray-900">{r.record}</span>
+                <span className="text-gray-500">missing</span>
+                {r.missing.map((m: string) => <Chip key={m} tone="red">{m}</Chip>)}
+              </li>
+            ))}
+          </ul>
+        )}
+      </Panel>
     </div>
   )
 }

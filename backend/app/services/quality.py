@@ -180,3 +180,31 @@ def compute_summary(findings: list, audits: list, records_by_source: dict, extra
         "extractors": extractors, "reviewers": reviewers,
         "confidence": "low" if len(audits) < 30 else "ok",
     }
+
+
+def sop_check(fields: dict, required: list[str], allowed: set | None) -> dict:
+    """Does one record follow the SOP's field list? Missing = required but empty or a placeholder like "N/A"."""
+    fields = fields or {}
+    missing = [f for f in required if not _present(fields.get(f)) or str(fields.get(f)).strip().lower() in PLACEHOLDERS]
+    extra = sorted(k for k in fields if allowed is not None and k not in allowed and k not in SKIP_FIELDS and _present(fields[k]))
+    return {"missing": missing, "extra": extra}
+
+
+def sop_report(records: list[tuple[str, str, dict]], required: list[str], allowed: set | None) -> dict:
+    """records = (record_id, label, fields). Field-by-field and record-by-record view of SOP compliance."""
+    by_field = {f: {"field": f, "filled": 0, "missing": 0} for f in required}
+    extra_count: Counter = Counter()
+    failing, ok = [], 0
+    for rid, label, fields in records:
+        r = sop_check(fields, required, allowed)
+        for f in required:
+            by_field[f]["missing" if f in r["missing"] else "filled"] += 1
+        extra_count.update(r["extra"])
+        if r["missing"]:
+            failing.append({"record_id": rid, "record": label, "missing": r["missing"], "extra": r["extra"]})
+        else:
+            ok += 1
+    n = len(records)
+    rows = [{**v, "pct": pct(v["filled"], n)} for v in by_field.values()]
+    return {"records": n, "compliant": ok, "rate": pct(ok, n), "by_field": sorted(rows, key=lambda x: (x["pct"] if x["pct"] is not None else 101)),
+            "extra_fields": [{"field": f, "count": c} for f, c in extra_count.most_common()], "failing": failing[:200], "failing_total": len(failing)}

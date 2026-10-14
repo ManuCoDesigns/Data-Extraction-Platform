@@ -156,6 +156,40 @@ def resolve_finding(finding_id: str, body: ResolveBody, db: Session = Depends(ge
     return _out(f, _names(db, {f.raised_by, f.resolved_by}))
 
 
+def _sop_for(s: Source) -> dict:
+    from app.api.v1.routes.integrations import _sop_requirements
+    return _sop_requirements(s)
+
+
+@router.get("/sources/{source_id}/sop-check")
+def sop_check_source(source_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Every record in the source checked against the SOP saved for it: is each required field filled in?"""
+    _need_lead(user)
+    s = _source(db, user, source_id)
+    req = _sop_for(s)
+    base = {"source_id": s.id, "source": s.name, "known": bool(req["known"] and req["required"]), "sop_code": req["sop_code"], "required": req["required"]}
+    if not base["known"]:
+        return {**base, "records": 0, "compliant": 0, "rate": None, "by_field": [], "extra_fields": [], "failing": [], "failing_total": 0}
+    recs = [(r.id, _label(r, i), r.extracted_fields or {}) for i, r in enumerate(_records(db, s.id))]
+    return {**base, **q.sop_report(recs, req["required"], req["allowed"])}
+
+
+@router.get("/sop-overview")
+def sop_overview(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """One line per source: how many records follow the SOP's required fields."""
+    _need_lead(user)
+    out = []
+    for s in _visible_sources(db, user, project_id).filter(Source.status != SourceStatus.NOT_STARTED).all():
+        req = _sop_for(s)
+        row = {"source_id": s.id, "name": s.name, "sop_code": req["sop_code"], "known": bool(req["known"] and req["required"]), "records": 0, "compliant": 0, "rate": None}
+        if row["known"]:
+            recs = [(r.id, "", r.extracted_fields or {}) for r in _records(db, s.id)]
+            rep = q.sop_report(recs, req["required"], req["allowed"])
+            row.update(records=rep["records"], compliant=rep["compliant"], rate=rep["rate"])
+        out.append(row)
+    return {"items": sorted(out, key=lambda x: (not x["known"], x["rate"] if x["rate"] is not None else 101, x["name"]))}
+
+
 @router.post("/sources/{source_id}/scan")
 def scan_source(source_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Run the automatic checks over every record in the source and log what they find."""
@@ -166,8 +200,17 @@ def scan_source(source_id: str, db: Session = Depends(get_db), user: User = Depe
     have = {(f.record_id, f.field, f.rule) for f in db.query(QualityFinding).filter(QualityFinding.source_id == s.id, QualityFinding.origin == "system").all()}
     created = 0
     seen_names: dict = {}
+    req = _sop_for(s)
+    sop_on = bool(req["known"] and req["required"])
     for r in recs:
-        for h in q.check_record(r.extracted_fields or {}, fields):
+        hits = q.check_record(r.extracted_fields or {}, fields)
+        if sop_on:
+            sc = q.sop_check(r.extracted_fields or {}, req["required"], req["allowed"])
+            already = {h["field"] for h in hits if h["category"] == "missing_value"}
+            code = req["sop_code"] or "the SOP"
+            hits += [{"field": f, "category": "sop_rule", "rule": "sop_required", "severity": "major", "message": f"{code} requires this field and it is empty."} for f in sc["missing"] if f not in already]
+            hits += [{"field": f, "category": "sop_rule", "rule": "sop_extra", "severity": "minor", "message": f"{code} does not list this field."} for f in sc["extra"]]
+        for h in hits:
             key = (r.id, h["field"], h["rule"])
             if key in have:
                 continue
@@ -185,7 +228,7 @@ def scan_source(source_id: str, db: Session = Depends(get_db), user: User = Depe
                 created += 1
             seen_names.setdefault(nm, r.id)
     db.commit()
-    return {"created": created, "records": len(recs)}
+    return {"created": created, "records": len(recs), "sop_checked": sop_on}
 
 
 @router.get("/sources/{source_id}/sample")
