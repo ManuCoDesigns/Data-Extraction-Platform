@@ -38,13 +38,24 @@ export function ReviewWorkspace() {
 
   return (
     <div className="space-y-4">
+      <div role="tablist" aria-label="Projects" className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
+        {!list ? <div className="h-[84px] w-full rounded-2xl bg-gray-100 animate-pulse" /> : [{ id: '', name: 'All projects', sources: (list.projects ?? []).reduce((n: number, p: any) => n + p.sources, 0), peer_done: (list.projects ?? []).reduce((n: number, p: any) => n + p.peer_done, 0), open: (list.projects ?? []).reduce((n: number, p: any) => n + p.open, 0), checked: (list.projects ?? []).reduce((n: number, p: any) => n + p.checked, 0) }, ...(list.projects ?? [])].map((p: any) => (
+          <button key={p.id || 'all'} type="button" role="tab" aria-selected={project === p.id} onClick={() => { setProject(p.id); setSourceId('') }}
+            className={cn('shrink-0 w-56 text-left rounded-2xl border px-4 py-3 bg-white transition', project === p.id ? 'border-transparent ring-2 ring-brand-400 shadow-card' : 'border-gray-100 hover:border-gray-200')}>
+            <span className="block text-sm font-bold text-gray-900 truncate">{p.name || 'Untitled project'}</span>
+            <span className="flex items-baseline gap-1.5 mt-1.5"><span className="text-2xl font-extrabold tabular-nums text-emerald-600 leading-none">{p.peer_done}</span><span className="text-xs text-gray-500">peer reviewed of {p.sources}</span></span>
+            <span className="flex items-center gap-1.5 mt-2 flex-wrap">
+              {p.open > 0 && <Chip tone="amber">{p.open} open</Chip>}
+              {p.checked > 0 && <Chip tone="blue">{p.checked} checked</Chip>}
+              {p.sources === 0 && <Chip tone="gray">No sources yet</Chip>}
+            </span>
+          </button>
+        ))}
+      </div>
       <div className="flex items-center gap-3 flex-wrap">
-        <SelectBox label="Project" value={project} onChange={v => { setProject(v); setSourceId('') }}>
-          <option value="">All projects</option>
-          {(list?.projects ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name} ({p.count})</option>)}
-        </SelectBox>
         <Tabs value={scope} onChange={setScope} items={[{ key: 'peer_done', label: 'Peer reviewed' }, { key: 'all', label: 'All sources' }]} />
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" className="text-sm rounded-xl border border-gray-200 px-3 py-1.5 w-48 max-w-full" />
+        <span className="text-xs text-gray-400">Keys: j and k change record, c marks correct, w marks wrong, n jumps to the next doubted field</span>
       </div>
       <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)] items-start">
         <aside className="space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
@@ -58,7 +69,8 @@ export function ReviewWorkspace() {
                   <li key={s.source_id}>
                     <button type="button" onClick={() => setSourceId(s.source_id)} className={cn('w-full text-left rounded-xl border px-3 py-2.5 transition bg-white', sourceId === s.source_id ? 'border-transparent ring-2 ring-brand-400' : 'border-gray-100 hover:border-gray-200')}>
                       <span className="block text-sm font-semibold text-gray-900 truncate">{s.name}</span>
-                      <span className="flex items-center gap-1.5 flex-wrap mt-1">
+                      <span className="block text-[11px] text-gray-400 mt-0.5">{s.records} record{s.records === 1 ? '' : 's'}</span>
+                      <span className="flex items-center gap-1.5 flex-wrap mt-1.5">
                         <Chip tone={s.peer_done ? 'green' : 'gray'}>{s.peer_done ? 'Peers done' : `Peers ${s.peers_done}/${s.peers_total}`}</Chip>
                         {s.open_findings > 0 && <Chip tone="amber">{s.open_findings} open</Chip>}
                         {s.audited > 0 && <Chip tone="blue">{s.audited} checked</Chip>}
@@ -109,6 +121,7 @@ function SourceDesk({ sourceId }: { sourceId: string }) {
       if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'j') move(1)
       else if (e.key === 'k') move(-1)
+      else if (e.key === 'n') nextTodo()
     }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
   })
@@ -133,7 +146,8 @@ function SourceDesk({ sourceId }: { sourceId: string }) {
         {d.peers.some((p: any) => p.comment) && (
           <div className="mt-4 space-y-2">
             {d.peers.filter((p: any) => p.comment).map((p: any) => (
-              <div key={p.id} className="rounded-xl bg-gray-50 px-3 py-2 text-sm"><span className="font-semibold text-gray-900">{p.name}</span><span className="text-gray-400"> wrote </span><span className="text-gray-700">{p.comment}</span></div>
+              <div key={p.id} className="rounded-xl bg-gray-50 px-3.5 py-2.5 text-sm"><span className="font-semibold text-gray-900">{p.name}</span><span className="text-gray-400"> wrote </span><span className="text-gray-700">{p.comment}</span>
+                {p.fields?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1.5"><span className="text-[11px] text-gray-500">Fields it points at:</span>{p.fields.map((n: string) => <Chip key={n} tone="red">{n}</Chip>)}</span>}</div>
             ))}
           </div>
         )}
@@ -160,8 +174,9 @@ function SourceDesk({ sourceId }: { sourceId: string }) {
             <Tabs value={view} onChange={setView} items={[{ key: 'fields', label: 'Fields' }, { key: 'json', label: 'JSON' }]} />
             <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyFlagged} onChange={e => setOnlyFlagged(e.target.checked)} /> Only doubted fields</label>
             <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Hide checked</label>
-            <span className="ml-auto flex gap-1.5"><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button></span>
+            <span className="ml-auto flex gap-1.5"><Button variant="secondary" onClick={nextTodo}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button></span>
           </div>
+          {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-3">Every doubted field in this source is settled. Check a few random fields too by unticking \"Only doubted fields\".</div>}
           {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
             <div className="space-y-2.5">
               {rec.general.length > 0 && (
@@ -195,6 +210,17 @@ function FieldRow({ rec, f, peers, active, onActive, onDone }: { rec: any; f: an
   useEffect(() => { if (active) ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }) }, [active])
   useEffect(() => { setCredit(pointers.map(p => p[0])) }, [f.signals.length])  // eslint-disable-line react-hooks/exhaustive-deps
   const verdict = f.audit?.verdict
+  useEffect(() => {
+    if (!active) return
+    const h = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement
+      if (t && /INPUT|TEXTAREA|SELECT/.test(t.tagName)) return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      if (e.key === 'c') { e.preventDefault(); mark('correct') }
+      else if (e.key === 'w') { e.preventDefault(); setWrong(true) }
+    }
+    window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
+  })
   const edge = verdict === 'correct' ? 'border-l-emerald-500' : verdict === 'incorrect' ? 'border-l-red-500' : sigs.length ? 'border-l-amber-500' : 'border-l-gray-200'
 
   const mark = async (v: 'correct' | 'incorrect') => {

@@ -361,25 +361,31 @@ def _peer_state(s: Source) -> tuple[int, int]:
 
 @router.get("/review/sources")
 def review_sources(project_id: str | None = None, scope: str = Query("peer_done"), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """Sources to review, grouped by project. scope=peer_done lists only sources every peer reviewer has finished."""
+    """Sources to review, grouped by project. scope=peer_done lists only sources every peer reviewer has finished.
+    `projects` always lists every project the person can see, with counts, even when none of its sources are ready."""
     _need_lead(user)
-    srcs = [s for s in _visible_sources(db, user, None).filter(Source.status != SourceStatus.NOT_STARTED).all()]
-    projects = {}
-    for s in srcs:
-        projects.setdefault(s.project_id, 0)
-    pn = {p.id: p.name for p in db.query(Project).filter(Project.id.in_(projects.keys())).all()} if projects else {}
-    rows = []
-    ids = [s.id for s in srcs]
     from sqlalchemy import func
+    allsrc = _visible_sources(db, user, None).all()
+    pids = {s.project_id for s in allsrc}
+    if "org_admin" in {r.role.value for r in user.roles}:
+        pids |= {p.id for p in db.query(Project.id).all()}
+    pn = {p.id: p.name for p in db.query(Project).filter(Project.id.in_(pids)).all()} if pids else {}
+    ids = [s.id for s in allsrc]
     open_f = dict(db.query(QualityFinding.source_id, func.count(QualityFinding.id)).filter(QualityFinding.source_id.in_(ids or ["-"]), QualityFinding.status == "open").group_by(QualityFinding.source_id).all())
     aud = dict(db.query(FieldAudit.source_id, func.count(FieldAudit.id)).filter(FieldAudit.source_id.in_(ids or ["-"])).group_by(FieldAudit.source_id).all())
     rec_n = dict(db.query(ExtractionJob.source_id, func.count(ExtractedRecord.id)).join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
                  .filter(ExtractionJob.source_id.in_(ids or ["-"])).group_by(ExtractionJob.source_id).all())
-    for s in srcs:
+    proj = {k: {"id": k, "name": pn.get(k, ""), "sources": 0, "peer_done": 0, "checked": 0, "open": 0} for k in pids}
+    rows = []
+    for s in allsrc:
         total, done = _peer_state(s)
         peer_done = total > 0 and done == total
-        projects[s.project_id] += 1 if (peer_done or scope == "all") else 0
-        if project_id and s.project_id != project_id:
+        pr = proj.setdefault(s.project_id, {"id": s.project_id, "name": pn.get(s.project_id, ""), "sources": 0, "peer_done": 0, "checked": 0, "open": 0})
+        pr["sources"] += 1
+        pr["peer_done"] += 1 if peer_done else 0
+        pr["checked"] += int(aud.get(s.id, 0))
+        pr["open"] += int(open_f.get(s.id, 0))
+        if s.status == SourceStatus.NOT_STARTED or (project_id and s.project_id != project_id):
             continue
         if scope == "peer_done" and not peer_done:
             continue
@@ -387,7 +393,7 @@ def review_sources(project_id: str | None = None, scope: str = Query("peer_done"
                      "peers_total": total, "peers_done": done, "peer_done": peer_done, "records": int(rec_n.get(s.id, 0)),
                      "open_findings": int(open_f.get(s.id, 0)), "audited": int(aud.get(s.id, 0))})
     rows.sort(key=lambda x: (x["project"].lower(), -x["open_findings"], x["name"].lower()))
-    return {"items": rows, "projects": sorted(({"id": k, "name": pn.get(k, ""), "count": v} for k, v in projects.items()), key=lambda x: x["name"].lower())}
+    return {"items": rows, "projects": sorted(proj.values(), key=lambda x: x["name"].lower())}
 
 
 def _email_ids(db: Session, emails: set) -> dict:
@@ -468,9 +474,10 @@ def review_source(source_id: str, db: Session = Depends(get_db), user: User = De
         out.append({"record_id": r.id, "record": _label(r, i), "fields": fields_out, "general": general, "risk": risk,
                     "todo": sum(1 for f in fields_out if f["signals"] and not f["audit"]), "audited": sum(1 for f in fields_out if f["audit"])})
     out.sort(key=lambda x: (-x["risk"], x["record"].lower()))
+    all_names = sorted({f["name"] for r in out for f in r["fields"]})
     total, done = _peer_state(s)
     return {"source_id": s.id, "source": s.name, "project_id": s.project_id, "website": s.website_url, "sop_code": req["sop_code"] if sop_on else None,
-            "peers": [{"id": p["id"], "name": p["name"], "comment": p["comment"]} for p in peers], "peer_done": total > 0 and done == total,
+            "peers": [{"id": p["id"], "name": p["name"], "comment": p["comment"], "fields": q.mentioned_fields(p["comment"], all_names)} for p in peers], "peer_done": total > 0 and done == total,
             "totals": tot, "records": out}
 
 
