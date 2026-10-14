@@ -11,6 +11,7 @@ import { isPeerOf } from '@/lib/peers'
 import { AskClientModal } from '@/components/enh/AskClient'
 import { SourceActivity } from '@/components/enh/SourceActivity'
 import { SourceChat } from '@/components/enh/SourceChat'
+import { FlagErrorModal } from '@/components/enh/FlagErrorModal'
 import { SourceRequiredCard } from '@/components/enh/RequiredFields'
 import { LinkChip } from '@/pages/DataHealth'
 import {
@@ -300,6 +301,7 @@ function SourceDetailInner() {
   }
 
   const [adminReviewing, setAdminReviewing] = useState(false)
+  const [flagRecord, setFlagRecord] = useState<{ id: string; label: string } | null>(null)
   const [showTimeline, setShowTimeline] = useState<string | null>(null)
   const [timeline, setTimeline] = useState<any>(null)
   const [timelineLoading, setTimelineLoading] = useState(false)
@@ -1516,6 +1518,18 @@ function SourceDetailInner() {
                                 }}>
                                 📋 History
                               </button>
+                              {(['org_admin', 'project_admin', 'qa_lead'].some(role => user?.roles?.includes(role)) || (source as any).peer_ids?.includes(user?.id)) && (
+                                <button
+                                  onClick={e => { e.stopPropagation(); setFlagRecord({ id: r.id, label: recordTitle(r.extracted_fields, r) }) }}
+                                  title="Log an error you found on this record"
+                                  style={{
+                                    fontSize: 10, padding: '4px 9px', borderRadius: 8,
+                                    background: 'var(--bg-fef2f2)', color: 'var(--tx-b91c1c)', border: '1px solid var(--bd-fecaca)',
+                                    cursor: 'pointer', whiteSpace: 'nowrap',
+                                  }}>
+                                  ⚑ Flag error
+                                </button>
+                              )}
                               {isAdmin && r.review_status === 'pending_admin_review' && (
                                 <span style={{
                                   fontSize: 11, fontWeight: 700, padding: '4px 10px', borderRadius: 20,
@@ -1999,6 +2013,7 @@ function SourceDetailInner() {
         </div>
       </Modal>
 
+      <FlagErrorModal record={flagRecord} onClose={() => setFlagRecord(null)} />
       <AskClientModal open={showAsk} onClose={() => setShowAsk(false)} projectId={source.project_id} sourceId={source.id} />
       <Modal open={uploadWarnings.length > 0} onClose={() => setUploadWarnings([])} title="Check these before you continue"
         description="The upload worked, but a few things may need a second look.">

@@ -746,3 +746,47 @@ class SourceMessageRead(Base):
     source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
     user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     last_read_at = Column(DateTime(timezone=True), nullable=False, default=now_utc)
+
+
+# ─── Quality: logged errors and ground-truth checks ─────────────────────────
+
+class QualityFinding(Base):
+    """One error found in a record: logged by a reviewer or detected by the system, then confirmed or dismissed by an admin."""
+    __tablename__ = "quality_findings"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    field = Column(String(255), nullable=True)                 # None = the record as a whole
+    category = Column(String(24), nullable=False)              # wrong_value | missing_value | unsupported_value | format | sop_rule | schema | duplicate | other
+    severity = Column(String(10), nullable=False, default="major")   # minor | major | critical
+    origin = Column(String(10), nullable=False, default="reviewer")  # reviewer | system
+    rule = Column(String(60), nullable=True)                   # for system findings: which check found it
+    raised_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    note = Column(Text, nullable=True)
+    extracted_value = Column(JSON, nullable=True)              # what the record said when this was logged
+    status = Column(String(10), nullable=False, default="open", server_default="open")   # open | confirmed | dismissed
+    auto_verdict = Column(String(16), nullable=True)           # confirmed | supported | not_reproduced | needs_human
+    auto_note = Column(Text, nullable=True)
+    truth_value = Column(Text, nullable=True)                  # what the source really says, when an admin knows
+    resolved_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    resolve_note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class FieldAudit(Base):
+    """An admin's ground-truth check of one field against the real source: right or wrong."""
+    __tablename__ = "field_audits"
+    __table_args__ = (UniqueConstraint("record_id", "field", name="uq_field_audits_record_field"),)
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="CASCADE"), nullable=False, index=True)
+    field = Column(String(255), nullable=False)
+    verdict = Column(String(10), nullable=False)               # correct | incorrect
+    extracted_value = Column(JSON, nullable=True)
+    truth_value = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    audited_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    audited_at = Column(DateTime(timezone=True), default=now_utc, index=True)
