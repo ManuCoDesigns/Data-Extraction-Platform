@@ -598,3 +598,70 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
             also += 1
     db.commit()
     return {"id": a.id, "verdict": a.verdict, "findings_settled": touched, "also_marked": also}
+
+
+# ─── Download of peer-reviewed sources ─────────────────────────────────────────
+
+@router.get("/export")
+def export_peer_reviewed(project_id: str | None = None, scope: str = Query("peer_done"), format: str = Query("xlsx"), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """One file with every peer-reviewed source (or all sources), the peers' comments beside the data, ready to hand to an AI model."""
+    from fastapi.responses import Response
+    from app.services import quality_export as qx
+    _need_lead(user)
+    if format not in ("xlsx", "json"):
+        raise HTTPException(status_code=422, detail="Choose xlsx or json.")
+    items = []
+    for s in sorted(_visible_sources(db, user, project_id).filter(Source.status != SourceStatus.NOT_STARTED).all(), key=lambda x: x.name.lower()):
+        total, done = _peer_state(s)
+        if scope == "peer_done" and not (total > 0 and done == total):
+            continue
+        rv = _review_data(db, s, True, user.id)
+        pr = db.query(Project).filter(Project.id == s.project_id).first()
+        ex = db.query(User).filter(User.id == s.assigned_extractor_id).first() if s.assigned_extractor_id else None
+        items.append({"source": s, "project": pr.name if pr else "", "extractor": ex.full_name if ex else "", "review": rv,
+                      "peer_rows": [{"name": p.user.full_name if p.user else "Peer reviewer", "status": p.status, "comment": (p.comment or ""), "when": qx._fmt(p.submitted_at)} for p in s.peer_reviews]})
+    if not items:
+        raise HTTPException(status_code=404, detail="No peer-reviewed sources to download yet.")
+    data = qx.collect(items)
+    stamp = enh.now_utc().strftime("%Y%m%d")
+    if format == "json":
+        body, mt = qx.to_json(data, {"scope": scope, "sources": len(items), "generated": stamp}), "application/json"
+    else:
+        body, mt = qx.to_xlsx(data), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    return Response(content=body, media_type=mt, headers={"Content-Disposition": f'attachment; filename="peer_reviewed_sources_{stamp}.{format}"'})
+
+
+# ─── Nimble Extract: look for a record's values on the source website ─────────
+
+@router.get("/nimble/status")
+def nimble_status(user: User = Depends(get_current_user)):
+    from app.services import nimble
+    _need_lead(user)
+    return {"configured": nimble.configured()}
+
+
+class SiteCheckBody(BaseModel):
+    record_id: str
+    url: str | None = None
+    render: bool = False
+
+
+@router.post("/review/site-check")
+def site_check(body: SiteCheckBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Fetch the source website with Nimble Extract and say, field by field, whether the value appears on the page.
+    This points the reviewer at what to look at. It never marks anything correct or wrong by itself."""
+    from app.services import nimble
+    _need_lead(user)
+    rec = db.query(ExtractedRecord).filter(ExtractedRecord.id == body.record_id).first()
+    job = db.query(ExtractionJob).filter(ExtractionJob.id == rec.job_id).first() if rec else None
+    s = _source(db, user, job.source_id) if job and job.source_id else None
+    if not s:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    url = (body.url or "").strip() or s.website_url or ""
+    if not url:
+        return {"ok": False, "error": "This source has no website address. Type one to check against.", "url": "", "fields": {}}
+    res = nimble.extract(url, render=body.render)
+    if not res["ok"]:
+        return {"ok": False, "error": res["error"], "url": res["url"], "fields": {}}
+    out = {k: q.find_in_text(v, res["text"]) for k, v in (rec.extracted_fields or {}).items() if k not in q.SKIP_FIELDS}
+    return {"ok": True, "url": res["url"], "cached": bool(res.get("cached")), "fields": out}

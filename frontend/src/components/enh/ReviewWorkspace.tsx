@@ -55,6 +55,7 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '' }: { i
       <div className="flex items-center gap-3 flex-wrap">
         <Tabs value={scope} onChange={setScope} items={[{ key: 'peer_done', label: 'Peer reviewed' }, { key: 'all', label: 'All sources' }]} />
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" className="text-sm rounded-xl border border-gray-200 px-3 py-1.5 w-48 max-w-full" />
+        <span className="inline-flex items-center gap-1.5"><DownloadButtons project={project} scope={scope} /></span>
         <span className="text-xs text-gray-400">Keys: ↑ ↓ change field, c correct, w wrong, n next doubted field, j and k change record</span>
       </div>
       <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)] items-start">
@@ -90,6 +91,25 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '' }: { i
   )
 }
 
+function DownloadButtons({ project, scope }: { project: string; scope: Scope }) {
+  const [busy, setBusy] = useState('')
+  const go = async (format: 'xlsx' | 'json') => {
+    setBusy(format)
+    try { await qualityApi.exportPeer({ project_id: project || undefined, scope, format }); toast.success('Downloaded') }
+    catch (e: any) {
+      let msg = "Couldn't download that"
+      try { const t = await e?.response?.data?.text?.(); msg = JSON.parse(t).detail || msg } catch { /* keep default */ }
+      toast.error(msg)
+    } finally { setBusy('') }
+  }
+  return (
+    <>
+      <Button variant="secondary" disabled={!!busy} onClick={() => go('xlsx')} title="Every source in this list, with the peers' comments beside the data">{busy === 'xlsx' ? 'Preparing…' : 'Download Excel'}</Button>
+      <Button variant="secondary" disabled={!!busy} onClick={() => go('json')} title="The same, as JSON for an AI model">{busy === 'json' ? 'Preparing…' : 'JSON'}</Button>
+    </>
+  )
+}
+
 function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource: () => void }) {
   const [d, setD] = useState<any>(null)
   const [rid, setRid] = useState('')
@@ -97,6 +117,21 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
   const [onlyFlagged, setOnlyFlagged] = useState(true)
   const [hideDone, setHideDone] = useState(false)
   const [active, setActive] = useState('')
+  const [site, setSite] = useState<Record<string, any>>({})
+  const [siteBusy, setSiteBusy] = useState(false)
+  const [render, setRender] = useState(false)
+  const [nimble, setNimble] = useState<boolean | null>(null)
+  useEffect(() => { qualityApi.nimbleStatus().then(r => setNimble(r.configured)).catch(() => setNimble(false)) }, [])
+  const runSite = async () => {
+    if (!rid) return
+    setSiteBusy(true)
+    try {
+      const r = await qualityApi.siteCheck({ record_id: rid, render })
+      setSite(cur => ({ ...cur, [rid]: r }))
+      if (!r.ok) toast.error(r.error || "Couldn't read the website")
+      else toast.success('Checked against the website')
+    } catch (e) { toast.error(err(e, "Couldn't check the website")) } finally { setSiteBusy(false) }
+  }
   const load = useCallback(() => qualityApi.reviewSource(sourceId).then(r => { setD(r); setRid(cur => (cur && r.records.some((x: any) => x.record_id === cur) ? cur : r.records[0]?.record_id ?? '')) }).catch(() => setD({ error: true })), [sourceId])
   useEffect(() => { setD(null); load() }, [load])
 
@@ -191,8 +226,9 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
           <div className="flex items-center gap-2 flex-wrap">
             <Tabs value={view} onChange={setView} items={[{ key: 'fields', label: 'Fields' }, { key: 'json', label: 'JSON' }]} />
             <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyFlagged} onChange={e => setOnlyFlagged(e.target.checked)} /> Only doubted fields</label>
+            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5" title="Slower, for sites that build their pages with JavaScript"><input type="checkbox" checked={render} onChange={e => setRender(e.target.checked)} /> Render page</label>
             <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Hide checked</label>
-            <span className="ml-auto flex gap-1.5"><Button variant="secondary" onClick={nextTodo}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button><Button variant="secondary" onClick={onNextSource}>Next source</Button></span>
+            <span className="ml-auto flex gap-1.5 flex-wrap [&_button]:whitespace-nowrap"><Button variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading the site…' : 'Check on the site'}</Button><Button variant="secondary" onClick={nextTodo}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button><Button variant="secondary" onClick={onNextSource}>Next source</Button></span>
           </div>
           {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-3">Every doubted field in this source is settled. Check a few random fields too by unticking \"Only doubted fields\".</div>}
           {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
@@ -203,7 +239,7 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
                 </div>
               )}
               {shown.length === 0 ? <Blank title={onlyFlagged ? 'Nothing doubted on this record' : 'Nothing to show'} text={onlyFlagged ? 'Untick "Only doubted fields" to check any field at random.' : ''} /> :
-                shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} website={d.website} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
+                shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
             </div>
           )}
         </section>
@@ -216,7 +252,7 @@ function Stat({ label, value, sub }: { label: string; value: number; sub: string
   return <div><div className="text-2xl font-extrabold tabular-nums text-gray-900 leading-none">{value}</div><div className="text-xs font-semibold text-gray-700 mt-1">{label}</div><div className="text-[11px] text-gray-400">{sub}</div></div>
 }
 
-function FieldRow({ rec, f, peers, website, active, onActive, onLocal, onReload }: { rec: any; f: any; peers: any[]; website?: string; active: boolean; onActive: () => void; onLocal: (rid: string, name: string, verdict: string, truth?: string) => void; onReload: () => void }) {
+function FieldRow({ rec, f, peers, website, site, active, onActive, onLocal, onReload }: { rec: any; f: any; peers: any[]; website?: string; site?: { state: string; snippet?: string | null }; active: boolean; onActive: () => void; onLocal: (rid: string, name: string, verdict: string, truth?: string) => void; onReload: () => void }) {
   const [same, setSame] = useState(() => { try { return localStorage.getItem('dx.reviewSame') === '1' } catch { return false } })
   const [wrong, setWrong] = useState(false)
   const [truth, setTruth] = useState('')
@@ -263,11 +299,13 @@ function FieldRow({ rec, f, peers, website, active, onActive, onLocal, onReload 
         <div className="min-w-0 flex-1 basis-64">
           <div className="flex items-center gap-1.5 flex-wrap"><span className="text-xs font-semibold text-gray-500">{f.name}</span>
             {sigs.map((s: any, i: number) => <Chip key={i} tone={KIND[s.kind]?.tone ?? 'gray'} title={s.text}>{KIND[s.kind]?.label ?? s.kind}{s.by && s.kind !== 'finding' ? `: ${s.by}` : ''}</Chip>)}
+            {site && site.state !== 'skip' && <Chip tone={site.state === 'found' ? 'green' : site.state === 'close' ? 'amber' : 'red'} title={site.snippet ?? ''}>{site.state === 'found' ? 'Found on the site' : site.state === 'close' ? 'Close match on the site' : 'Not on the page'}</Chip>}
             {verdict && <Chip tone={verdict === 'correct' ? 'green' : 'red'}>{verdict === 'correct' ? 'Checked: correct' : 'Checked: wrong'}</Chip>}</div>
           <div className={cn('text-sm mt-1 break-words whitespace-pre-wrap', empty ? 'text-gray-400 italic' : 'text-gray-900 font-medium')}>
             {empty ? 'Empty' : isUrl(f.value) ? <a href={f.value} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline break-all">{f.value}</a> : show(f.value)}
           </div>
           {sigs.filter((s: any) => s.text && s.kind !== 'mention').slice(0, 3).map((s: any, i: number) => <p key={i} className="text-xs text-gray-500 mt-1 mb-0">{s.by ? `${s.by}: ` : ''}{s.text}</p>)}
+          {site?.snippet && site.state !== 'missing' && <p className="text-xs text-gray-500 mt-1 mb-0 italic break-words">On the site: …{site.snippet}…</p>}
           {f.audit?.truth_value && <p className="text-xs text-gray-600 mt-1 mb-0">Source says: <b>{f.audit.truth_value}</b></p>}
           <div className="flex items-center gap-3 flex-wrap mt-1.5 text-xs">
             {findUrl && <a href={findUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-brand-600 hover:underline">Find it on the site</a>}

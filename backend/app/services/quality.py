@@ -235,3 +235,38 @@ def mentioned_fields(text: str, names: list[str]) -> list[str]:
 
 
 SIGNAL_WEIGHT = {"comment": 5, "finding": 4, "mention": 3, "sop": 3, "system": 2, "ai": 2, "web": 2}
+
+
+def _norm(t: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", (t or "").lower()).split())
+
+
+def find_in_text(value, text: str) -> dict:
+    """Is this field value on the page? state: found | close | missing | skip. Only a pointer, never a verdict."""
+    if isinstance(value, (list, tuple)):
+        parts = [find_in_text(v, text) for v in value if _present(v)]
+        parts = [p for p in parts if p["state"] != "skip"]
+        if not parts:
+            return {"state": "skip", "snippet": None}
+        n = sum(1 for p in parts if p["state"] == "found")
+        return {"state": "found" if n == len(parts) else "close" if n or any(p["state"] == "close" for p in parts) else "missing", "snippet": next((p["snippet"] for p in parts if p["snippet"]), None)}
+    if value is None or isinstance(value, (bool, dict)) or str(value).strip() == "":
+        return {"state": "skip", "snippet": None}
+    raw = str(value).strip()
+    if URL_RE.match(raw) or EMAIL_RE.match(raw) or len(raw) < 3:
+        return {"state": "skip", "snippet": None}
+    page = _norm(text)
+    v = _norm(raw)
+    if not v:
+        return {"state": "skip", "snippet": None}
+    def snip(word: str):
+        i = text.lower().find(word.lower())
+        return text[max(0, i - 60): i + 100].replace("\n", " ").strip() if i >= 0 else None
+    if f" {v} " in f" {page} ":
+        return {"state": "found", "snippet": snip(raw.split()[0]) or snip(v.split()[0])}
+    toks = [t for t in v.split() if len(t) >= 3]
+    if len(toks) >= 2:
+        hit = sum(1 for t in toks if f" {t} " in f" {page} ")
+        if hit / len(toks) >= 0.8:
+            return {"state": "close", "snippet": snip(toks[0])}
+    return {"state": "missing", "snippet": None}
