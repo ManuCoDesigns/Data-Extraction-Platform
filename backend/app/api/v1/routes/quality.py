@@ -497,7 +497,7 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
             tot["comments"] += sum(1 for x in sig[name] if x["kind"] == "comment")
             tot["mentions"] += sum(1 for x in sig[name] if x["kind"] == "mention")
         risk = sum(f["weight"] for f in fields_out if not f["audit"])
-        out.append({"record_id": r.id, "record": _label(r, i), "fields": fields_out, "general": general, "risk": risk,
+        out.append({"record_id": r.id, "record": _label(r, i), "fields": fields_out, "general": general, "risk": risk, "raw": (r.raw_text or "")[:20000],
                     "todo": sum(1 for f in fields_out if f["signals"] and not f["audit"]), "audited": sum(1 for f in fields_out if f["audit"])})
     if full:
         import json as _json
@@ -514,8 +514,11 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
     out.sort(key=lambda x: (-x["risk"], x["record"].lower()))
     all_names = sorted({f["name"] for r in out for f in r["fields"]})
     total, done = _peer_state(s)
+    tot["system_findings"] = sum(1 for f in findings if f.origin == "system")
+    tot["open_findings"] = sum(1 for f in findings if f.status == "open")
+    tot["sop_rate"] = q.pct(sum(1 for r in out if not any(x["kind"] == "sop" and "empty" in x["text"] for f in r["fields"] for x in f["signals"])), len(out)) if sop_on else None
     return {"source_id": s.id, "source": s.name, "project_id": s.project_id, "website": s.website_url, "sop_code": req["sop_code"] if sop_on else None,
-            "peers": [{"id": p["id"], "name": p["name"], "comment": p["comment"], "fields": q.mentioned_fields(p["comment"], all_names)} for p in peers], "peer_done": total > 0 and done == total,
+            "sop_required": req["required"] if sop_on else [], "peers": [{"id": p["id"], "name": p["name"], "comment": p["comment"], "fields": q.mentioned_fields(p["comment"], all_names)} for p in peers], "peer_done": total > 0 and done == total,
             "totals": tot, "records": out}
 
 
@@ -529,6 +532,17 @@ class MarkBody(BaseModel):
     severity: str = "major"
     credit: list[str] = []
     same_value: bool = False
+
+
+def _commit_or_retry(db: Session, redo):
+    """Two admins can mark the same field at the same moment. The loser of the race updates the row instead of failing."""
+    from sqlalchemy.exc import IntegrityError
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        redo()
+        db.commit()
 
 
 @router.post("/review/mark")
@@ -560,6 +574,14 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
         a = FieldAudit(source_id=s.id, record_id=rec.id, field=body.field, verdict=body.verdict)
         db.add(a)
     a.verdict, a.truth_value, a.note, a.extracted_value, a.audited_by, a.audited_at = body.verdict, truth, note, value, user.id, now
+    try:
+        db.flush()
+    except Exception:
+        db.rollback()
+        a = db.query(FieldAudit).filter(FieldAudit.record_id == rec.id, FieldAudit.field == body.field).first()
+        if not a:
+            raise
+        a.verdict, a.truth_value, a.note, a.extracted_value, a.audited_by, a.audited_at = body.verdict, truth, note, value, user.id, now
     # who commented on this field on this record
     ulookup = _email_ids(db, {e.get("user") for e in ((rec.reviewer_field_comments or {}).get(body.field) or []) if isinstance(e, dict)})
     commenters = {u.id: u for u in ulookup.values() if u.id in _owner_ids(s) and u.id != s.assigned_extractor_id}
@@ -640,6 +662,23 @@ def nimble_status(user: User = Depends(get_current_user)):
     return {"configured": nimble.configured()}
 
 
+SITE_CHECKS_PER_HOUR = 60
+_SITE_HITS: dict = {}
+
+
+def _site_budget(user_id: str) -> bool:
+    """Nimble costs money per page. One person can read this many pages an hour."""
+    import time
+    now = time.time()
+    hits = [t for t in _SITE_HITS.get(user_id, []) if now - t < 3600]
+    if len(hits) >= SITE_CHECKS_PER_HOUR:
+        _SITE_HITS[user_id] = hits
+        return False
+    hits.append(now)
+    _SITE_HITS[user_id] = hits
+    return True
+
+
 class SiteCheckBody(BaseModel):
     record_id: str
     url: str | None = None
@@ -660,8 +699,10 @@ def site_check(body: SiteCheckBody, db: Session = Depends(get_db), user: User = 
     url = (body.url or "").strip() or s.website_url or ""
     if not url:
         return {"ok": False, "error": "This source has no website address. Type one to check against.", "url": "", "fields": {}}
+    if not _site_budget(user.id):
+        return {"ok": False, "error": f"That is {SITE_CHECKS_PER_HOUR} website checks in the last hour. Wait a little, or check the rest by hand.", "url": url, "fields": {}}
     res = nimble.extract(url, render=body.render)
     if not res["ok"]:
         return {"ok": False, "error": res["error"], "url": res["url"], "fields": {}}
     out = {k: q.find_in_text(v, res["text"]) for k, v in (rec.extracted_fields or {}).items() if k not in q.SKIP_FIELDS}
-    return {"ok": True, "url": res["url"], "cached": bool(res.get("cached")), "fields": out}
+    return {"ok": True, "url": res["url"], "cached": bool(res.get("cached")), "fields": out, "text": res["text"][:80000]}

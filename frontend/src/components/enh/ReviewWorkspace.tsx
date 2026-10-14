@@ -3,6 +3,7 @@ import { qualityApi } from '@/api/client'
 import { Blank, Chip, Panel, SelectBox, Skeletons, Tabs, type Tone } from '@/components/enh/kit'
 import { CATEGORY_OPTIONS } from '@/components/enh/FlagErrorModal'
 import { Button, cn, toast } from '@/components/ui'
+import { ReviewSidePanel } from '@/components/enh/ReviewSidePanel'
 
 // The admin's review desk: every field that something doubts is pulled to the top, with the reason beside it,
 // so a check against the real source is one click per field instead of a hunt through JSON.
@@ -117,6 +118,13 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
   const [onlyFlagged, setOnlyFlagged] = useState(true)
   const [hideDone, setHideDone] = useState(false)
   const [active, setActive] = useState('')
+  const [focus, setFocus] = useState(false)
+  useEffect(() => {
+    if (!focus) return
+    const prev = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    return () => { document.body.style.overflow = prev }
+  }, [focus])
   const [site, setSite] = useState<Record<string, any>>({})
   const [siteBusy, setSiteBusy] = useState(false)
   const [render, setRender] = useState(false)
@@ -126,11 +134,17 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
     if (!rid) return
     setSiteBusy(true)
     try {
-      const r = await qualityApi.siteCheck({ record_id: rid, render })
+      const r = await qualityApi.siteCheck({ record_id: rid, render, include_text: true })
       setSite(cur => ({ ...cur, [rid]: r }))
       if (!r.ok) toast.error(r.error || "Couldn't read the website")
       else toast.success('Checked against the website')
     } catch (e) { toast.error(err(e, "Couldn't check the website")) } finally { setSiteBusy(false) }
+  }
+  const [scanBusy, setScanBusy] = useState(false)
+  const runScan = async () => {
+    setScanBusy(true)
+    try { const r = await qualityApi.scan(sourceId); toast.success(r.created ? `System checks found ${r.created} new issue${r.created === 1 ? '' : 's'}` : 'System checks found nothing new'); load() }
+    catch (e) { toast.error(err(e, "Couldn't run the checks")) } finally { setScanBusy(false) }
   }
   const load = useCallback(() => qualityApi.reviewSource(sourceId).then(r => { setD(r); setRid(cur => (cur && r.records.some((x: any) => x.record_id === cur) ? cur : r.records[0]?.record_id ?? '')) }).catch(() => setD({ error: true })), [sourceId])
   useEffect(() => { setD(null); load() }, [load])
@@ -139,8 +153,18 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
   const shown = useMemo(() => (rec?.fields ?? []).filter((f: any) => (!onlyFlagged || f.signals.length > 0 || f.audit) && (!hideDone || !f.audit)), [rec, onlyFlagged, hideDone])
   const nextTodo = useCallback(() => {
     const todo = (rec?.fields ?? []).filter((f: any) => f.signals.length > 0 && !f.audit)
-    setActive(todo[0]?.name ?? '')
+    if (todo[0]) { setActive(todo[0].name); return }
+    setActive('')
   }, [rec])
+  // When this record has nothing left to settle, `n` carries on to the next record that does.
+  const jumpToWork = useCallback(() => {
+    const todo = (rec?.fields ?? []).filter((f: any) => f.signals.length > 0 && !f.audit)
+    if (todo[0]) { setActive(todo[0].name); return }
+    const recs: any[] = d?.records ?? []
+    const i = recs.findIndex((r: any) => r.record_id === rid)
+    const next = [...recs.slice(i + 1), ...recs.slice(0, Math.max(i, 0))].find((r: any) => r.todo > 0)
+    if (next) setRid(next.record_id); else toast.success('Every doubted field in this source is settled')
+  }, [rec, d, rid])
   useEffect(() => { nextTodo() }, [rid, d])  // eslint-disable-line react-hooks/exhaustive-deps
   // Show the verdict at once; the server call happens in the background so the next field is one keypress away.
   const applyLocal = (recordId: string, name: string, verdict: string, truth?: string) => setD((cur: any) => {
@@ -168,7 +192,9 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
       if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'j') move(1)
       else if (e.key === 'k') move(-1)
-      else if (e.key === 'n') nextTodo()
+      else if (e.key === 'n') jumpToWork()
+      else if (e.key === 's') setFocus(v => !v)
+      else if (e.key === 'Escape' && focus) setFocus(false)
       else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         const names = shown.map((f: any) => f.name); if (!names.length) return
         e.preventDefault()
@@ -183,6 +209,74 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
   if (d.error) return <Blank title="Couldn't open this source" text="Check your connection and try again." />
   const t = d.totals
   const pctDone = t.flagged ? Math.round(100 * d.records.reduce((n: number, r: any) => n + r.fields.filter((f: any) => f.signals.length && f.audit).length, 0) / t.flagged) : 100
+
+  const recNav = (
+        <nav aria-label="Records" className="rounded-2xl border border-gray-100 bg-white p-2 xl:max-h-[70vh] overflow-y-auto">
+          <p className="text-[11px] text-gray-400 px-2 py-1 m-0">Riskiest first. Press j and k to move.</p>
+          <ul className="m-0 p-0 list-none">
+            {d.records.map((r: any) => (
+              <li key={r.record_id}>
+                <button type="button" onClick={() => setRid(r.record_id)} className={cn('w-full text-left rounded-lg px-2.5 py-2 text-sm flex items-center gap-2', rid === r.record_id ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-gray-700 hover:bg-gray-50')}>
+                  <span className={cn('w-2 h-2 rounded-full shrink-0', r.todo > 0 ? 'bg-red-500' : r.audited > 0 ? 'bg-emerald-500' : 'bg-gray-300')} aria-hidden />
+                  <span className="truncate flex-1">{r.record}</span>
+                  {r.todo > 0 && <span className="text-[11px] tabular-nums text-red-600 font-semibold">{r.todo}</span>}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+  )
+  const fieldsSection = (
+        <section className="min-w-0 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <Tabs value={view} onChange={setView} items={[{ key: 'fields', label: 'Fields' }, { key: 'json', label: 'JSON' }]} />
+            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyFlagged} onChange={e => setOnlyFlagged(e.target.checked)} /> Only doubted fields</label>
+            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5" title="Slower, for sites that build their pages with JavaScript"><input type="checkbox" checked={render} onChange={e => setRender(e.target.checked)} /> Render page</label>
+            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Hide checked</label>
+            <span className="ml-auto flex gap-1.5 flex-wrap [&_button]:whitespace-nowrap"><Button variant="secondary" onClick={() => setFocus(true)} title="Open the record with the SOP, source text and website beside it (press s)">Side by side</Button><Button variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading the site…' : 'Check on the site'}</Button><Button variant="secondary" onClick={jumpToWork}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button><Button variant="secondary" onClick={onNextSource}>Next source</Button></span>
+          </div>
+          {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-3">Every doubted field in this source is settled. Check a few random fields too by unticking \"Only doubted fields\".</div>}
+          {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
+            <div className="space-y-2.5">
+              {rec.general.length > 0 && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+                  {rec.general.map((g: any, i: number) => <p key={i} className="m-0"><b>{g.by}</b>: {g.text}</p>)}
+                </div>
+              )}
+              {shown.length === 0 ? <Blank title={onlyFlagged ? 'Nothing doubted on this record' : 'Nothing to show'} text={onlyFlagged ? 'Untick "Only doubted fields" to check any field at random.' : ''} /> :
+                shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
+            </div>
+          )}
+        </section>
+  )
+  const activeValue = rec?.fields?.find((f: any) => f.name === active)?.value
+  if (focus) return (
+    <div className="fixed inset-0 z-[60] bg-gray-50 flex flex-col" role="dialog" aria-modal="true" aria-label="Side by side review">
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-200 bg-white flex-wrap">
+        <b className="text-sm text-gray-900">{d.source}</b>
+        {d.sop_code && <Chip tone="indigo">{d.sop_code}</Chip>}
+        <span className="text-xs text-gray-500 tabular-nums">{pctDone}% of doubted fields settled</span>
+        <span className="text-xs text-gray-400 hidden md:inline">Keys: ↑ ↓ field, c correct, w wrong, n next doubted, j k record, Esc close</span>
+        <span className="ml-auto"><Button variant="secondary" onClick={() => setFocus(false)}>Close side by side</Button></span>
+      </div>
+      <div className="flex-1 min-h-0 grid gap-4 p-4 lg:grid-cols-[190px_minmax(0,1fr)_minmax(380px,46%)] overflow-y-auto lg:overflow-hidden">
+        <div className="lg:overflow-y-auto">{recNav}</div>
+        <div className="lg:overflow-y-auto min-w-0 space-y-3 pr-1">
+          {d.peers.some((p: any) => p.comment) && (
+            <div className="space-y-1.5">{d.peers.filter((p: any) => p.comment).map((p: any) => (
+              <div key={p.id} className="rounded-xl bg-white border border-gray-100 px-3 py-2 text-sm"><b className="text-gray-900">{p.name}</b><span className="text-gray-400"> wrote </span><span className="text-gray-700">{p.comment}</span>
+                {p.fields?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1">{p.fields.map((n: string) => <Chip key={n} tone="red">{n}</Chip>)}</span>}</div>
+            ))}</div>
+          )}
+          {fieldsSection}
+        </div>
+        <div className="min-h-[70vh] lg:min-h-0 lg:h-full">
+          <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} activeValue={activeValue} activeField={active}
+            pageText={site[rid]?.ok ? site[rid].text : undefined} pageBusy={siteBusy} nimbleReady={nimble === true} onFetchPage={runSite} />
+        </div>
+      </div>
+    </div>
+  )
 
   return (
     <div className="space-y-4">
@@ -206,44 +300,42 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
         )}
       </Panel>
 
-      <div className="grid gap-4 xl:grid-cols-[230px_minmax(0,1fr)] items-start">
-        <nav aria-label="Records" className="rounded-2xl border border-gray-100 bg-white p-2 xl:max-h-[70vh] overflow-y-auto">
-          <p className="text-[11px] text-gray-400 px-2 py-1 m-0">Riskiest first. Press j and k to move.</p>
-          <ul className="m-0 p-0 list-none">
-            {d.records.map((r: any) => (
-              <li key={r.record_id}>
-                <button type="button" onClick={() => setRid(r.record_id)} className={cn('w-full text-left rounded-lg px-2.5 py-2 text-sm flex items-center gap-2', rid === r.record_id ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-gray-700 hover:bg-gray-50')}>
-                  <span className={cn('w-2 h-2 rounded-full shrink-0', r.todo > 0 ? 'bg-red-500' : r.audited > 0 ? 'bg-emerald-500' : 'bg-gray-300')} aria-hidden />
-                  <span className="truncate flex-1">{r.record}</span>
-                  {r.todo > 0 && <span className="text-[11px] tabular-nums text-red-600 font-semibold">{r.todo}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+      <ReviewFlow d={d} pctDone={pctDone} busy={scanBusy} onScan={runScan} />
 
-        <section className="min-w-0 space-y-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Tabs value={view} onChange={setView} items={[{ key: 'fields', label: 'Fields' }, { key: 'json', label: 'JSON' }]} />
-            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyFlagged} onChange={e => setOnlyFlagged(e.target.checked)} /> Only doubted fields</label>
-            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5" title="Slower, for sites that build their pages with JavaScript"><input type="checkbox" checked={render} onChange={e => setRender(e.target.checked)} /> Render page</label>
-            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Hide checked</label>
-            <span className="ml-auto flex gap-1.5 flex-wrap [&_button]:whitespace-nowrap"><Button variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading the site…' : 'Check on the site'}</Button><Button variant="secondary" onClick={nextTodo}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button><Button variant="secondary" onClick={onNextSource}>Next source</Button></span>
-          </div>
-          {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-3">Every doubted field in this source is settled. Check a few random fields too by unticking \"Only doubted fields\".</div>}
-          {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
-            <div className="space-y-2.5">
-              {rec.general.length > 0 && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
-                  {rec.general.map((g: any, i: number) => <p key={i} className="m-0"><b>{g.by}</b>: {g.text}</p>)}
-                </div>
-              )}
-              {shown.length === 0 ? <Blank title={onlyFlagged ? 'Nothing doubted on this record' : 'Nothing to show'} text={onlyFlagged ? 'Untick "Only doubted fields" to check any field at random.' : ''} /> :
-                shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
-            </div>
-          )}
-        </section>
+      <div className="grid gap-4 xl:grid-cols-[230px_minmax(0,1fr)] items-start">
+        {recNav}
+
+        {fieldsSection}
       </div>
+    </div>
+  )
+}
+
+function ReviewFlow({ d, pctDone, busy, onScan }: { d: any; pctDone: number; busy: boolean; onScan: () => void }) {
+  const t = d.totals
+  const steps: { n: string; label: string; state: 'done' | 'todo' | 'na'; hint: string; action?: React.ReactNode }[] = [
+    { n: '1', label: 'Peers submitted', state: d.peer_done ? 'done' : 'todo', hint: d.peer_done ? 'All peers are done' : 'Wait for the peers before you settle fields' },
+    { n: '2', label: 'System checks', state: t.system_findings > 0 ? 'done' : 'todo', hint: t.system_findings > 0 ? `${t.system_findings} found by the checks` : 'Not run yet, or found nothing',
+      action: <button type="button" disabled={busy} onClick={onScan} className="text-[11px] font-semibold text-brand-600 hover:underline disabled:opacity-50">{busy ? 'Running…' : 'Run now'}</button> },
+    { n: '3', label: 'SOP', state: t.sop_rate === null ? 'na' : t.sop_rate >= 100 ? 'done' : 'todo', hint: t.sop_rate === null ? 'No SOP saved' : `${Math.round(t.sop_rate)}% of records have every required field` },
+    { n: '4', label: 'Doubted fields', state: pctDone >= 100 ? 'done' : 'todo', hint: `${pctDone}% settled` },
+    { n: '5', label: 'Spot check', state: t.audited >= 30 ? 'done' : 'todo', hint: `${t.audited} of 30 fields checked at the source` },
+    { n: '6', label: 'Open errors', state: t.open_findings === 0 ? 'done' : 'todo', hint: t.open_findings === 0 ? 'None waiting' : `${t.open_findings} to settle in Errors logged` },
+  ]
+  const next = steps.find(s => s.state === 'todo')
+  return (
+    <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3">
+      <div className="flex items-center gap-2 mb-2 flex-wrap"><h3 className="text-sm font-bold text-gray-900 m-0">Review steps</h3>
+        <span className="text-xs text-gray-500">{next ? `Next: ${next.label.toLowerCase()}` : 'All steps done. Approve the source or send records back.'}</span></div>
+      <ol className="m-0 p-0 list-none grid gap-2 grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
+        {steps.map(s => (
+          <li key={s.n} className={cn('rounded-xl border px-3 py-2', s.state === 'done' ? 'border-emerald-200 bg-emerald-50' : s.state === 'na' ? 'border-gray-100 bg-gray-50' : s === next ? 'border-amber-300 bg-amber-50' : 'border-gray-100')}>
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-900"><span aria-hidden className={s.state === 'done' ? 'text-emerald-600' : 'text-gray-400'}>{s.state === 'done' ? '✓' : s.n}</span>{s.label}</div>
+            <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{s.hint}</div>
+            {s.action && s.state !== 'done' && <div className="mt-1">{s.action}</div>}
+          </li>
+        ))}
+      </ol>
     </div>
   )
 }
