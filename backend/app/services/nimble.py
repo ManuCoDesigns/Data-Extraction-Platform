@@ -56,7 +56,23 @@ def extract(url: str, render: bool = False) -> dict:
     body = {"url": u, "formats": ["markdown"], "render": render}
     try:
         with httpx.Client(timeout=60) as c:
-            r = c.post(_base() + os.getenv("NIMBLE_EXTRACT_PATH", "/v2/extract"), json=body, headers=headers)
+            r = None
+            for attempt in range(3):  # back off on rate limits (429) and retry a slow page once
+                try:
+                    r = c.post(_base() + os.getenv("NIMBLE_EXTRACT_PATH", "/v2/extract"), json=body, headers=headers)
+                except httpx.TimeoutException:
+                    if attempt == 1:
+                        raise
+                    continue
+                if r.status_code != 429:
+                    break
+                try:
+                    wait = float(r.json().get("retry_after") or r.headers.get("retry-after") or 1)
+                except Exception:
+                    wait = 1.0
+                time.sleep(min(max(wait, 0.5), 10))
+            if r is None or r.status_code == 429:
+                return {"ok": False, "url": u, "text": "", "error": "Nimble is busy right now (rate limit). Try again in a minute."}
             if r.status_code in (401, 403):
                 return {"ok": False, "url": u, "text": "", "error": "Nimble rejected the API key."}
             if r.status_code == 404:
@@ -76,6 +92,8 @@ def extract(url: str, render: bool = False) -> dict:
                         break
             text = data.get("markdown") or data.get("text") or data.get("html") or ""
             status = str(j.get("status") or "success").lower()
+    except httpx.TimeoutException:
+        return {"ok": False, "url": u, "text": "", "error": "The page took too long to load. Try again, or tick Render page."}
     except httpx.HTTPError:
         return {"ok": False, "url": u, "text": "", "error": "Could not reach Nimble. Try again in a moment."}
     except ValueError:
