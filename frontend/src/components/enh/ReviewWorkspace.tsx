@@ -55,7 +55,7 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '' }: { i
       <div className="flex items-center gap-3 flex-wrap">
         <Tabs value={scope} onChange={setScope} items={[{ key: 'peer_done', label: 'Peer reviewed' }, { key: 'all', label: 'All sources' }]} />
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" className="text-sm rounded-xl border border-gray-200 px-3 py-1.5 w-48 max-w-full" />
-        <span className="text-xs text-gray-400">Keys: j and k change record, c marks correct, w marks wrong, n jumps to the next doubted field</span>
+        <span className="text-xs text-gray-400">Keys: ↑ ↓ change field, c correct, w wrong, n next doubted field, j and k change record</span>
       </div>
       <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)] items-start">
         <aside className="space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
@@ -83,14 +83,14 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '' }: { i
           ))}
         </aside>
         <main className="min-w-0">
-          {sourceId ? <SourceDesk key={sourceId} sourceId={sourceId} /> : <Blank title="Pick a source" text="Choose a source on the left. Fields that peers commented on, the SOP is missing, or the system doubts are pulled to the top." />}
+          {sourceId ? <SourceDesk key={sourceId} sourceId={sourceId} onNextSource={() => { const i = items.findIndex((x: any) => x.source_id === sourceId); const n = items[i + 1]; if (n) setSourceId(n.source_id); else toast.success('That was the last source in this list') }} /> : <Blank title="Pick a source" text="Choose a source on the left. Fields that peers commented on, the SOP is missing, or the system doubts are pulled to the top." />}
         </main>
       </div>
     </div>
   )
 }
 
-function SourceDesk({ sourceId }: { sourceId: string }) {
+function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource: () => void }) {
   const [d, setD] = useState<any>(null)
   const [rid, setRid] = useState('')
   const [view, setView] = useState<'fields' | 'json'>('fields')
@@ -107,6 +107,18 @@ function SourceDesk({ sourceId }: { sourceId: string }) {
     setActive(todo[0]?.name ?? '')
   }, [rec])
   useEffect(() => { nextTodo() }, [rid, d])  // eslint-disable-line react-hooks/exhaustive-deps
+  // Show the verdict at once; the server call happens in the background so the next field is one keypress away.
+  const applyLocal = (recordId: string, name: string, verdict: string, truth?: string) => setD((cur: any) => {
+    if (!cur?.records) return cur
+    let audited = 0
+    const records = cur.records.map((r: any) => {
+      if (r.record_id !== recordId) return r
+      const fields = r.fields.map((f: any) => (f.name === name ? { ...f, audit: { verdict, truth_value: truth ?? null, note: null } } : f))
+      return { ...r, fields, todo: fields.filter((f: any) => f.signals.length && !f.audit).length, audited: fields.filter((f: any) => f.audit).length }
+    })
+    records.forEach((r: any) => { audited += r.audited })
+    return { ...cur, records, totals: { ...cur.totals, audited } }
+  })
 
   const move = (delta: number) => {
     if (!d) return
@@ -122,6 +134,12 @@ function SourceDesk({ sourceId }: { sourceId: string }) {
       if (e.key === 'j') move(1)
       else if (e.key === 'k') move(-1)
       else if (e.key === 'n') nextTodo()
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const names = shown.map((f: any) => f.name); if (!names.length) return
+        e.preventDefault()
+        const i = names.indexOf(active)
+        setActive(names[Math.max(0, Math.min(names.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))])
+      }
     }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
   })
@@ -174,7 +192,7 @@ function SourceDesk({ sourceId }: { sourceId: string }) {
             <Tabs value={view} onChange={setView} items={[{ key: 'fields', label: 'Fields' }, { key: 'json', label: 'JSON' }]} />
             <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyFlagged} onChange={e => setOnlyFlagged(e.target.checked)} /> Only doubted fields</label>
             <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Hide checked</label>
-            <span className="ml-auto flex gap-1.5"><Button variant="secondary" onClick={nextTodo}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button></span>
+            <span className="ml-auto flex gap-1.5"><Button variant="secondary" onClick={nextTodo}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button><Button variant="secondary" onClick={onNextSource}>Next source</Button></span>
           </div>
           {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-3">Every doubted field in this source is settled. Check a few random fields too by unticking \"Only doubted fields\".</div>}
           {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
@@ -185,7 +203,7 @@ function SourceDesk({ sourceId }: { sourceId: string }) {
                 </div>
               )}
               {shown.length === 0 ? <Blank title={onlyFlagged ? 'Nothing doubted on this record' : 'Nothing to show'} text={onlyFlagged ? 'Untick "Only doubted fields" to check any field at random.' : ''} /> :
-                shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} active={active === f.name} onActive={() => setActive(f.name)} onDone={() => { load() }} />)}
+                shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} website={d.website} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
             </div>
           )}
         </section>
@@ -198,7 +216,8 @@ function Stat({ label, value, sub }: { label: string; value: number; sub: string
   return <div><div className="text-2xl font-extrabold tabular-nums text-gray-900 leading-none">{value}</div><div className="text-xs font-semibold text-gray-700 mt-1">{label}</div><div className="text-[11px] text-gray-400">{sub}</div></div>
 }
 
-function FieldRow({ rec, f, peers, active, onActive, onDone }: { rec: any; f: any; peers: any[]; active: boolean; onActive: () => void; onDone: () => void }) {
+function FieldRow({ rec, f, peers, website, active, onActive, onLocal, onReload }: { rec: any; f: any; peers: any[]; website?: string; active: boolean; onActive: () => void; onLocal: (rid: string, name: string, verdict: string, truth?: string) => void; onReload: () => void }) {
+  const [same, setSame] = useState(() => { try { return localStorage.getItem('dx.reviewSame') === '1' } catch { return false } })
   const [wrong, setWrong] = useState(false)
   const [truth, setTruth] = useState('')
   const [category, setCategory] = useState('wrong_value')
@@ -225,10 +244,18 @@ function FieldRow({ rec, f, peers, active, onActive, onDone }: { rec: any; f: an
 
   const mark = async (v: 'correct' | 'incorrect') => {
     if (v === 'incorrect' && !truth.trim()) { toast.error('Type what the source really says'); return }
-    setBusy(true)
-    try { await qualityApi.mark({ record_id: rec.record_id, field: f.name, verdict: v, truth_value: truth.trim() || undefined, category, credit: v === 'incorrect' ? credit : [] }); setWrong(false); setTruth(''); onDone() }
-    catch (e) { toast.error(err(e, "Couldn't save that")) } finally { setBusy(false) }
+    const t = truth.trim() || undefined
+    const withSame = same && f.same_count > 0
+    onLocal(rec.record_id, f.name, v, t); setWrong(false); setTruth('')
+    try {
+      const r = await qualityApi.mark({ record_id: rec.record_id, field: f.name, verdict: v, truth_value: t, category, credit: v === 'incorrect' ? credit : [], same_value: withSame })
+      if (withSame) { toast.success(`Also marked ${r.also_marked} other record${r.also_marked === 1 ? '' : 's'} with the same value`); onReload() }
+    } catch (e) { toast.error(err(e, "Couldn't save that. Showing the saved state again.")); onReload() }
   }
+  const setSameSaved = (v: boolean) => { setSame(v); try { localStorage.setItem('dx.reviewSame', v ? '1' : '0') } catch { /* ignore */ } }
+  const host = (() => { try { return website ? new URL(website).hostname.replace(/^www\./, '') : '' } catch { return '' } })()
+  const findUrl = host && typeof f.value === 'string' && f.value.trim() && f.value.length <= 90 && !isUrl(f.value)
+    ? `https://www.google.com/search?q=${encodeURIComponent(`site:${host} "${f.value.trim()}"`)}` : ''
   const empty = show(f.value) === ''
   return (
     <div ref={ref} onClick={onActive} className={cn('rounded-xl border border-gray-100 border-l-4 bg-white px-4 py-3', edge, active && 'ring-2 ring-brand-300')}>
@@ -242,6 +269,11 @@ function FieldRow({ rec, f, peers, active, onActive, onDone }: { rec: any; f: an
           </div>
           {sigs.filter((s: any) => s.text && s.kind !== 'mention').slice(0, 3).map((s: any, i: number) => <p key={i} className="text-xs text-gray-500 mt-1 mb-0">{s.by ? `${s.by}: ` : ''}{s.text}</p>)}
           {f.audit?.truth_value && <p className="text-xs text-gray-600 mt-1 mb-0">Source says: <b>{f.audit.truth_value}</b></p>}
+          <div className="flex items-center gap-3 flex-wrap mt-1.5 text-xs">
+            {findUrl && <a href={findUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-brand-600 hover:underline">Find it on the site</a>}
+            {!empty && <button type="button" onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(show(f.value)).then(() => toast.success('Copied')) }} className="text-gray-500 hover:text-gray-800 underline">Copy value</button>}
+            {f.same_count > 0 && !verdict && <label className="inline-flex items-center gap-1.5 text-gray-600" onClick={e => e.stopPropagation()}><input type="checkbox" checked={same} onChange={e => setSameSaved(e.target.checked)} />Apply to {f.same_count} more record{f.same_count === 1 ? '' : 's'} with this value</label>}
+          </div>
         </div>
         {!wrong && (
           <div className="flex gap-1.5 shrink-0">

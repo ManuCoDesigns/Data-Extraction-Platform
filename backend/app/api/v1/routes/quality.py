@@ -499,6 +499,18 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
         risk = sum(f["weight"] for f in fields_out if not f["audit"])
         out.append({"record_id": r.id, "record": _label(r, i), "fields": fields_out, "general": general, "risk": risk,
                     "todo": sum(1 for f in fields_out if f["signals"] and not f["audit"]), "audited": sum(1 for f in fields_out if f["audit"])})
+    if full:
+        import json as _json
+        tally: dict = {}
+        for r in out:
+            for f in r["fields"]:
+                if f["value"] not in (None, "") and not f["audit"]:
+                    tally.setdefault((f["name"], _json.dumps(f["value"], sort_keys=True, default=str)), 0)
+                    tally[(f["name"], _json.dumps(f["value"], sort_keys=True, default=str))] += 1
+        for r in out:
+            for f in r["fields"]:
+                n = tally.get((f["name"], _json.dumps(f["value"], sort_keys=True, default=str)), 0) if (f["value"] not in (None, "") and not f["audit"]) else 0
+                f["same_count"] = max(0, n - 1)
     out.sort(key=lambda x: (-x["risk"], x["record"].lower()))
     all_names = sorted({f["name"] for r in out for f in r["fields"]})
     total, done = _peer_state(s)
@@ -516,6 +528,7 @@ class MarkBody(BaseModel):
     category: str = "wrong_value"
     severity: str = "major"
     credit: list[str] = []
+    same_value: bool = False
 
 
 @router.post("/review/mark")
@@ -574,5 +587,14 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
                                       note="A peer reviewer commented on this field.", extracted_value=value, status="dismissed", auto_verdict="needs_human",
                                       auto_note="Picked up from the reviewer's comment.", resolved_by=user.id, resolved_at=now, resolve_note="The source supports the value."))
                 touched += 1
+    also = 0
+    if body.same_value and value not in (None, ""):
+        for r in _records(db, s.id):
+            if r.id == rec.id or (r.extracted_fields or {}).get(body.field) != value:
+                continue
+            if db.query(FieldAudit.id).filter(FieldAudit.record_id == r.id, FieldAudit.field == body.field).first():
+                continue
+            db.add(FieldAudit(source_id=s.id, record_id=r.id, field=body.field, verdict=body.verdict, extracted_value=value, truth_value=truth, note=note, audited_by=user.id, audited_at=now))
+            also += 1
     db.commit()
-    return {"id": a.id, "verdict": a.verdict, "findings_settled": touched}
+    return {"id": a.id, "verdict": a.verdict, "findings_settled": touched, "also_marked": also}
