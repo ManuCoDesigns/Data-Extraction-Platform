@@ -406,13 +406,37 @@ def review_source(source_id: str, db: Session = Depends(get_db), user: User = De
     """Every record in a source with each field's signals: peer comments, peer mentions, SOP gaps, system checks, AI and website flags."""
     _need_lead(user)
     s = _source(db, user, source_id)
+    return _review_data(db, s, True, user.id)
+
+
+@router.get("/sources/{source_id}/signals")
+def source_signals(source_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The same signals for the source page. Admins see everything. Reviewers and extractors see only the automatic
+    ones (SOP, system, AI, website) and their own logged errors, so peers stay independent of each other."""
+    s = _source(db, user, source_id)
+    full = _lead(user)
+    if not full and user.id not in _owner_ids(s):
+        raise HTTPException(status_code=403, detail="You are not on this source.")
+    d = _review_data(db, s, full, user.id)
+    sop_ok = sop_n = 0
+    req = _sop_for(s)
+    if req["known"] and req["required"]:
+        for r in d["records"]:
+            sop_n += 1
+            sop_ok += 0 if any(x["kind"] == "sop" and "empty" in x["text"] for f in r["fields"] for x in f["signals"]) else 1
+    d["sop_rate"] = q.pct(sop_ok, sop_n)
+    d["full"] = full
+    return d
+
+
+def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
     schema = _schema_fields(db, s)
     req = _sop_for(s)
     sop_on = bool(req["known"] and req["required"])
     recs = _records(db, s.id)
     findings = db.query(QualityFinding).filter(QualityFinding.source_id == s.id).all()
     audits = {(a.record_id, a.field): a for a in db.query(FieldAudit).filter(FieldAudit.source_id == s.id).all()}
-    peers = [{"id": p.user_id, "name": (p.user.full_name if p.user else "Peer reviewer"), "comment": (p.comment or "").strip()} for p in s.peer_reviews]
+    peers = [{"id": p.user_id, "name": (p.user.full_name if p.user else "Peer reviewer"), "comment": ((p.comment or "").strip() if full else "")} for p in s.peer_reviews]
     peer_ids = {p["id"] for p in peers}
     all_comments = [e for r in recs for lst in (r.reviewer_field_comments or {}).values() for e in (lst or []) if isinstance(e, dict)]
     ulookup = _email_ids(db, {e.get("user") for e in all_comments})
@@ -445,6 +469,8 @@ def review_source(source_id: str, db: Session = Depends(get_db), user: User = De
                 u = ulookup.get(e.get("user"))
                 who = (u.full_name if u else None) or e.get("user") or "Someone"
                 item = {"text": e["comment"], "by": who, "by_id": u.id if u else None, "role": e.get("role"), "type": e.get("type"), "ts": e.get("ts")}
+                if not full:
+                    continue
                 if field == "_general":
                     general.append(item)
                     for m in q.mentioned_fields(e["comment"], list(sig.keys())):
@@ -459,9 +485,9 @@ def review_source(source_id: str, db: Session = Depends(get_db), user: User = De
         for name in order:
             fl = by_rf.get((r.id, name), [])
             for f in fl:
-                if f.status != "dismissed":
+                if f.status != "dismissed" and (full or f.raised_by == uid):
                     sig[name].append({"kind": "finding", "severity": f.severity, "text": f.note or f.rule or f.category, "by": names.get(f.raised_by) or "System checks", "by_id": f.raised_by, "status": f.status, "finding_id": f.id})
-            a = audits.get((r.id, name))
+            a = audits.get((r.id, name)) if full else None
             weight = sum(q.SIGNAL_WEIGHT.get(x["kind"], 1) for x in sig[name])
             fields_out.append({"name": name, "value": ef.get(name), "signals": sig[name], "weight": weight,
                                "audit": {"id": a.id, "verdict": a.verdict, "truth_value": a.truth_value, "note": a.note} if a else None})

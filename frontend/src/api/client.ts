@@ -494,6 +494,7 @@ export const qualityApi = {
   reviewSources: (params: { project_id?: string; scope?: string }) => api.get('/quality/review/sources', { params }).then(r => r.data),
   reviewSource: (sourceId: string) => api.get(`/quality/review/sources/${sourceId}`).then(r => r.data),
   mark: (body: { record_id: string; field: string; verdict: string; truth_value?: string; note?: string; category?: string; severity?: string; credit?: string[] }) => api.post('/quality/review/mark', body).then(r => r.data),
+  signals: (sourceId: string) => api.get(`/quality/sources/${sourceId}/signals`).then(r => r.data),
   sopCheck: (sourceId: string) => api.get(`/quality/sources/${sourceId}/sop-check`).then(r => r.data),
   sopOverview: (projectId?: string) => api.get('/quality/sop-overview', { params: { project_id: projectId || undefined } }).then(r => r.data),
   summary: (params: { project_id?: string; source_id?: string; days?: number }) => api.get('/quality/summary', { params }).then(r => r.data),

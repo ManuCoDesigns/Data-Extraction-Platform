@@ -12,6 +12,7 @@ import { AskClientModal } from '@/components/enh/AskClient'
 import { SourceActivity } from '@/components/enh/SourceActivity'
 import { SourceChat } from '@/components/enh/SourceChat'
 import { FlagErrorModal } from '@/components/enh/FlagErrorModal'
+import { SourceQuality } from '@/components/enh/SourceQuality'
 import { SourceRequiredCard } from '@/components/enh/RequiredFields'
 import { LinkChip } from '@/pages/DataHealth'
 import {
@@ -20,7 +21,7 @@ import {
   Clock, Brain, Trash2, Search, Sparkles, Shield, Info, ChevronDown, RotateCcw, Code, Send, Eye, FolderOpen,
   Folder, AlertTriangle, File as FileIcon, Zap, Link2, Database, MessageSquarePlus, History as HistoryIcon
 } from 'lucide-react'
-import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi, xtriumApi, resourcesApi, enhApi } from '@/api/client'
+import { sourcesApi, projectsApi, schemasApi, recordsApi, submissionApi, jobsApi, xtriumApi, resourcesApi, enhApi, qualityApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
 import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinner, Avatar, ConfirmDialog, cn, toast, safeFromNow, safeFormat } from '@/components/ui'
 import { useAuthStore } from '@/store/auth'
@@ -407,6 +408,14 @@ function SourceDetailInner() {
   const [verifyResult, setVerifyResult] = useState<any>(null)
   const [showVerifyResult, setShowVerifyResult] = useState(false)
   const [activeRecordIndex, setActiveRecordIndex] = useState<number | null>(null)
+  const [qsig, setQsig] = useState<any>(null)
+  const isLeadUser = ['org_admin', 'project_admin', 'qa_lead'].some(role => user?.roles?.includes(role))
+  const sigFor = (recordId?: string) => {
+    const rec = qsig?.records?.find((x: any) => x.record_id === recordId)
+    const out: Record<string, any[]> = {}
+    rec?.fields?.forEach((f: any) => { if (f.signals.length) out[f.name] = f.signals })
+    return out
+  }
 
   const load = () => {
     if (!projectId || !sourceId) return
@@ -414,6 +423,7 @@ function SourceDetailInner() {
     setSourceNotFound(false)
     setSourceLoadError(false)
     projectsApi.get(projectId).then(setProject).catch(() => {})
+    qualityApi.signals(sourceId).then(setQsig).catch(() => setQsig(null))
     // This is the one fetch that gates the page: `loading` only clears once
     // it actually settles, success or failure — never before, which is what
     // previously caused a "Source not found" flash on every visit (loading
@@ -852,6 +862,7 @@ function SourceDetailInner() {
           onReview={handleReviewRecord}
           onAdminReview={handleAdminReview}
           onNavigate={setActiveRecordIndex}
+          signals={sigFor(records[activeRecordIndex].id)}
           onClose={() => { setActiveRecordIndex(null); load() }}
         />
       </div>
@@ -1090,6 +1101,8 @@ function SourceDetailInner() {
       </Card>
 
       <PeerReviewPanel sourceId={source.id} onChanged={load} />
+
+      <SourceQuality data={qsig} isLead={isLeadUser} sourceId={source.id} projectId={source.project_id} onOpenRecord={rid => { const i = records.findIndex((x: any) => x.id === rid); if (i >= 0) setActiveRecordIndex(i) }} />
 
       <SourceChat sourceId={source.id} />
 
@@ -1490,6 +1503,15 @@ function SourceDetailInner() {
                                   display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap',
                                 }}>
                                   ↩ Returned {r.correction_count}×
+                                </span>
+                              )}
+                              {Object.keys(sigFor(r.id)).length > 0 && (
+                                <span title={Object.keys(sigFor(r.id)).join(', ')} style={{
+                                  fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                                  background: 'var(--bg-fffbeb)', color: 'var(--tx-b45309)', border: '1px solid var(--bd-fde68a)',
+                                  display: 'inline-flex', alignItems: 'center', gap: 3, whiteSpace: 'nowrap',
+                                }}>
+                                  ⚠ {Object.keys(sigFor(r.id)).length} to check
                                 </span>
                               )}
                               {r.reviewer_field_comments && Object.values(r.reviewer_field_comments).some((arr: any) => Array.isArray(arr) && arr.length > 0) && (

@@ -21,12 +21,12 @@ const err = (e: any, d: string) => e?.response?.data?.detail || d
 
 type Scope = 'peer_done' | 'all'
 
-export function ReviewWorkspace() {
+export function ReviewWorkspace({ initialSource = '', initialProject = '' }: { initialSource?: string; initialProject?: string }) {
   const [list, setList] = useState<any>(null)
-  const [project, setProject] = useState('')
-  const [scope, setScope] = useState<Scope>('peer_done')
+  const [project, setProject] = useState(initialProject)
+  const [scope, setScope] = useState<Scope>(initialSource ? 'all' : 'peer_done')
   const [q, setQ] = useState('')
-  const [sourceId, setSourceId] = useState('')
+  const [sourceId, setSourceId] = useState(initialSource)
 
   useEffect(() => { setList(null); qualityApi.reviewSources({ project_id: project || undefined, scope }).then(setList).catch(() => setList({ items: [], projects: [] })) }, [project, scope])
   const items: any[] = useMemo(() => (list?.items ?? []).filter((s: any) => !q.trim() || s.name.toLowerCase().includes(q.trim().toLowerCase())), [list, q])

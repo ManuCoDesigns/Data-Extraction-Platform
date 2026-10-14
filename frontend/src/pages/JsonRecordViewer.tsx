@@ -11,6 +11,7 @@ import { resourcesApi } from '@/api/client'
 import { JsonEditor } from './JsonEditor'
 import { RecordRequiredBar } from '@/components/enh/RequiredFields'
 import { EvidencePanel } from '@/components/enh/EvidencePanel'
+import { SIGNAL_LABEL, type Signal } from '@/components/enh/SourceQuality'
 
 interface SchemaField {
   name: string; type?: string; required?: boolean
@@ -26,6 +27,7 @@ interface Props {
   onFix: (id: string, fields: Record<string, unknown>) => Promise<void>
   onReview: (id: string, action: 'approve' | 'reject', note?: string) => Promise<void>
   onNavigate: (index: number) => void; onClose: () => void
+  signals?: Record<string, Signal[]>
 }
 
 // ── Colour helpers ────────────────────────────────────────────────────────────
@@ -67,8 +69,8 @@ function SectionHeader({ icon, label, count, grad }: { icon: string; label: stri
 }
 
 // ── Editable field ─────────────────────────────────────────────────────────────
-function EditField({ label, value, field, onSave, required, isExtra }: {
-  label: string; value: unknown; field: string
+function EditField({ label, value, field, onSave, required, isExtra, signals }: {
+  label: string; value: unknown; field: string; signals?: Signal[]
   onSave: (field: string, val: string) => void
   required?: boolean; isExtra?: boolean
 }) {
@@ -80,7 +82,7 @@ function EditField({ label, value, field, onSave, required, isExtra }: {
   const display = value === null || value === undefined || value === '' ? null : String(value)
 
   return (
-    <div style={{ padding: '10px 0', borderBottom: '1px solid var(--bd-f1f5f9)', display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+    <div id={`fld-${field}`} style={{ padding: '10px 0 10px', borderBottom: '1px solid var(--bd-f1f5f9)', display: 'flex', gap: 12, alignItems: 'flex-start', ...(signals?.length ? { borderLeft: '3px solid #f59e0b', paddingLeft: 10, marginLeft: -13, background: 'var(--bg-fffbeb, transparent)' } : {}) }}>
       <div style={{ minWidth: 180, flexShrink: 0 }}>
         <p style={{ fontSize: 11, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.06em', margin: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
           {label}
@@ -89,6 +91,14 @@ function EditField({ label, value, field, onSave, required, isExtra }: {
         </p>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
+        {signals && signals.length > 0 && (
+          <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 5 }}>
+            {[...new Set(signals.map(x => x.kind))].map(k => {
+              const first = signals.find(x => x.kind === k)!
+              return <span key={k} title={first.text} style={{ fontSize: 10, fontWeight: 700, padding: '1px 8px', borderRadius: 20, background: 'var(--bg-fffbeb)', color: 'var(--tx-b45309)', border: '1px solid var(--bd-fde68a)' }}>{SIGNAL_LABEL[k]?.label ?? k}{first.by && k !== 'finding' ? `: ${first.by}` : ''}</span>
+            })}
+          </div>
+        )}
         {editing ? (
           <div style={{ display: 'flex', gap: 6 }}>
             <input ref={inputRef} value={draft} onChange={e => setDraft(e.target.value)}
@@ -115,7 +125,7 @@ function EditField({ label, value, field, onSave, required, isExtra }: {
 export function JsonRecordViewer({
   record, allRecords, currentIndex, schemaFields, schemaName,
   sourceWebsiteUrl, extrasFields = [], extrasSource, sourceId, projectId,
-  isExtractor, isReviewer, isAdmin, onFix, onReview, onAdminReview, onNavigate, onClose,
+  isExtractor, isReviewer, isAdmin, onFix, onReview, onAdminReview, onNavigate, onClose, signals,
 }: Props) {
   // SOP dropdown auto-detects from whatever SOP resources are actually
   // attached to this project (Resources tab, type=sop) — rather than a
@@ -389,6 +399,14 @@ export function JsonRecordViewer({
         </div>
       )}
 
+      {viewTab === 'review' && signals && Object.keys(signals).filter(k => signals[k].length).length > 0 && (
+        <div style={{ margin: '0 24px 8px', padding: '8px 12px', borderRadius: 10, background: 'var(--bg-fffbeb)', border: '1px solid var(--bd-fde68a)', color: 'var(--tx-b45309)', fontSize: 12, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+          <b>Look at these first:</b>
+          {Object.keys(signals).filter(k => signals[k].length).map(k => (
+            <button key={k} type="button" onClick={() => document.getElementById(`fld-${k}`)?.scrollIntoView({ block: 'center', behavior: 'smooth' })} style={{ fontSize: 11, fontWeight: 700, padding: '1px 8px', borderRadius: 20, border: '1px solid var(--bd-fde68a)', background: 'transparent', color: 'inherit', cursor: 'pointer' }}>{k}</button>
+          ))}
+        </div>
+      )}
       {viewTab === 'review' && !record.is_escalation_only && schemaFields.some(f => f.required) && (
         <RecordRequiredBar fields={schemaFields} data={localFields} />
       )}
@@ -505,7 +523,7 @@ export function JsonRecordViewer({
               const isExtra = extrasFields.includes(field)
               if (localFields[field] === undefined && !isExtra) return null
               return (
-                <EditField key={field} field={field} label={label}
+                <EditField key={field} field={field} label={label} signals={signals?.[field]}
                   value={localFields[field]} required={required} isExtra={isExtra}
                   onSave={handleSaveField} />
               )
@@ -550,7 +568,7 @@ export function JsonRecordViewer({
                       )}
                     </div>
                   ) : (
-                    <EditField key={field} field={field} label={field.replace(/_/g,' ')}
+                    <EditField key={field} field={field} label={field.replace(/_/g,' ')} signals={signals?.[field]}
                       value={localFields[field]} isExtra={extrasFields.includes(field)}
                       onSave={handleSaveField} />
                   )

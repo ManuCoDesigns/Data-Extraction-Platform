@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { qualityApi } from '@/api/client'
 import { Blank, Chip, PAGE, PageHeader, Panel, SelectBox, Skeletons, Tabs, Tile, shortAgo, type Tone } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
@@ -17,6 +18,7 @@ export function QualityPage() {
   const [days, setDays] = useState('90')
   const [tab, setTab] = useState<Tab>('review')
   const [projectId, setProjectId] = useState('')
+  const [params] = useSearchParams()
 
   useEffect(() => { qualityApi.sources().then(r => setSources(r.items)).catch(() => setSources([])) }, [tab])
   const src = (sources ?? []).find(s => s.source_id === sourceId)
@@ -41,7 +43,7 @@ export function QualityPage() {
           </SelectBox>
         )}
       </div>
-      {tab === 'review' && <ReviewWorkspace />}
+      {tab === 'review' && <ReviewWorkspace initialSource={params.get('source') || ''} initialProject={params.get('project') || ''} />}
       {tab === 'scores' && <Scores sourceId={sourceId} projectId={projectId} days={Number(days)} />}
       {tab === 'sop' && <SopCheck sourceId={sourceId} projectId={projectId} onPick={id => setSourceId(id)} />}
       {tab === 'findings' && <Findings sourceId={sourceId} source={src} />}
