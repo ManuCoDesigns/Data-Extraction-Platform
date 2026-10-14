@@ -1,7 +1,7 @@
 """Quality: log errors on records, let the system confirm what it can, check fields against the real source,
 and score the process from those checks."""
 import random
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -35,6 +35,13 @@ def _source(db: Session, user: User, source_id: str) -> Source:
     if not s or not _can_chat(user, s):
         raise HTTPException(status_code=404, detail="Source not found.")
     return s
+
+
+def _record_source_id(db: Session, rec: ExtractedRecord) -> str:
+    job = db.query(ExtractionJob).filter(ExtractionJob.id == rec.job_id).first()
+    if not job or not job.source_id:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    return job.source_id
 
 
 def _label(r: ExtractedRecord, i: int | None = None) -> str:
@@ -471,6 +478,14 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
                 item = {"text": e["comment"], "by": who, "by_id": u.id if u else None, "role": e.get("role"), "type": e.get("type"), "ts": e.get("ts")}
                 if not full:
                     continue
+                if e.get("role") == "admin":
+                    item["sop_rule"] = e.get("sop_rule")
+                    if field == "_general":
+                        general.append(item)
+                    elif field in sig:
+                        sig[field].append({"kind": "note", "severity": "minor", "text": e["comment"], "by": who, "by_id": item["by_id"], "role": "admin",
+                                           "type": e.get("type"), "sop_rule": e.get("sop_rule"), "ts": e.get("ts"), "mine": bool(u and u.id == uid)})
+                    continue
                 if field == "_general":
                     general.append(item)
                     for m in q.mentioned_fields(e["comment"], list(sig.keys())):
@@ -498,7 +513,8 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
             tot["mentions"] += sum(1 for x in sig[name] if x["kind"] == "mention")
         risk = sum(f["weight"] for f in fields_out if not f["audit"])
         out.append({"record_id": r.id, "record": _label(r, i), "fields": fields_out, "general": general, "risk": risk, "raw": (r.raw_text or "")[:20000],
-                    "todo": sum(1 for f in fields_out if f["signals"] and not f["audit"]), "audited": sum(1 for f in fields_out if f["audit"])})
+                    "todo": sum(1 for f in fields_out if f["signals"] and not f["audit"]), "audited": sum(1 for f in fields_out if f["audit"]),
+                    "review_status": getattr(r.review_status, "value", r.review_status), "admin_note": r.admin_review_note, "corrections": r.correction_count or 0})
     if full:
         import json as _json
         tally: dict = {}
@@ -519,7 +535,63 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
     tot["sop_rate"] = q.pct(sum(1 for r in out if not any(x["kind"] == "sop" and "empty" in x["text"] for f in r["fields"] for x in f["signals"])), len(out)) if sop_on else None
     return {"source_id": s.id, "source": s.name, "project_id": s.project_id, "website": s.website_url, "sop_code": req["sop_code"] if sop_on else None,
             "sop_required": req["required"] if sop_on else [], "peers": [{"id": p["id"], "name": p["name"], "comment": p["comment"], "fields": q.mentioned_fields(p["comment"], all_names)} for p in peers], "peer_done": total > 0 and done == total,
-            "totals": tot, "records": out}
+            "totals": tot, "records": out,
+            "status": getattr(s.status, "value", s.status), "approved_records": sum(1 for r in out if r["review_status"] == "approved"), "total_records": len(out)}
+
+
+class CommentBody(BaseModel):
+    record_id: str
+    field: str = "_general"
+    comment: str
+    sop_rule: str | None = None
+    kind: str = "note"
+
+
+@router.post("/review/comment")
+def review_comment(body: CommentBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """An admin note on one field (or on the whole record). The extractor and peers see it on the source page."""
+    _need_lead(user)
+    rec = db.query(ExtractedRecord).filter(ExtractedRecord.id == body.record_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    s = _source(db, user, _record_source_id(db, rec))
+    text = (body.comment or "").strip()
+    if not text:
+        raise HTTPException(status_code=422, detail="Write the comment first.")
+    if len(text) > 2000:
+        raise HTTPException(status_code=422, detail="Keep the comment under 2000 characters.")
+    field = body.field or "_general"
+    if field != "_general" and field not in (rec.extracted_fields or {}) and field not in (_sop_for(s)["required"] or []):
+        raise HTTPException(status_code=422, detail="That field is not on this record.")
+    kind = body.kind if body.kind in ("note", "sop", "correction") else "note"
+    now = datetime.now(timezone.utc)
+    fc = {k: list(v or []) for k, v in (rec.reviewer_field_comments or {}).items()}
+    fc.setdefault(field, []).append({"comment": text, "user": user.email, "role": "admin", "type": kind,
+                                     "sop_rule": (body.sop_rule or "").strip()[:120] or None, "ts": now.isoformat()})
+    rec.reviewer_field_comments = fc
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(rec, "reviewer_field_comments")
+    db.commit()
+    return {"ok": True, "ts": now.isoformat()}
+
+
+@router.delete("/review/comment")
+def review_comment_delete(record_id: str, field: str, ts: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    rec = db.query(ExtractedRecord).filter(ExtractedRecord.id == record_id).first()
+    if not rec:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    _source(db, user, _record_source_id(db, rec))
+    fc = {k: list(v or []) for k, v in (rec.reviewer_field_comments or {}).items()}
+    keep = [e for e in fc.get(field, []) if not (isinstance(e, dict) and e.get("ts") == ts and e.get("user") == user.email and e.get("role") == "admin")]
+    if len(keep) == len(fc.get(field, [])):
+        raise HTTPException(status_code=404, detail="Only your own comment can be removed.")
+    fc[field] = keep
+    rec.reviewer_field_comments = fc
+    from sqlalchemy.orm.attributes import flag_modified
+    flag_modified(rec, "reviewer_field_comments")
+    db.commit()
+    return {"ok": True}
 
 
 class MarkBody(BaseModel):
@@ -583,7 +655,7 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
             raise
         a.verdict, a.truth_value, a.note, a.extracted_value, a.audited_by, a.audited_at = body.verdict, truth, note, value, user.id, now
     # who commented on this field on this record
-    ulookup = _email_ids(db, {e.get("user") for e in ((rec.reviewer_field_comments or {}).get(body.field) or []) if isinstance(e, dict)})
+    ulookup = _email_ids(db, {e.get("user") for e in ((rec.reviewer_field_comments or {}).get(body.field) or []) if isinstance(e, dict) and e.get("role") != "admin"})
     commenters = {u.id: u for u in ulookup.values() if u.id in _owner_ids(s) and u.id != s.assigned_extractor_id}
     credit = set(commenters) | {c for c in body.credit if c in _owner_ids(s)}
     touched = 0

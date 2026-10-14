@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { qualityApi } from '@/api/client'
+import { qualityApi, sourcesApi } from '@/api/client'
 import { Blank, Chip, Panel, SelectBox, Skeletons, Tabs, type Tone } from '@/components/enh/kit'
 import { CATEGORY_OPTIONS } from '@/components/enh/FlagErrorModal'
 import { Button, cn, toast } from '@/components/ui'
 import { ReviewSidePanel } from '@/components/enh/ReviewSidePanel'
+import { SourceChat } from '@/components/enh/SourceChat'
+import { SourceActivity } from '@/components/enh/SourceActivity'
+import { AskClientModal } from '@/components/enh/AskClient'
 
 // The admin's review desk: every field that something doubts is pulled to the top, with the reason beside it,
 // so a check against the real source is one click per field instead of a hunt through JSON.
@@ -15,6 +18,7 @@ const KIND: Record<string, { label: string; tone: Tone; rank: number }> = {
   sop: { label: 'SOP', tone: 'indigo', rank: 3 },
   system: { label: 'System check', tone: 'blue', rank: 4 },
   ai: { label: 'AI or web flag', tone: 'purple', rank: 5 },
+  note: { label: 'Admin note', tone: 'indigo', rank: 6 },
 }
 const show = (v: unknown) => (v === null || v === undefined || v === '' ? '' : typeof v === 'object' ? JSON.stringify(v, null, 1) : String(v))
 const isUrl = (v: unknown) => typeof v === 'string' && /^https?:\/\/\S+$/i.test(v)
@@ -141,6 +145,10 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
     } catch (e) { toast.error(err(e, "Couldn't check the website")) } finally { setSiteBusy(false) }
   }
   const [scanBusy, setScanBusy] = useState(false)
+  const [toolsOpen, setToolsOpen] = useState(false)
+  const [tool, setTool] = useState<'chat' | 'activity'>('chat')
+  const [ask, setAsk] = useState(false)
+  const [approving, setApproving] = useState(false)
   const runScan = async () => {
     setScanBusy(true)
     try { const r = await qualityApi.scan(sourceId); toast.success(r.created ? `System checks found ${r.created} new issue${r.created === 1 ? '' : 's'}` : 'System checks found nothing new'); load() }
@@ -178,6 +186,12 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
     records.forEach((r: any) => { audited += r.audited })
     return { ...cur, records, totals: { ...cur.totals, audited } }
   })
+
+  const approveSource = async () => {
+    setApproving(true)
+    try { await sourcesApi.approve(sourceId); toast.success('Source approved'); load() }
+    catch (e) { toast.error(err(e, 'Cannot approve yet. Check that every record is approved.')) } finally { setApproving(false) }
+  }
 
   const move = (delta: number) => {
     if (!d) return
@@ -235,6 +249,7 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
             <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Hide checked</label>
             <span className="ml-auto flex gap-1.5 flex-wrap [&_button]:whitespace-nowrap"><Button variant="secondary" onClick={() => setFocus(true)} title="Open the record with the SOP, source text and website beside it (press s)">Side by side</Button><Button variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading the site…' : 'Check on the site'}</Button><Button variant="secondary" onClick={jumpToWork}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button><Button variant="secondary" onClick={onNextSource}>Next source</Button></span>
           </div>
+          {rec && <RecordActions key={rec.record_id} sourceId={sourceId} rec={rec} onDone={load} />}
           {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-3">Every doubted field in this source is settled. Check a few random fields too by unticking \"Only doubted fields\".</div>}
           {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
             <div className="space-y-2.5">
@@ -244,7 +259,7 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
                 </div>
               )}
               {shown.length === 0 ? <Blank title={onlyFlagged ? 'Nothing doubted on this record' : 'Nothing to show'} text={onlyFlagged ? 'Untick "Only doubted fields" to check any field at random.' : ''} /> :
-                shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
+                shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} sopRules={d.sop_required ?? []} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
             </div>
           )}
         </section>
@@ -281,7 +296,9 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
   return (
     <div className="space-y-4">
       <Panel title={d.source} subtitle={d.peer_done ? 'Every peer reviewer has submitted.' : 'Some peer reviewers have not submitted yet.'}
-        actions={<div className="flex items-center gap-1.5 flex-wrap">{d.sop_code && <Chip tone="indigo">{d.sop_code}</Chip>}{d.website && <a href={d.website} target="_blank" rel="noreferrer" className="text-xs font-semibold text-brand-600 hover:underline">Open the source site</a>}</div>}>
+        actions={<div className="flex items-center gap-1.5 flex-wrap [&_button]:whitespace-nowrap">{d.sop_code && <Chip tone="indigo">{d.sop_code}</Chip>}<Chip tone={d.status === 'approved' ? 'green' : 'gray'}>{d.status === 'approved' ? 'Source approved' : `${d.approved_records}/${d.total_records} records approved`}</Chip>
+          <Button variant="secondary" onClick={() => setAsk(true)} title="Send a question to the client about this source">Ask the client</Button>
+          {d.status !== 'approved' && <Button disabled={approving || !d.total_records || d.approved_records !== d.total_records} onClick={approveSource} title={d.approved_records === d.total_records ? 'Approve this source' : 'Approve every record first'}>{approving ? 'Approving…' : 'Approve source'}</Button>}{d.website && <a href={d.website} target="_blank" rel="noreferrer" className="text-xs font-semibold text-brand-600 hover:underline">Open the source site</a>}</div>}>
         <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 text-sm">
           <Stat label="Fields doubted" value={t.flagged} sub={`of ${t.fields}`} />
           <Stat label="Peer comments" value={t.comments} sub="on a field" />
@@ -307,6 +324,58 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
 
         {fieldsSection}
       </div>
+
+      <Panel title="Source discussion and activity" subtitle="The same chat and history as the source page, so you do not have to leave the desk."
+        actions={<Button variant="secondary" onClick={() => setToolsOpen(v => !v)}>{toolsOpen ? 'Hide' : 'Show'}</Button>}>
+        {toolsOpen && (
+          <div className="space-y-3">
+            <Tabs value={tool} onChange={setTool} items={[{ key: 'chat', label: 'Discussion' }, { key: 'activity', label: 'Activity' }]} />
+            {tool === 'chat' ? <SourceChat sourceId={sourceId} /> : <SourceActivity sourceId={sourceId} refreshKey={d.approved_records} />}
+          </div>
+        )}
+      </Panel>
+      <AskClientModal open={ask} onClose={() => setAsk(false)} projectId={d.project_id} sourceId={sourceId} />
+    </div>
+  )
+}
+
+/** Final sign-off on one record, and a note on the whole record, without leaving the desk. */
+function RecordActions({ sourceId, rec, onDone }: { sourceId: string; rec: any; onDone: () => void }) {
+  const [mode, setMode] = useState<'' | 'return' | 'comment'>('')
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(false)
+  const status: string = rec.review_status
+  const label: Record<string, [string, Tone]> = { approved: ['Approved', 'green'], rejected: ['Sent back', 'red'], pending_admin_review: ['Waiting for your sign-off', 'amber'], pending: ['In progress', 'gray'] }
+  const [text, tone] = label[status] ?? [status?.replace(/_/g, ' ') || 'In progress', 'gray']
+  const run = async (fn: () => Promise<unknown>, ok: string) => {
+    setBusy(true)
+    try { await fn(); toast.success(ok); setMode(''); setNote(''); onDone() }
+    catch (e) { toast.error(err(e, 'That did not save')) } finally { setBusy(false) }
+  }
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white px-4 py-2.5 space-y-2">
+      <div className="flex items-center gap-2 flex-wrap [&_button]:whitespace-nowrap">
+        <span className="text-xs text-gray-500">This record</span><Chip tone={tone}>{text}</Chip>
+        {rec.corrections > 0 && <span className="text-xs text-gray-500">sent back {rec.corrections} time{rec.corrections === 1 ? '' : 's'}</span>}
+        <span className="ml-auto flex gap-1.5 flex-wrap">
+          <Button variant="secondary" onClick={() => setMode(mode === 'comment' ? '' : 'comment')}>Comment on the record</Button>
+          <Button variant="secondary" disabled={busy} onClick={() => setMode(mode === 'return' ? '' : 'return')}>Return for correction</Button>
+          <Button disabled={busy || status === 'approved'} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'approve', note: '' }), 'Record approved')}>{status === 'approved' ? 'Approved' : 'Approve record'}</Button>
+        </span>
+      </div>
+      {mode !== '' && (
+        <div className="space-y-2">
+          <textarea autoFocus value={note} onChange={e => setNote(e.target.value)} rows={2} maxLength={2000}
+            placeholder={mode === 'return' ? 'Tell the extractor what to fix. Your field notes go with it.' : 'A note about the whole record'}
+            className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2" />
+          <div className="flex gap-1.5 justify-end">
+            <Button variant="secondary" onClick={() => { setMode(''); setNote('') }}>Cancel</Button>
+            {mode === 'return'
+              ? <Button disabled={busy || !note.trim()} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'return', note: note.trim() }), 'Sent back to the extractor')}>Send back</Button>
+              : <Button disabled={busy || !note.trim()} onClick={() => run(() => qualityApi.comment({ record_id: rec.record_id, comment: note.trim() }), 'Comment saved')}>Save comment</Button>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -344,13 +413,16 @@ function Stat({ label, value, sub }: { label: string; value: number; sub: string
   return <div><div className="text-2xl font-extrabold tabular-nums text-gray-900 leading-none">{value}</div><div className="text-xs font-semibold text-gray-700 mt-1">{label}</div><div className="text-[11px] text-gray-400">{sub}</div></div>
 }
 
-function FieldRow({ rec, f, peers, website, site, active, onActive, onLocal, onReload }: { rec: any; f: any; peers: any[]; website?: string; site?: { state: string; snippet?: string | null }; active: boolean; onActive: () => void; onLocal: (rid: string, name: string, verdict: string, truth?: string) => void; onReload: () => void }) {
+function FieldRow({ rec, f, peers, sopRules, website, site, active, onActive, onLocal, onReload }: { rec: any; f: any; peers: any[]; sopRules: string[]; website?: string; site?: { state: string; snippet?: string | null }; active: boolean; onActive: () => void; onLocal: (rid: string, name: string, verdict: string, truth?: string) => void; onReload: () => void }) {
   const [same, setSame] = useState(() => { try { return localStorage.getItem('dx.reviewSame') === '1' } catch { return false } })
   const [wrong, setWrong] = useState(false)
   const [truth, setTruth] = useState('')
   const [category, setCategory] = useState('wrong_value')
   const [credit, setCredit] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  const [cmt, setCmt] = useState(false)
+  const [ctext, setCtext] = useState('')
+  const [crule, setCrule] = useState('')
   const ref = useRef<HTMLDivElement>(null)
   const sigs = [...f.signals].sort((a: any, b: any) => (KIND[a.kind]?.rank ?? 9) - (KIND[b.kind]?.rank ?? 9))
   const pointers = [...new Map(f.signals.filter((s: any) => (s.kind === 'mention' || s.kind === 'comment') && s.by_id).map((s: any) => [s.by_id, s.by])).entries()] as [string, string][]
@@ -365,6 +437,7 @@ function FieldRow({ rec, f, peers, website, site, active, onActive, onLocal, onR
       if (e.metaKey || e.ctrlKey || e.altKey) return
       if (e.key === 'c') { e.preventDefault(); mark('correct') }
       else if (e.key === 'w') { e.preventDefault(); setWrong(true) }
+      else if (e.key === 'm') { e.preventDefault(); setCmt(true) }
     }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
   })
@@ -380,6 +453,16 @@ function FieldRow({ rec, f, peers, website, site, active, onActive, onLocal, onR
       if (withSame) { toast.success(`Also marked ${r.also_marked} other record${r.also_marked === 1 ? '' : 's'} with the same value`); onReload() }
     } catch (e) { toast.error(err(e, "Couldn't save that. Showing the saved state again.")); onReload() }
   }
+  const saveComment = async () => {
+    if (!ctext.trim()) return
+    setBusy(true)
+    try { await qualityApi.comment({ record_id: rec.record_id, field: f.name, comment: ctext.trim(), sop_rule: crule || undefined, kind: crule ? 'sop' : 'note' }); toast.success('Comment saved. The extractor sees it on the source page.'); setCmt(false); setCtext(''); setCrule(''); onReload() }
+    catch (e) { toast.error(err(e, "Couldn't save the comment")) } finally { setBusy(false) }
+  }
+  const removeComment = async (ts: string) => {
+    try { await qualityApi.deleteComment({ record_id: rec.record_id, field: f.name, ts }); onReload() } catch (e) { toast.error(err(e, "Couldn't remove it")) }
+  }
+  const notes = f.signals.filter((s: any) => s.kind === 'note')
   const setSameSaved = (v: boolean) => { setSame(v); try { localStorage.setItem('dx.reviewSame', v ? '1' : '0') } catch { /* ignore */ } }
   const host = (() => { try { return website ? new URL(website).hostname.replace(/^www\./, '') : '' } catch { return '' } })()
   const findUrl = host && typeof f.value === 'string' && f.value.trim() && f.value.length <= 90 && !isUrl(f.value)
@@ -396,10 +479,17 @@ function FieldRow({ rec, f, peers, website, site, active, onActive, onLocal, onR
           <div className={cn('text-sm mt-1 break-words whitespace-pre-wrap', empty ? 'text-gray-400 italic' : 'text-gray-900 font-medium')}>
             {empty ? 'Empty' : isUrl(f.value) ? <a href={f.value} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline break-all">{f.value}</a> : show(f.value)}
           </div>
-          {sigs.filter((s: any) => s.text && s.kind !== 'mention').slice(0, 3).map((s: any, i: number) => <p key={i} className="text-xs text-gray-500 mt-1 mb-0">{s.by ? `${s.by}: ` : ''}{s.text}</p>)}
+          {sigs.filter((s: any) => s.text && s.kind !== 'mention' && s.kind !== 'note').slice(0, 3).map((s: any, i: number) => <p key={i} className="text-xs text-gray-500 mt-1 mb-0">{s.by ? `${s.by}: ` : ''}{s.text}</p>)}
+          {notes.map((s: any, i: number) => (
+            <p key={'n' + i} className="text-xs text-indigo-800 bg-indigo-50 rounded-lg px-2.5 py-1.5 mt-1.5 mb-0 break-words">
+              <b>{s.by}</b>{s.sop_rule ? <span> on <b>{s.sop_rule}</b></span> : null}: {s.text}
+              {s.mine && <button type="button" onClick={e => { e.stopPropagation(); removeComment(s.ts) }} className="ml-2 underline text-indigo-600">Remove</button>}
+            </p>
+          ))}
           {site?.snippet && site.state !== 'missing' && <p className="text-xs text-gray-500 mt-1 mb-0 italic break-words">On the site: …{site.snippet}…</p>}
           {f.audit?.truth_value && <p className="text-xs text-gray-600 mt-1 mb-0">Source says: <b>{f.audit.truth_value}</b></p>}
           <div className="flex items-center gap-3 flex-wrap mt-1.5 text-xs">
+            <button type="button" onClick={e => { e.stopPropagation(); setCmt(v => !v) }} className="text-brand-600 hover:underline" title="Leave a note on this field (press m)">Comment</button>
             {findUrl && <a href={findUrl} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-brand-600 hover:underline">Find it on the site</a>}
             {!empty && <button type="button" onClick={e => { e.stopPropagation(); navigator.clipboard?.writeText(show(f.value)).then(() => toast.success('Copied')) }} className="text-gray-500 hover:text-gray-800 underline">Copy value</button>}
             {f.same_count > 0 && !verdict && <label className="inline-flex items-center gap-1.5 text-gray-600" onClick={e => e.stopPropagation()}><input type="checkbox" checked={same} onChange={e => setSameSaved(e.target.checked)} />Apply to {f.same_count} more record{f.same_count === 1 ? '' : 's'} with this value</label>}
@@ -412,6 +502,17 @@ function FieldRow({ rec, f, peers, website, site, active, onActive, onLocal, onR
           </div>
         )}
       </div>
+      {cmt && (
+        <div className="mt-3 pt-3 border-t border-gray-100 space-y-2" onClick={e => e.stopPropagation()}>
+          <textarea autoFocus value={ctext} onChange={e => setCtext(e.target.value)} rows={2} maxLength={2000}
+            onKeyDown={e => { if (e.key === 'Escape') setCmt(false); if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) saveComment() }}
+            placeholder="What is the issue with this field? Say what the SOP expects." className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2" />
+          <div className="flex items-center gap-3 flex-wrap">
+            {sopRules.length > 0 && <SelectBox label="SOP rule" value={crule} onChange={setCrule}><option value="">None</option>{sopRules.map(r => <option key={r} value={r}>{r} (required)</option>)}</SelectBox>}
+            <span className="ml-auto flex gap-1.5"><Button variant="secondary" onClick={() => setCmt(false)}>Cancel</Button><Button disabled={busy || !ctext.trim()} onClick={saveComment}>Save comment</Button></span>
+          </div>
+        </div>
+      )}
       {wrong && (
         <div className="mt-3 pt-3 border-t border-gray-100 space-y-2" onClick={e => e.stopPropagation()}>
           <input autoFocus value={truth} onChange={e => setTruth(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') mark('incorrect'); if (e.key === 'Escape') setWrong(false) }}

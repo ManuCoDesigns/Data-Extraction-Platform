@@ -93,10 +93,13 @@ For one record:
 4. Mark the field:
    - **Correct**: the source supports the value.
    - **Wrong**: type what the source really says. Pick the kind of error. Tick the peers who should get credit for catching it.
-5. If the same value appears on other records, tick **Apply to N more records with this value** to settle them in one go. It only touches fields you have not checked yet, and peer credit still goes only to the record you clicked.
-6. Move on. The next doubted field is selected for you.
+5. **Comment on a field** (press `m`, or the Comment link). Write what is wrong and pick the SOP rule it breaks. The note is saved on the record and the extractor and peers see it on the source page. It is a pointer for them, not a verdict. You can still mark the field Correct or Wrong separately. Remove your own note with Remove.
+6. If the same value appears on other records, tick **Apply to N more records with this value** to settle them in one go. It only touches fields you have not checked yet, and peer credit still goes only to the record you clicked.
+7. Move on. The next doubted field is selected for you.
 
 Keys: `s` side by side, `↑` `↓` change field, `c` correct, `w` wrong (type the real value, press Enter), `n` next doubted field (continues into the next record that still has work), `j` and `k` change record.
+
+**Record actions** sit above the fields: **Comment on the record** (a note about the whole record), **Return for correction** (needs a note; sends it to the extractor and resets the peer reviews) and **Approve record** (your final sign-off; peers must have submitted). The header shows how many records are approved and has **Approve source** once all are, and **Ask the client**. The same chat and activity as the source page are under the records.
 
 ### Step 6. Spot check some fields that nobody doubted
 
@@ -192,6 +195,7 @@ The Scores page also breaks errors down by kind and severity, and has a table pe
 | Other peers' comments | Yes | Only after they submit their own review | Yes, as review feedback |
 | Ground-truth verdicts | Yes | No | No |
 | Flag error on a record | Yes | Yes | No |
+| Admin field comments | Write and remove own | See on the source page | See on the source page |
 | Download of peer-reviewed sources | Yes | No | No |
 
 ---

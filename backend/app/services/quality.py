@@ -234,7 +234,7 @@ def mentioned_fields(text: str, names: list[str]) -> list[str]:
     return out
 
 
-SIGNAL_WEIGHT = {"comment": 5, "finding": 4, "mention": 3, "sop": 3, "system": 2, "ai": 2, "web": 2}
+SIGNAL_WEIGHT = {"comment": 5, "finding": 4, "mention": 3, "sop": 3, "system": 2, "ai": 2, "web": 2, "note": 1}
 
 
 def _norm(t: str) -> str:
