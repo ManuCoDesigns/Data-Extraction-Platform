@@ -2,49 +2,57 @@ import { useEffect, useState } from 'react'
 import { qualityApi } from '@/api/client'
 import { Blank, Chip, PAGE, PageHeader, Panel, SelectBox, Skeletons, Tabs, Tile, shortAgo, type Tone } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
+import { ReviewWorkspace } from '@/components/enh/ReviewWorkspace'
 
 const pc = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${Math.round(v)}%`)
 const scoreTone = (v: number | null | undefined): Tone => (v === null || v === undefined ? 'gray' : v >= 90 ? 'green' : v >= 75 ? 'amber' : 'red')
 const show = (v: unknown) => (v === null || v === undefined || v === '' ? '(empty)' : typeof v === 'object' ? JSON.stringify(v) : String(v))
 const err = (e: any, d: string) => e?.response?.data?.detail || d
 
-type Tab = 'scores' | 'sop' | 'findings' | 'audit'
+type Tab = 'review' | 'scores' | 'sop' | 'findings' | 'audit'
 
 export function QualityPage() {
   const [sources, setSources] = useState<any[] | null>(null)
   const [sourceId, setSourceId] = useState('')
   const [days, setDays] = useState('90')
-  const [tab, setTab] = useState<Tab>('scores')
+  const [tab, setTab] = useState<Tab>('review')
+  const [projectId, setProjectId] = useState('')
 
   useEffect(() => { qualityApi.sources().then(r => setSources(r.items)).catch(() => setSources([])) }, [tab])
   const src = (sources ?? []).find(s => s.source_id === sourceId)
+  const projects = [...new Map((sources ?? []).map(s => [s.project_id, s.project])).entries()].map(([id, name]) => ({ id, name: name as string }))
 
   return (
     <div className={PAGE}>
       <PageHeader title="Quality" subtitle="How accurate the delivered data is, how many errors reviewers caught, and how many got through. Scores come from errors that were checked and from fields an admin verified against the real source." />
       <div className="flex items-center gap-3 flex-wrap">
-        <Tabs value={tab} onChange={setTab} items={[{ key: 'scores', label: 'Scores' }, { key: 'sop', label: 'SOP check' }, { key: 'findings', label: 'Errors logged', count: (sources ?? []).reduce((n, s) => n + s.open_findings, 0) }, { key: 'audit', label: 'Check against source' }]} />
-        <SelectBox label="Source" value={sourceId} onChange={setSourceId}>
+        <Tabs value={tab} onChange={t => { setTab(t) }} items={[{ key: 'review', label: 'Review' }, { key: 'scores', label: 'Scores' }, { key: 'sop', label: 'SOP check' }, { key: 'findings', label: 'Errors logged', count: (sources ?? []).reduce((n, s) => n + s.open_findings, 0) }, { key: 'audit', label: 'Check against source' }]} />
+        {tab !== 'review' && <SelectBox label="Project" value={projectId} onChange={v => { setProjectId(v); setSourceId('') }}>
+          <option value="">All projects</option>
+          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+        </SelectBox>}
+        {tab !== 'review' && <SelectBox label="Source" value={sourceId} onChange={setSourceId}>
           <option value="">All sources</option>
-          {(sources ?? []).map(s => <option key={s.source_id} value={s.source_id}>{s.name}{s.open_findings ? ` (${s.open_findings} open)` : ''}</option>)}
-        </SelectBox>
+          {(sources ?? []).filter(s => !projectId || s.project_id === projectId).map(s => <option key={s.source_id} value={s.source_id}>{s.name}{s.open_findings ? ` (${s.open_findings} open)` : ''}</option>)}
+        </SelectBox>}
         {tab === 'scores' && (
           <SelectBox label="Period" value={days} onChange={setDays}>
             <option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option>
           </SelectBox>
         )}
       </div>
-      {tab === 'scores' && <Scores sourceId={sourceId} days={Number(days)} />}
-      {tab === 'sop' && <SopCheck sourceId={sourceId} onPick={id => setSourceId(id)} />}
+      {tab === 'review' && <ReviewWorkspace />}
+      {tab === 'scores' && <Scores sourceId={sourceId} projectId={projectId} days={Number(days)} />}
+      {tab === 'sop' && <SopCheck sourceId={sourceId} projectId={projectId} onPick={id => setSourceId(id)} />}
       {tab === 'findings' && <Findings sourceId={sourceId} source={src} />}
       {tab === 'audit' && <Audit sourceId={sourceId} />}
     </div>
   )
 }
 
-function Scores({ sourceId, days }: { sourceId: string; days: number }) {
+function Scores({ sourceId, projectId, days }: { sourceId: string; projectId: string; days: number }) {
   const [d, setD] = useState<any>(null)
-  useEffect(() => { setD(null); qualityApi.summary({ source_id: sourceId || undefined, days }).then(setD).catch(() => setD({ error: true })) }, [sourceId, days])
+  useEffect(() => { setD(null); qualityApi.summary({ source_id: sourceId || undefined, project_id: projectId || undefined, days }).then(setD).catch(() => setD({ error: true })) }, [sourceId, projectId, days])
   if (!d) return <Skeletons rows={4} />
   if (d.error) return <Blank title="Couldn't load scores" text="Check your connection and try again." />
   const s = d.scores, c = d.counts
@@ -211,10 +219,10 @@ function Audit({ sourceId }: { sourceId: string }) {
   )
 }
 
-function SopCheck({ sourceId, onPick }: { sourceId: string; onPick: (id: string) => void }) {
+function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId: string; onPick: (id: string) => void }) {
   const [ov, setOv] = useState<any[] | null>(null)
   const [d, setD] = useState<any>(null)
-  useEffect(() => { setOv(null); setD(null); if (sourceId) qualityApi.sopCheck(sourceId).then(setD).catch(() => setD({ error: true })); else qualityApi.sopOverview().then(r => setOv(r.items)).catch(() => setOv([])) }, [sourceId])
+  useEffect(() => { setOv(null); setD(null); if (sourceId) qualityApi.sopCheck(sourceId).then(setD).catch(() => setD({ error: true })); else qualityApi.sopOverview(projectId).then(r => setOv(r.items)).catch(() => setOv([])) }, [sourceId, projectId])
 
   if (!sourceId) {
     if (!ov) return <Skeletons rows={4} />

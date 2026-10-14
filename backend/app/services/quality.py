@@ -208,3 +208,30 @@ def sop_report(records: list[tuple[str, str, dict]], required: list[str], allowe
     rows = [{**v, "pct": pct(v["filled"], n)} for v in by_field.values()]
     return {"records": n, "compliant": ok, "rate": pct(ok, n), "by_field": sorted(rows, key=lambda x: (x["pct"] if x["pct"] is not None else 101)),
             "extra_fields": [{"field": f, "count": c} for f, c in extra_count.most_common()], "failing": failing[:200], "failing_total": len(failing)}
+
+
+def mentioned_fields(text: str, names: list[str]) -> list[str]:
+    """Which field names does a free-text comment talk about?
+
+    Names with an underscore or several words match anywhere ("hq_city", "hq city"). Single plain words such as
+    "website" or "name" are common English, so they only count when quoted, bold, written like "website:" or
+    followed by the word "field" / "column".
+    """
+    out = []
+    t = text or ""
+    for n in names:
+        if not n or n.startswith("_"):
+            continue
+        spaced = n.replace("_", " ")
+        edge = r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])"
+        if "_" in n or " " in n:
+            if re.search(edge % re.escape(n), t, re.I) or re.search(edge % re.escape(spaced), t, re.I):
+                out.append(n)
+            continue
+        w = re.escape(n)
+        if re.search(r"[`'\"*]%s[`'\"*]" % w, t, re.I) or re.search(r"(?<![A-Za-z0-9_])%s\s*:" % w, t, re.I) or re.search(r"(?<![A-Za-z0-9_])%s\s+(field|column)" % w, t, re.I) or re.search(r"(field|column)\s+%s(?![A-Za-z0-9_])" % w, t, re.I):
+            out.append(n)
+    return out
+
+
+SIGNAL_WEIGHT = {"comment": 5, "finding": 4, "mention": 3, "sop": 3, "system": 2, "ai": 2, "web": 2}

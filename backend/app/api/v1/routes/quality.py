@@ -11,7 +11,7 @@ from app.api.v1.routes.enhancements import _can_chat, _lead, _need_lead, _owner_
 from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.all_models import (
-    ExtractedRecord, ExtractionJob, FieldAudit, Project, QualityFinding, SchemaVersion, Source, SourceStatus, User,
+    ExtractedRecord, ExtractionJob, FieldAudit, Project, QualityFinding, SchemaVersion, Source, SourcePeerReview, SourceStatus, User,
 )
 from app.services import enh, quality as q
 
@@ -350,3 +350,196 @@ def enh_aware(dt):
     if dt is None:
         return enh.now_utc()
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+# ─── Review workspace: one place for the automatic signals and the human check ─────────────
+
+def _peer_state(s: Source) -> tuple[int, int]:
+    prs = list(s.peer_reviews or [])
+    return len(prs), sum(1 for p in prs if p.status == "submitted")
+
+
+@router.get("/review/sources")
+def review_sources(project_id: str | None = None, scope: str = Query("peer_done"), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Sources to review, grouped by project. scope=peer_done lists only sources every peer reviewer has finished."""
+    _need_lead(user)
+    srcs = [s for s in _visible_sources(db, user, None).filter(Source.status != SourceStatus.NOT_STARTED).all()]
+    projects = {}
+    for s in srcs:
+        projects.setdefault(s.project_id, 0)
+    pn = {p.id: p.name for p in db.query(Project).filter(Project.id.in_(projects.keys())).all()} if projects else {}
+    rows = []
+    ids = [s.id for s in srcs]
+    from sqlalchemy import func
+    open_f = dict(db.query(QualityFinding.source_id, func.count(QualityFinding.id)).filter(QualityFinding.source_id.in_(ids or ["-"]), QualityFinding.status == "open").group_by(QualityFinding.source_id).all())
+    aud = dict(db.query(FieldAudit.source_id, func.count(FieldAudit.id)).filter(FieldAudit.source_id.in_(ids or ["-"])).group_by(FieldAudit.source_id).all())
+    rec_n = dict(db.query(ExtractionJob.source_id, func.count(ExtractedRecord.id)).join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
+                 .filter(ExtractionJob.source_id.in_(ids or ["-"])).group_by(ExtractionJob.source_id).all())
+    for s in srcs:
+        total, done = _peer_state(s)
+        peer_done = total > 0 and done == total
+        projects[s.project_id] += 1 if (peer_done or scope == "all") else 0
+        if project_id and s.project_id != project_id:
+            continue
+        if scope == "peer_done" and not peer_done:
+            continue
+        rows.append({"source_id": s.id, "project_id": s.project_id, "project": pn.get(s.project_id, ""), "name": s.name, "status": s.status.value,
+                     "peers_total": total, "peers_done": done, "peer_done": peer_done, "records": int(rec_n.get(s.id, 0)),
+                     "open_findings": int(open_f.get(s.id, 0)), "audited": int(aud.get(s.id, 0))})
+    rows.sort(key=lambda x: (x["project"].lower(), -x["open_findings"], x["name"].lower()))
+    return {"items": rows, "projects": sorted(({"id": k, "name": pn.get(k, ""), "count": v} for k, v in projects.items()), key=lambda x: x["name"].lower())}
+
+
+def _email_ids(db: Session, emails: set) -> dict:
+    emails = {e for e in emails if e}
+    return {u.email: u for u in db.query(User).filter(User.email.in_(emails)).all()} if emails else {}
+
+
+@router.get("/review/sources/{source_id}")
+def review_source(source_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Every record in a source with each field's signals: peer comments, peer mentions, SOP gaps, system checks, AI and website flags."""
+    _need_lead(user)
+    s = _source(db, user, source_id)
+    schema = _schema_fields(db, s)
+    req = _sop_for(s)
+    sop_on = bool(req["known"] and req["required"])
+    recs = _records(db, s.id)
+    findings = db.query(QualityFinding).filter(QualityFinding.source_id == s.id).all()
+    audits = {(a.record_id, a.field): a for a in db.query(FieldAudit).filter(FieldAudit.source_id == s.id).all()}
+    peers = [{"id": p.user_id, "name": (p.user.full_name if p.user else "Peer reviewer"), "comment": (p.comment or "").strip()} for p in s.peer_reviews]
+    peer_ids = {p["id"] for p in peers}
+    all_comments = [e for r in recs for lst in (r.reviewer_field_comments or {}).values() for e in (lst or []) if isinstance(e, dict)]
+    ulookup = _email_ids(db, {e.get("user") for e in all_comments})
+    names = _names(db, {f.raised_by for f in findings if f.raised_by})
+    by_rf: dict = {}
+    for f in findings:
+        by_rf.setdefault((f.record_id, f.field), []).append(f)
+    out, tot = [], {"fields": 0, "flagged": 0, "audited": 0, "comments": 0, "mentions": 0}
+    for i, r in enumerate(recs):
+        ef = r.extracted_fields or {}
+        order = [k for k in ef if k not in q.SKIP_FIELDS] + [f for f in (req["required"] if sop_on else []) if f not in ef]
+        sig: dict = {k: [] for k in order}
+        hits = q.check_record(ef, schema)
+        for h in hits:
+            sig.setdefault(h["field"], []).append({"kind": "system", "severity": h["severity"], "text": h["message"]})
+        if sop_on:
+            sc = q.sop_check(ef, req["required"], req["allowed"])
+            for f in sc["missing"]:
+                sig.setdefault(f, []).append({"kind": "sop", "severity": "major", "text": f"{req['sop_code'] or 'The SOP'} requires this field and it is empty."})
+            for f in sc["extra"]:
+                sig.setdefault(f, []).append({"kind": "sop", "severity": "minor", "text": f"{req['sop_code'] or 'The SOP'} does not list this field."})
+        for name in q._flag_fields(r):
+            if name in sig:
+                sig[name].append({"kind": "ai", "severity": "minor", "text": "Flagged by the automatic AI or website check."})
+        general = []
+        for field, lst in (r.reviewer_field_comments or {}).items():
+            for e in (lst or []):
+                if not isinstance(e, dict) or not e.get("comment"):
+                    continue
+                u = ulookup.get(e.get("user"))
+                who = (u.full_name if u else None) or e.get("user") or "Someone"
+                item = {"text": e["comment"], "by": who, "by_id": u.id if u else None, "role": e.get("role"), "type": e.get("type"), "ts": e.get("ts")}
+                if field == "_general":
+                    general.append(item)
+                    for m in q.mentioned_fields(e["comment"], list(sig.keys())):
+                        sig[m].append({"kind": "mention", "severity": "major", "text": e["comment"], "by": who, "by_id": item["by_id"]})
+                elif field in sig:
+                    sig[field].append({"kind": "comment", "severity": "major", "text": e["comment"], "by": who, "by_id": item["by_id"], "role": e.get("role")})
+        for p in peers:
+            if p["comment"]:
+                for m in q.mentioned_fields(p["comment"], list(sig.keys())):
+                    sig[m].append({"kind": "mention", "severity": "major", "text": p["comment"], "by": p["name"], "by_id": p["id"]})
+        fields_out = []
+        for name in order:
+            fl = by_rf.get((r.id, name), [])
+            for f in fl:
+                if f.status != "dismissed":
+                    sig[name].append({"kind": "finding", "severity": f.severity, "text": f.note or f.rule or f.category, "by": names.get(f.raised_by) or "System checks", "by_id": f.raised_by, "status": f.status, "finding_id": f.id})
+            a = audits.get((r.id, name))
+            weight = sum(q.SIGNAL_WEIGHT.get(x["kind"], 1) for x in sig[name])
+            fields_out.append({"name": name, "value": ef.get(name), "signals": sig[name], "weight": weight,
+                               "audit": {"id": a.id, "verdict": a.verdict, "truth_value": a.truth_value, "note": a.note} if a else None})
+            tot["fields"] += 1
+            tot["flagged"] += 1 if sig[name] else 0
+            tot["audited"] += 1 if a else 0
+            tot["comments"] += sum(1 for x in sig[name] if x["kind"] == "comment")
+            tot["mentions"] += sum(1 for x in sig[name] if x["kind"] == "mention")
+        risk = sum(f["weight"] for f in fields_out if not f["audit"])
+        out.append({"record_id": r.id, "record": _label(r, i), "fields": fields_out, "general": general, "risk": risk,
+                    "todo": sum(1 for f in fields_out if f["signals"] and not f["audit"]), "audited": sum(1 for f in fields_out if f["audit"])})
+    out.sort(key=lambda x: (-x["risk"], x["record"].lower()))
+    total, done = _peer_state(s)
+    return {"source_id": s.id, "source": s.name, "project_id": s.project_id, "website": s.website_url, "sop_code": req["sop_code"] if sop_on else None,
+            "peers": [{"id": p["id"], "name": p["name"], "comment": p["comment"]} for p in peers], "peer_done": total > 0 and done == total,
+            "totals": tot, "records": out}
+
+
+class MarkBody(BaseModel):
+    record_id: str
+    field: str
+    verdict: str
+    truth_value: str | None = None
+    note: str | None = None
+    category: str = "wrong_value"
+    severity: str = "major"
+    credit: list[str] = []
+
+
+@router.post("/review/mark")
+def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Settle one field against the real source. Also settles what peers said about it:
+    a wrong field confirms their comments (they caught it), a right field dismisses them (they were mistaken)."""
+    _need_lead(user)
+    rec = db.query(ExtractedRecord).filter(ExtractedRecord.id == body.record_id).first()
+    job = db.query(ExtractionJob).filter(ExtractionJob.id == rec.job_id).first() if rec else None
+    s = _source(db, user, job.source_id) if job and job.source_id else None
+    if not s:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    if body.verdict not in ("correct", "incorrect"):
+        raise HTTPException(status_code=422, detail="Mark the field correct or wrong.")
+    schema_names = {f.get("name") for f in _schema_fields(db, s)} | set(_sop_for(s)["required"])
+    if body.field not in (rec.extracted_fields or {}) and body.field not in schema_names:
+        raise HTTPException(status_code=422, detail="That field is not on this record.")
+    if body.category not in q.CATEGORIES or body.severity not in q.SEVERITIES:
+        raise HTTPException(status_code=422, detail="Pick a valid kind and severity.")
+    truth = (body.truth_value or "").strip() or None
+    note = (body.note or "").strip() or None
+    wrong = body.verdict == "incorrect"
+    if wrong and not truth and not note:
+        raise HTTPException(status_code=422, detail="Add what the source really says, or a short note.")
+    now = enh.now_utc()
+    value = (rec.extracted_fields or {}).get(body.field)
+    a = db.query(FieldAudit).filter(FieldAudit.record_id == rec.id, FieldAudit.field == body.field).first()
+    if not a:
+        a = FieldAudit(source_id=s.id, record_id=rec.id, field=body.field, verdict=body.verdict)
+        db.add(a)
+    a.verdict, a.truth_value, a.note, a.extracted_value, a.audited_by, a.audited_at = body.verdict, truth, note, value, user.id, now
+    # who commented on this field on this record
+    ulookup = _email_ids(db, {e.get("user") for e in ((rec.reviewer_field_comments or {}).get(body.field) or []) if isinstance(e, dict)})
+    commenters = {u.id: u for u in ulookup.values() if u.id in _owner_ids(s) and u.id != s.assigned_extractor_id}
+    credit = set(commenters) | {c for c in body.credit if c in _owner_ids(s)}
+    touched = 0
+    existing = db.query(QualityFinding).filter(QualityFinding.record_id == rec.id, QualityFinding.field == body.field, QualityFinding.origin == "reviewer").all()
+    for f in existing:
+        if f.status == "open":
+            f.status = "confirmed" if wrong else "dismissed"
+            f.truth_value, f.resolved_by, f.resolved_at, f.resolve_note = truth, user.id, now, "Settled in the review workspace."
+            touched += 1
+    if wrong:
+        have = {f.raised_by for f in existing}
+        for uid in credit:
+            if uid not in have:
+                db.add(QualityFinding(source_id=s.id, record_id=rec.id, field=body.field, category=body.category, severity=body.severity, origin="reviewer", raised_by=uid,
+                                      note="A peer reviewer pointed at this field.", extracted_value=value, status="confirmed", auto_verdict="supported",
+                                      auto_note="Picked up from the reviewer's comment.", truth_value=truth, resolved_by=user.id, resolved_at=now, resolve_note="Confirmed against the source."))
+                touched += 1
+    else:
+        have = {f.raised_by for f in existing}
+        for uid in commenters:
+            if uid not in have:
+                db.add(QualityFinding(source_id=s.id, record_id=rec.id, field=body.field, category="other", severity="minor", origin="reviewer", raised_by=uid,
+                                      note="A peer reviewer commented on this field.", extracted_value=value, status="dismissed", auto_verdict="needs_human",
+                                      auto_note="Picked up from the reviewer's comment.", resolved_by=user.id, resolved_at=now, resolve_note="The source supports the value."))
+                touched += 1
+    db.commit()
+    return {"id": a.id, "verdict": a.verdict, "findings_settled": touched}
