@@ -493,6 +493,7 @@ export const qualityApi = {
   sources: (projectId?: string) => api.get('/quality/sources', { params: { project_id: projectId || undefined } }).then(r => r.data),
   reviewSources: (params: { project_id?: string; scope?: string }) => api.get('/quality/review/sources', { params }).then(r => r.data),
   reviewSource: (sourceId: string) => api.get(`/quality/review/sources/${sourceId}`).then(r => r.data),
+  sourceAudit: (body: { source_id: string; render?: boolean }) => api.post('/quality/review/source-audit', body, { timeout: 180000 }).then(r => r.data),
   mark: (body: { record_id: string; field: string; verdict: string; truth_value?: string; note?: string; category?: string; severity?: string; credit?: string[]; same_value?: boolean; original_ok?: boolean }) => api.post('/quality/review/mark', body).then(r => r.data),
   comment: (body: { record_id: string; field?: string; comment: string; sop_rule?: string; kind?: string }) => api.post('/quality/review/comment', body).then(r => r.data),
   deleteComment: (params: { record_id: string; field: string; ts: string }) => api.delete('/quality/review/comment', { params }).then(r => r.data),

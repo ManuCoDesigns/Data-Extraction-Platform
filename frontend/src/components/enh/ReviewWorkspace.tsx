@@ -8,6 +8,7 @@ import { ReviewSidePanel } from '@/components/enh/ReviewSidePanel'
 import { SourceChat } from '@/components/enh/SourceChat'
 import { SourceActivity } from '@/components/enh/SourceActivity'
 import { AskClientModal } from '@/components/enh/AskClient'
+import { SourceAuditPanel } from '@/components/enh/SourceAuditPanel'
 
 // The admin's review desk: every field that something doubts is pulled to the top, with the reason beside it,
 // so a check against the real source is one click per field instead of a hunt through JSON.
@@ -191,6 +192,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   }, [focus])
   const [site, setSite] = useState<Record<string, any>>({})
   const [siteBusy, setSiteBusy] = useState(false)
+  const [auditOpen, setAuditOpen] = useState(false)
   const [render, setRender] = useState(false)
   const [nimble, setNimble] = useState<boolean | null>(null)
   useEffect(() => { qualityApi.nimbleStatus().then(r => setNimble(r.configured)).catch(() => setNimble(false)) }, [])
@@ -403,6 +405,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         <Chip tone={d.status === 'approved' ? 'green' : 'gray'}>{d.status === 'approved' ? 'Source approved' : `${d.approved_records}/${d.total_records} approved`}</Chip>
         <span className="hidden md:inline-flex items-center gap-2 text-xs text-gray-500" title="Doubted fields you have settled"><span className="w-24 h-1.5 rounded-full bg-gray-100 overflow-hidden"><span className="block h-1.5 rounded-full bg-emerald-500 transition-all" style={{ width: `${pctDone}%` }} /></span><span className="tabular-nums">{pctDone}% settled</span></span>
         <span className="ml-auto flex items-center gap-1.5">
+          <Button size="sm" variant={auditOpen ? 'primary' : 'secondary'} onClick={() => setAuditOpen(v => !v)} title="Check every field of every record against the live pages, using the SOP">Audit against site</Button>
           <Button size="sm" variant="secondary" onClick={() => setAsk(true)} title="Send a question to the client about this source">Ask the client</Button>
           {d.status !== 'approved' && <Button size="sm" disabled={approving || !d.total_records || d.approved_records !== d.total_records} onClick={approveSource} title={d.approved_records === d.total_records ? 'Approve this source' : 'Approve every record first'}>{approving ? 'Approving…' : 'Approve source'}</Button>}
         </span>
@@ -422,6 +425,10 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
           </div>
         )}
       </div>
+
+      {auditOpen && <SourceAuditPanel sourceId={sourceId} nimbleReady={nimble === true} onClose={() => setAuditOpen(false)} onApplied={load}
+        checked={(recordId, field) => !!d.records.find((r: any) => r.record_id === recordId)?.fields.find((f: any) => f.name === field)?.audit}
+        onJump={(recordId, field) => { setRid(recordId); setOnlyFlagged(false); setHideDone(false); setActive(field); setAuditOpen(false) }} />}
 
       <div className={cn('grid gap-3 items-start', docked ? 'lg:grid-cols-[200px_minmax(0,1fr)_minmax(440px,42%)]' : 'lg:grid-cols-[210px_minmax(0,1fr)]')}>
         <div className="lg:sticky lg:top-3 lg:self-start">{recNav}</div>

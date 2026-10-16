@@ -100,7 +100,9 @@ def extract(url: str, render: bool = False) -> dict:
         return {"ok": False, "url": u, "text": "", "error": "Nimble sent back something unreadable."}
     if not text or status in ("fatal", "error", "blocked", "rejected"):
         return {"ok": False, "url": u, "text": "", "error": "The page came back empty or blocked. Try again with page rendering on."}
-    out = {"ok": True, "url": u, "text": text[:400_000], "error": None}
+    meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
+    final = next((x for x in (data.get("final_url"), data.get("resolved_url"), data.get("redirected_url"), meta.get("final_url"), meta.get("url"), data.get("url")) if isinstance(x, str) and x.startswith("http")), None)
+    out = {"ok": True, "url": u, "text": text[:400_000], "error": None, "final_url": final}
     _CACHE[key] = (time.time(), out)
     if len(_CACHE) > 200:
         _CACHE.pop(next(iter(_CACHE)))

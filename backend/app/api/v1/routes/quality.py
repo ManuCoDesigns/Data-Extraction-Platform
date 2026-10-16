@@ -1047,3 +1047,45 @@ def site_check(body: SiteCheckBody, db: Session = Depends(get_db), user: User = 
         return {"ok": False, "error": res["error"], "url": res["url"], "fields": {}}
     out = {k: q.find_in_text(v, res["text"]) for k, v in (rec.extracted_fields or {}).items() if k not in q.SKIP_FIELDS}
     return {"ok": True, "url": res["url"], "cached": bool(res.get("cached")), "fields": out, "text": res["text"][:80000]}
+
+
+class SourceAuditBody(BaseModel):
+    source_id: str
+    render: bool = False
+
+
+@router.post("/review/source-audit")
+def source_audit(body: SourceAuditBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Check every field of every record in a source against the live pages it cites, using the SOP rules.
+    Returns Correct / Wrong / Hold per field with a quoted proof. It changes nothing: the reviewer applies what they agree with."""
+    from concurrent.futures import ThreadPoolExecutor
+    from app.services import nimble, source_audit as sa
+    _need_lead(user)
+    s = _source(db, user, body.source_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="Source not found.")
+    if not nimble.configured():
+        raise HTTPException(status_code=400, detail="Nimble is not set up. Add NIMBLE_API_KEY to the server settings to audit against the live site.")
+    desk = _review_data(db, s, True, user.id)
+    urls: list = []
+    for r in desk["records"]:
+        for f in r["fields"]:
+            if f["name"] == "source_url" and isinstance(f["value"], str) and f["value"].strip() and f["value"].strip() not in urls:
+                urls.append(f["value"].strip())
+    if not urls and s.website_url:
+        urls.append(s.website_url)
+    urls = urls[:12]
+
+    def grab(u):
+        if not _site_budget(user.id):
+            return u, {"ok": False, "error": f"the hourly limit of {SITE_CHECKS_PER_HOUR} website reads was reached", "text": ""}
+        res = nimble.extract(u, render=body.render)
+        return u, ({"ok": True, "text": res["text"], "final_url": res.get("final_url"), "error": None} if res["ok"] else {"ok": False, "error": res["error"], "text": ""})
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        pages = dict(ex.map(grab, urls))
+    ext = db.query(User).filter(User.id == s.assigned_extractor_id).first() if s.assigned_extractor_id else None
+    out = sa.audit_source(desk, pages, s.name, s.website_url, ext.full_name if ext else None)
+    out["pages"] = [{"url": u, "ok": p["ok"], "error": p.get("error"), "final_url": p.get("final_url"), "chars": p.get("chars", 0)} for u, p in pages.items()]
+    out["source_id"] = s.id
+    out["sop_code"] = desk.get("sop_code")
+    return out

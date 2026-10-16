@@ -118,6 +118,20 @@ Keys: `s` side by side, `↑` `↓` change field, `c` correct, `w` wrong (type t
 - If the reviewer was right and the extractor fixed it before you looked, marking the new value **Correct** still counts the reviewer as having caught an error. If the old value was actually fine and the flag was a mistake, tick **The old value was fine** before you mark it.
 - Feedback never disappears. The extractor keeps a **Feedback on this source** list on the source page, with each item marked Not changed yet, Changed (waiting for your re-check), or Fixed and checked.
 
+### Optional: audit the whole source against the live site
+
+**Audit against site** (top of the desk) reads the pages the records cite and checks every field against the SOP, using the written audit algorithm in `docs/SOURCE_AUDIT_ALGORITHM.md`. It needs Nimble to be set up. It only suggests: nothing changes until you apply it.
+
+For every field you get **Correct**, **Wrong** or **Hold**, with the exact text from the page as proof and, for a wrong field, what the source really says:
+
+- **Wrong** is only used when the live page proves it: a value or sentence that is not on the cited page, evidence glued together from two parts of a page, a segment name that is a platform, service or duplicate, a mismatched data_origin and method pair, a timestamp in the wrong shape or the same placeholder on every record, or a link that redirects elsewhere.
+- **Hold** is used when the page cannot settle it: a page that did not load, a View more or sign-in wall, a broad sector name, extra region keys that depend on the SOP version, or a weak match. Holds are never counted as errors.
+- Each field also shows a **flag status**: Valid (a reviewer or the system flagged a real error, with the reviewer named), Not flagged (an error nobody caught), False flag (flagged but fine) or Stale (changed since it was flagged).
+
+The panel also gives a suggested decision (Send back, Hold or Approve), the repeated defects counted as one pattern, records the pages suggest adding (one verbatim sentence each), who owns the errors, and a list of what was **not scanned**. A page that could not be read or a part of the site that was not visited is reported as a gap, never as clean. The site map is not scanned yet, so suggested records come only from the pages the records cite.
+
+Use **Mark wrong** or **Mark correct** on a single field, or **Apply all** to mark every Wrong field and every Correct field you have not checked yet. Peers whose own note pointed at a real error get the credit. **Save as note** leaves a Hold as a comment on the field. **Download JSON** gives the full audit, one record per field.
+
 ### Step 6. Spot check some fields that nobody doubted
 
 Untick **Only doubted fields** and check a spread of ordinary fields. This matters. If you only check doubted fields, errors nobody noticed never show up, and the scores look better than the data really is.
