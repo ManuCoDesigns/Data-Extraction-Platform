@@ -176,6 +176,14 @@ Colour bands on the tiles: 90% and above green, 75 to 89 amber, below 75 red.
 
 The Scores page also breaks errors down by kind and severity, and has a table per extractor (errors per 100 fields, accuracy on checked fields) and per reviewer (logged, confirmed, dismissed, open, precision).
 
+### Looking at a past period
+
+On the **Scores** tab the **Period** control sets the window for both the scores and the Extractor report. Pick All time, the last 30, 90 or 365 days, or choose exact **From** and **To** dates (or Today, Yesterday, Last 7 days). Dates are Nairobi days.
+
+A check counts on the day it was **first made**, not the day it was last touched, so fields you checked on the 14th still show for the 14th after you re-check them later. Errors logged by reviewers or the system count on the day they were logged. Everything is read from the database, so nothing needs to be re-entered.
+
+One limit: checks made before the review-memory update only kept their latest verdict, so for those the date is the last check and the first-pass result is the verdict they had at the update. From then on the first verdict and its date are kept for good.
+
 ### Extractor report
 
 Quality, Scores, **Extractor report**. It counts every error ever found, so rework does not hide a weak first pass. An error is one field on one record, counted once, whether it came from a confirmed finding or from a first check you marked wrong.

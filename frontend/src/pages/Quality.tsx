@@ -16,6 +16,8 @@ export function QualityPage() {
   const [sources, setSources] = useState<any[] | null>(null)
   const [sourceId, setSourceId] = useState('')
   const [days, setDays] = useState('90')
+  const [from, setFrom] = useState('')
+  const [to, setTo] = useState('')
   const [tab, setTab] = useState<Tab>('review')
   const [projectId, setProjectId] = useState('')
   const [bench, setBench] = useState(!!new URLSearchParams(window.location.search).get('source'))
@@ -38,14 +40,10 @@ export function QualityPage() {
           <option value="">All sources</option>
           {(sources ?? []).filter(s => !projectId || s.project_id === projectId).map(s => <option key={s.source_id} value={s.source_id}>{s.name}{s.open_findings ? ` (${s.open_findings} open)` : ''}</option>)}
         </SelectBox>}
-        {tab === 'scores' && (
-          <SelectBox label="Period" value={days} onChange={setDays}>
-            <option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option>
-          </SelectBox>
-        )}
+        {tab === 'scores' && <Period days={days} setDays={setDays} from={from} to={to} setFrom={setFrom} setTo={setTo} />}
       </div>
       {tab === 'review' && <ReviewWorkspace onBench={setBench} initialSource={params.get('source') || ''} initialProject={params.get('project') || ''} />}
-      {tab === 'scores' && <Scores sourceId={sourceId} projectId={projectId} days={Number(days)} />}
+      {tab === 'scores' && <Scores sourceId={sourceId} projectId={projectId} period={{ days: Number(days), from, to }} />}
       {tab === 'sop' && <SopCheck sourceId={sourceId} projectId={projectId} onPick={id => setSourceId(id)} />}
       {tab === 'findings' && <Findings sourceId={sourceId} source={src} />}
       {tab === 'audit' && <Audit sourceId={sourceId} />}
@@ -53,9 +51,35 @@ export function QualityPage() {
   )
 }
 
-function Scores({ sourceId, projectId, days }: { sourceId: string; projectId: string; days: number }) {
+type PeriodValue = { days: number; from: string; to: string }
+const dayStr = (d: Date) => new Date(d.getTime() + 3 * 3600_000).toISOString().slice(0, 10)  // Nairobi calendar day
+const nice = (iso: string) => new Date(iso + 'T12:00:00Z').toLocaleDateString(undefined, { day: 'numeric', month: 'short', timeZone: 'UTC' })
+
+function Period({ days, setDays, from, to, setFrom, setTo }: { days: string; setDays: (v: string) => void; from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void }) {
+  const ranged = !!(from || to)
+  const pick = (a: string, b: string) => { setFrom(a); setTo(b) }
+  const today = dayStr(new Date()), yest = dayStr(new Date(Date.now() - 86400_000))
+  const chip = 'text-xs font-semibold rounded-full border border-gray-200 px-2.5 py-1 hover:bg-gray-50'
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      <SelectBox label="Period" value={ranged ? 'custom' : days} onChange={v => { if (v !== 'custom') { pick('', ''); setDays(v) } }}>
+        <option value="0">All time</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option>{ranged && <option value="custom">Custom dates</option>}
+      </SelectBox>
+      <label className="text-xs text-gray-500 flex items-center gap-1">From<input type="date" value={from} max={to || undefined} onChange={e => setFrom(e.target.value)} className="text-sm rounded-xl border border-gray-200 px-2 py-1.5" aria-label="From date" /></label>
+      <label className="text-xs text-gray-500 flex items-center gap-1">To<input type="date" value={to} min={from || undefined} onChange={e => setTo(e.target.value)} className="text-sm rounded-xl border border-gray-200 px-2 py-1.5" aria-label="To date" /></label>
+      <button type="button" className={chip} onClick={() => pick(today, today)}>Today</button>
+      <button type="button" className={chip} onClick={() => pick(yest, yest)}>Yesterday</button>
+      <button type="button" className={chip} onClick={() => pick(dayStr(new Date(Date.now() - 6 * 86400_000)), today)}>Last 7 days</button>
+      {ranged && <button type="button" className="text-xs font-semibold text-brand-600 hover:underline" onClick={() => pick('', '')}>Clear dates</button>}
+    </div>
+  )
+}
+
+function Scores({ sourceId, projectId, period }: { sourceId: string; projectId: string; period: PeriodValue }) {
   const [d, setD] = useState<any>(null)
-  useEffect(() => { setD(null); qualityApi.summary({ source_id: sourceId || undefined, project_id: projectId || undefined, days }).then(setD).catch(() => setD({ error: true })) }, [sourceId, projectId, days])
+  const { days, from, to } = period
+  const ranged = !!(from || to)
+  useEffect(() => { setD(null); qualityApi.summary({ source_id: sourceId || undefined, project_id: projectId || undefined, days: ranged ? undefined : days, date_from: from || undefined, date_to: to || undefined }).then(setD).catch(() => setD({ error: true })) }, [sourceId, projectId, days, from, to])  // eslint-disable-line react-hooks/exhaustive-deps
   if (!d) return <Skeletons rows={4} />
   if (d.error) return <Blank title="Couldn't load scores" text="Check your connection and try again." />
   const s = d.scores, c = d.counts
@@ -95,7 +119,7 @@ function Scores({ sourceId, projectId, days }: { sourceId: string; projectId: st
           )}
         </Panel>
       </div>
-      <ExtractorReport sourceId={sourceId} projectId={projectId} />
+      <ExtractorReport sourceId={sourceId} projectId={projectId} period={period} />
       <Panel title="Reviewers" subtitle="How many of each reviewer's logged errors turned out to be real">
         {d.reviewers.length === 0 ? <Blank title="No errors logged yet" text="Reviewers flag errors from a record in the source page." /> : (
           <table className="w-full text-sm"><thead><tr className="text-left text-xs text-gray-500"><th className="py-1 font-semibold">Name</th><th className="font-semibold">Logged</th><th className="font-semibold">Confirmed</th><th className="font-semibold">Dismissed</th><th className="font-semibold">Open</th><th className="font-semibold">Precision</th></tr></thead>
@@ -108,19 +132,19 @@ function Scores({ sourceId, projectId, days }: { sourceId: string; projectId: st
   )
 }
 
-function ExtractorReport({ sourceId, projectId }: { sourceId: string; projectId: string }) {
+function ExtractorReport({ sourceId, projectId, period }: { sourceId: string; projectId: string; period: PeriodValue }) {
   const [d, setD] = useState<any>(null)
-  const [days, setDays] = useState('0')
+  const { days, from, to } = period
   const [open, setOpen] = useState<string>('')
   const [busy, setBusy] = useState(false)
-  const filt = { source_id: sourceId || undefined, project_id: projectId || undefined, days: Number(days) || undefined }
-  useEffect(() => { setD(null); qualityApi.extractorReport(filt).then(setD).catch(() => setD({ error: true })) }, [sourceId, projectId, days])  // eslint-disable-line react-hooks/exhaustive-deps
+  const ranged = !!(from || to)
+  const filt = { source_id: sourceId || undefined, project_id: projectId || undefined, days: ranged ? undefined : Number(days) || undefined, date_from: from || undefined, date_to: to || undefined }
+  useEffect(() => { setD(null); qualityApi.extractorReport(filt).then(setD).catch(() => setD({ error: true })) }, [sourceId, projectId, days, from, to])  // eslint-disable-line react-hooks/exhaustive-deps
   const download = async () => { setBusy(true); try { await qualityApi.exportExtractorReport(filt) } catch (e) { toast.error(err(e, 'Nothing to download yet')) } finally { setBusy(false) } }
   const th = 'font-semibold py-1 pr-3 whitespace-nowrap'
   return (
-    <Panel title="Extractor report" subtitle="Every error ever found stays counted, even after the extractor fixes it. First pass is how they did before any rework."
+    <Panel title="Extractor report" subtitle={`Every error ever found stays counted, even after the extractor fixes it. First pass is how they did before any rework. ${ranged ? `Showing checks first made ${from ? nice(from) : 'from the start'}${to && to !== from ? ' to ' + nice(to) : from && !to ? ' onwards' : ''}.` : days ? `Showing the last ${days} days.` : 'Showing all time.'}`}
       actions={<div className="flex items-center gap-2 flex-wrap">
-        <SelectBox label="Period" value={days} onChange={setDays}><option value="0">All time</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></SelectBox>
         <Button variant="secondary" disabled={busy || !d?.extractors?.length} onClick={download}>{busy ? 'Preparing…' : 'Download Excel'}</Button>
       </div>}>
       {!d ? <Skeletons rows={3} /> : d.error ? <Blank title="Couldn't load the report" /> : d.extractors.length === 0 ? <Blank title="No extractor data yet" text="Extractors appear here once they have a source with records." /> : (
@@ -148,6 +172,7 @@ function ExtractorReport({ sourceId, projectId }: { sourceId: string; projectId:
               ))}
             </tbody>
           </table>
+          {ranged && <p className="text-xs text-gray-500 mt-3 mb-0">Dates are in Nairobi time. A check counts on the day it was first made. Fields and Sent back still show each source in full, so use Checked, Errors and First pass to judge this period.</p>}
           <p className="text-xs text-gray-500 mt-3 mb-0">Click a name to see their sources. First pass counts fields as wrong if they were wrong when first checked, even if fixed later. Final counts what is right now. Fields the extractor changed after a check are left out of Final until you check them again.</p>
         </div>
       )}

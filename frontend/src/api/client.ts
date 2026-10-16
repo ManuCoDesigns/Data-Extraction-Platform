@@ -503,8 +503,8 @@ export const qualityApi = {
     const a = document.createElement('a'); a.href = url; a.download = `peer_reviewed_sources_${new Date().toISOString().slice(0, 10)}.${params.format}`; a.click(); URL.revokeObjectURL(url)
   },
   feedback: (sourceId: string) => api.get(`/quality/sources/${sourceId}/feedback`).then(r => r.data),
-  extractorReport: (params: { project_id?: string; source_id?: string; user_id?: string; days?: number }) => api.get('/quality/extractor-report', { params }).then(r => r.data),
-  exportExtractorReport: async (params: { project_id?: string; source_id?: string; user_id?: string; days?: number }) => {
+  extractorReport: (params: { project_id?: string; source_id?: string; user_id?: string; days?: number; date_from?: string; date_to?: string }) => api.get('/quality/extractor-report', { params }).then(r => r.data),
+  exportExtractorReport: async (params: { project_id?: string; source_id?: string; user_id?: string; days?: number; date_from?: string; date_to?: string }) => {
     const r = await api.get('/quality/extractor-report/export', { params, responseType: 'blob' })
     const url = URL.createObjectURL(new Blob([r.data]))
     const a = document.createElement('a'); a.href = url; a.download = `extractor_report_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
@@ -513,5 +513,5 @@ export const qualityApi = {
   siteCheck: (body: { record_id: string; url?: string; render?: boolean; include_text?: boolean }) => api.post('/quality/review/site-check', body).then(r => r.data),
   sopCheck: (sourceId: string) => api.get(`/quality/sources/${sourceId}/sop-check`).then(r => r.data),
   sopOverview: (projectId?: string) => api.get('/quality/sop-overview', { params: { project_id: projectId || undefined } }).then(r => r.data),
-  summary: (params: { project_id?: string; source_id?: string; days?: number }) => api.get('/quality/summary', { params }).then(r => r.data),
+  summary: (params: { project_id?: string; source_id?: string; days?: number; date_from?: string; date_to?: string }) => api.get('/quality/summary', { params }).then(r => r.data),
 }

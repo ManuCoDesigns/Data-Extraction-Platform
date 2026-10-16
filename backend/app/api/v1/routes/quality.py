@@ -376,8 +376,8 @@ def quality_sources(project_id: str | None = None, db: Session = Depends(get_db)
 
 
 @router.get("/summary")
-def quality_summary(project_id: str | None = None, source_id: str | None = None, days: int = Query(90, ge=1, le=730),
-                    db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def quality_summary(project_id: str | None = None, source_id: str | None = None, days: int = Query(90, ge=0, le=3650),
+                    date_from: str | None = None, date_to: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _need_lead(user)
     srcs = _visible_sources(db, user, project_id).all()
     if source_id:
@@ -386,9 +386,21 @@ def quality_summary(project_id: str | None = None, source_id: str | None = None,
     empty = q.compute_summary([], [], {}, {}, {})
     if not ids:
         return {**empty, "days": days}
-    since = enh.now_utc() - timedelta(days=days)
-    findings = [f for f in db.query(QualityFinding).filter(QualityFinding.source_id.in_(ids)).all() if enh_aware(f.created_at) >= since]
-    audits = [a for a in db.query(FieldAudit).filter(FieldAudit.source_id.in_(ids)).all() if enh_aware(a.audited_at) >= since]
+    # Pick the window: exact dates (Nairobi days) win over "last N days"; 0 days with no dates means all time.
+    lo, hi = _day_start(date_from), _day_start(date_to, plus=1)
+    if days and not (date_from or date_to):
+        lo = enh.now_utc() - timedelta(days=days)
+
+    def _ok(dt):
+        if not (lo or hi):
+            return True
+        if dt is None:
+            return False
+        t = enh_aware(dt)
+        return (not lo or t >= lo) and (not hi or t < hi)
+    # A check counts on the day it was first made, so a re-check later does not move it out of the period it belongs to.
+    findings = [f for f in db.query(QualityFinding).filter(QualityFinding.source_id.in_(ids)).all() if _ok(f.created_at)]
+    audits = [a for a in db.query(FieldAudit).filter(FieldAudit.source_id.in_(ids)).all() if _ok(a.first_at or a.audited_at)]
     recs: dict = {}
     for r, sid in (db.query(ExtractedRecord, ExtractionJob.source_id).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
                    .filter(ExtractionJob.source_id.in_(ids)).all()):
@@ -397,11 +409,24 @@ def quality_summary(project_id: str | None = None, source_id: str | None = None,
     uids = {f.raised_by for f in findings} | set(v for v in ext_of.values() if v)
     out = q.compute_summary(findings, audits, recs, ext_of, _names(db, uids), {s.id: s.name for s in srcs})
     out["days"] = days
+    out["date_from"] = date_from
+    out["date_to"] = date_to
     out["sources"] = len(ids)
     return out
 
 
-def _extractor_data(db: Session, user: User, project_id, source_id, user_id, days: int):
+def _day_start(day: str | None, plus: int = 0):
+    """Midnight at the start of a YYYY-MM-DD day in Nairobi time (UTC+3), as UTC. plus=1 gives the end of that day."""
+    if not day:
+        return None
+    try:
+        d = datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=422, detail="Dates look like 2026-10-14")
+    return (d + timedelta(days=plus)).replace(tzinfo=timezone(timedelta(hours=3))).astimezone(timezone.utc)
+
+
+def _extractor_data(db: Session, user: User, project_id, source_id, user_id, days: int, date_from: str | None = None, date_to: str | None = None):
     srcs = _visible_sources(db, user, project_id).all()
     if source_id:
         srcs = [x for x in srcs if x.id == source_id]
@@ -412,10 +437,18 @@ def _extractor_data(db: Session, user: User, project_id, source_id, user_id, day
         return {"extractors": []}, [], srcs, {}
     findings = db.query(QualityFinding).filter(QualityFinding.source_id.in_(ids)).all()
     audits = db.query(FieldAudit).filter(FieldAudit.source_id.in_(ids)).all()
-    if days:
-        since = enh.now_utc() - timedelta(days=days)
-        findings = [f for f in findings if enh_aware(f.created_at) >= since]
-        audits = [a for a in audits if enh_aware(a.audited_at) >= since]
+    # A check counts on the day it was first made, so a field you checked on the 14th still shows for the 14th after a later re-check.
+    lo, hi = _day_start(date_from), _day_start(date_to, plus=1)
+    if days and not lo:
+        lo = enh.now_utc() - timedelta(days=days)
+    if lo or hi:
+        def _ok(dt):
+            if dt is None:
+                return False
+            t = enh_aware(dt)
+            return (not lo or t >= lo) and (not hi or t < hi)
+        findings = [f for f in findings if _ok(f.created_at)]
+        audits = [a for a in audits if _ok(a.first_at or a.audited_at)]
     recs: dict = {}
     for r, sid in (db.query(ExtractedRecord, ExtractionJob.source_id).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id).filter(ExtractionJob.source_id.in_(ids)).all()):
         recs.setdefault(sid, []).append(r)
@@ -427,19 +460,20 @@ def _extractor_data(db: Session, user: User, project_id, source_id, user_id, day
 
 @router.get("/extractor-report")
 def extractor_report(project_id: str | None = None, source_id: str | None = None, user_id: str | None = None, days: int = Query(0, ge=0, le=3650),
+                     date_from: str | None = None, date_to: str | None = None,
                      db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Accuracy and error rate per extractor, counting everything ever found. Errors the extractor fixed after a return stay in."""
     _need_lead(user)
-    report, _, _, _ = _extractor_data(db, user, project_id, source_id, user_id, days)
-    return {**report, "days": days}
+    report, _, _, _ = _extractor_data(db, user, project_id, source_id, user_id, days, date_from, date_to)
+    return {**report, "days": days, "date_from": date_from, "date_to": date_to}
 
 
 @router.get("/extractor-report/export")
-def extractor_report_export(project_id: str | None = None, source_id: str | None = None, user_id: str | None = None, days: int = Query(0, ge=0, le=3650), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def extractor_report_export(project_id: str | None = None, source_id: str | None = None, user_id: str | None = None, days: int = Query(0, ge=0, le=3650), date_from: str | None = None, date_to: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from fastapi.responses import Response
     from app.services import quality_export as qx
     _need_lead(user)
-    report, pack, srcs, by_id = _extractor_data(db, user, project_id, source_id, user_id, days)
+    report, pack, srcs, by_id = _extractor_data(db, user, project_id, source_id, user_id, days, date_from, date_to)
     if not report["extractors"]:
         raise HTTPException(status_code=404, detail="Nothing to report yet.")
     findings, audits, recs, ext_of, names = pack
