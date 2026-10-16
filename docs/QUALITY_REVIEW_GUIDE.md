@@ -73,7 +73,7 @@ Quality, **Review**.
 
 - A compact bar at the top holds the **source switcher** (click the source name to search and jump to another source in the same list), Previous and Next source, **Ask the client** and **Approve source**.
 - The **Overview** bar below it is one line: doubted fields, peer pointers, checked fields. Click **Show peer notes and steps** to open the Review steps and what each peer wrote. Close it again to get the room back.
-- The record toolbar stays pinned while you scroll. Next doubted, Side by side and Check site are always visible. Less used actions (copy a value, open the source, download) are under **More**.
+- The record toolbar stays pinned while you scroll, with every action on it and none hidden in a menu: the filters (**Doubted only**, **JSON**, **Hide checked**), **Next doubted**, **Side by side**, **Check site** with its **Render page** option, **Run system checks** and **Open source site**. The keyboard shortcuts are listed under it.
 - The record actions (**Comment**, **Return for correction**, **Approve record**) are in a bar at the bottom, so they are never off screen.
 - On a wide screen (about 1500 pixels or more) **Side by side** opens as a panel next to the fields, so you can compare without losing your place. On a narrower screen it opens over the page, and Esc closes it.
 - The red notification banner is not pinned on this page, so it does not cover the toolbar.

@@ -332,19 +332,17 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         </div>
         <FilterChip on={onlyFlagged} onClick={() => setOnlyFlagged(v => !v)} hint="Show only fields that something doubts. Turn it off to spot check any field.">Doubted only</FilterChip>
         <FilterChip on={view === 'json'} onClick={() => setView(view === 'json' ? 'fields' : 'json')} hint="Read the whole record as JSON">JSON</FilterChip>
+        <FilterChip on={hideDone} onClick={() => setHideDone(v => !v)} hint="Hide the fields you have already checked">Hide checked</FilterChip>
         <span className="ml-auto flex items-center gap-1.5 flex-wrap">
           <Button size="sm" onClick={jumpToWork} title="Jump to the next doubted field (n)">Next doubted{todoLeft ? ` (${todoLeft})` : ''}</Button>
           {!inOverlay && <Button size="sm" variant={docked ? 'primary' : 'secondary'} onClick={openSide} title="SOP, source text and website beside the record (s)">Side by side</Button>}
           <Button size="sm" variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading…' : 'Check site'}</Button>
-          <MoreMenu items={[
-            { label: 'Hide fields I have checked', checked: hideDone, onClick: () => setHideDone(v => !v) },
-            { label: 'Render the page for the site check', hint: 'Slower. For sites that build their pages with JavaScript.', checked: render, onClick: () => setRender(v => !v) },
-            { label: scanBusy ? 'Running system checks…' : 'Run system checks', hint: 'Logs missing fields, bad formats and SOP gaps for the whole source.', onClick: runScan, disabled: scanBusy },
-            ...(d.website ? [{ label: 'Open the source site', href: d.website }] : []),
-            { label: 'Keyboard shortcuts', hint: '↑ ↓ field · c correct · w wrong · m comment · n next doubted · j k record · s side by side · Esc close', onClick: () => toast.info('↑ ↓ field, c correct, w wrong, m comment, n next doubted, j k record, s side by side') },
-          ]} />
+          <FilterChip on={render} onClick={() => setRender(v => !v)} hint="Slower. Use it for sites that build their pages with JavaScript, then run Check site.">Render page</FilterChip>
+          <Button size="sm" variant="secondary" disabled={scanBusy} onClick={runScan} title="Logs missing fields, bad formats and SOP gaps for the whole source">{scanBusy ? 'Running checks…' : 'Run system checks'}</Button>
+          {d.website && <a href={d.website} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">Open source site</a>}
         </span>
       </div>
+      <p className="hidden md:block text-[11px] text-gray-500 px-1">Keys: ↑ ↓ field · c correct · w wrong · m comment · n next doubted · j k record · s side by side · Esc close</p>
       {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-2.5">Every doubted field in this source is settled. Check a few random fields too: turn off Doubted only.</div>}
       {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
         <div className="space-y-2">
@@ -460,35 +458,6 @@ function FilterChip({ on, onClick, hint, children }: { on: boolean; onClick: () 
       className={cn('text-xs font-semibold rounded-full px-3 py-1 border transition', on ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-white border-gray-200 text-gray-500 hover:text-gray-800')}>
       {on ? '✓ ' : ''}{children}
     </button>
-  )
-}
-
-type MenuItem = { label: string; hint?: string; checked?: boolean; href?: string; disabled?: boolean; onClick?: () => void }
-function MoreMenu({ items }: { items: MenuItem[] }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
-    document.addEventListener('mousedown', down); document.addEventListener('keydown', key)
-    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
-  }, [open])
-  return (
-    <div ref={ref} className="relative">
-      <Button size="sm" variant="secondary" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(v => !v)} title="More">More ▾</Button>
-      {open && (
-        <div role="menu" className="absolute right-0 top-full mt-1.5 z-40 w-72 rounded-xl border border-gray-200 bg-white shadow-xl p-1">
-          {items.map((it, i) => {
-            const body = <><span className="flex items-center gap-2 text-sm font-medium text-gray-900">{it.checked !== undefined && <span aria-hidden className="w-4 text-brand-600">{it.checked ? '✓' : ''}</span>}{it.label}</span>{it.hint && <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">{it.hint}</span>}</>
-            const cls = 'w-full text-left rounded-lg px-3 py-2 hover:bg-gray-50 disabled:opacity-50 block'
-            return it.href
-              ? <a key={i} role="menuitem" href={it.href} target="_blank" rel="noreferrer" className={cls} onClick={() => setOpen(false)}>{body}</a>
-              : <button key={i} type="button" role="menuitem" disabled={it.disabled} className={cls} onClick={() => { it.onClick?.(); setOpen(false) }}>{body}</button>
-          })}
-        </div>
-      )}
-    </div>
   )
 }
 
