@@ -1376,6 +1376,82 @@ def _usable_sop(value) -> bool:
     return isinstance(value, dict) and bool(value.get("markdown"))
 
 
+async def _load_sop(source, db, force: bool = True, deep: bool = False) -> dict:
+    """
+    Get the SOP Xtrium provides for this source's item, and save it on the source.
+    force=True asks Xtrium first (the SOP viewer's behaviour). force=False uses the saved copy when there is one, so
+    bulk readers do not hit Xtrium's gateway for sources that already have a SOP.
+    deep=True also asks Xtrium for the item's own SOP when the list view has no SOP text, even if a copy is saved (a real refresh).
+    Returns {origin: live|saved|none, saved_at, live_error, meta, sop, just_saved}.
+    """
+    saved = source.xtrium_sop if isinstance(source.xtrium_sop, dict) else None
+    if not force and saved and _usable_sop(saved.get("sop")):
+        return {"origin": "saved", "saved_at": saved.get("saved_at"), "live_error": None, "meta": saved.get("meta"), "sop": saved.get("sop"), "just_saved": False}
+    if not source.external_ref_id:
+        return {"origin": "none", "saved_at": None, "live_error": "This source wasn't pulled from Xtrium Catalog IQ.", "meta": None, "sop": None, "just_saved": False}
+
+    item = None
+    live_error = None
+    for _status in ("all", "In Progress"):
+        try:
+            _items = await _cached_get_items(_status, 100)
+        except Exception as e:
+            live_error = str(e)
+            break
+        found = next(
+            (i for i in _items if isinstance(i, dict) and str(i.get("id")) == str(source.external_ref_id)),
+            None,
+        ) if isinstance(_items, list) else None
+        if found is not None:
+            item = found
+            live_error = None
+            break
+
+    sop = item.get("sop") if item else None
+    meta = _sop_meta(item) if item else None
+
+    # The list view may omit the SOP body; fall back to the item's own SOP URL
+    # once, only when we have nothing saved (keeps calls to Xtrium low).
+    if (item or not live_error) and not _usable_sop(sop) and (deep or not (saved and _usable_sop(saved.get("sop")))):
+        try:
+            r = await xtrium_client._request(
+                "GET", f"/api/careerflow/batch/{source.external_ref_id}/sop",
+                headers=xtrium_client._headers(),
+            )
+            if r.status_code == 200 and isinstance(r.json(), dict):
+                sop = r.json()
+                if meta is None:
+                    meta = {"sop_code": sop.get("sop_code"), "sop_id": sop.get("sop_id"),
+                            "target_entity": sop.get("entity"), "required_fields": sop.get("required_fields")}
+            elif r.status_code != 200:
+                live_error = live_error or f"Xtrium answered {r.status_code} for this source's SOP."
+        except Exception as e:
+            live_error = live_error or str(e)
+
+    origin = "none"
+    just_saved = False
+    saved_at = saved.get("saved_at") if saved else None
+    if _usable_sop(sop):
+        origin = "live"
+        old = saved.get("sop") if saved else None
+        if not (isinstance(old, dict) and old.get("fingerprint") == sop.get("fingerprint")
+                and old.get("markdown") == sop.get("markdown")):
+            saved_at = datetime.now(timezone.utc).isoformat()
+            source.xtrium_sop = {"sop": sop, "meta": meta, "saved_at": saved_at}
+            try:
+                db.commit()
+                just_saved = True
+            except Exception:
+                db.rollback()  # a read must never fail because the save did
+    elif saved and _usable_sop(saved.get("sop")):
+        origin = "saved"
+        sop = saved.get("sop")
+        meta = saved.get("meta") or meta
+    else:
+        sop = None
+    return {"origin": origin, "saved_at": saved_at, "live_error": live_error, "meta": meta, "sop": sop, "just_saved": just_saved}
+
+
 @router.get("/sources/{source_id}/sop")
 async def source_sop(
     source_id: str,
@@ -1395,75 +1471,18 @@ async def source_sop(
     assert_can_view_source(current_user, source, db)
     if not source.external_ref_id:
         raise HTTPException(status_code=422, detail="This source wasn't pulled from Xtrium Catalog IQ.")
-
-    item = None
-    live_error = None
-    for _status in ("all", "In Progress"):
-        try:
-            _items = await _cached_get_items(_status, 100)
-        except Exception as e:
-            live_error = str(e)
-            break
-        found = next(
-            (i for i in _items if isinstance(i, dict) and str(i.get("id")) == str(source.external_ref_id)),
-            None,
-        ) if isinstance(_items, list) else None
-        if found is not None:
-            item = found
-            live_error = None
-            break
-
-    saved = source.xtrium_sop if isinstance(source.xtrium_sop, dict) else None
-    sop = item.get("sop") if item else None
-    meta = _sop_meta(item) if item else None
-
-    # The list view may omit the SOP body; fall back to the item's own SOP URL
-    # once, only when we have nothing saved (keeps calls to Xtrium low).
-    if (item or not live_error) and not _usable_sop(sop) and not (saved and _usable_sop(saved.get("sop"))):
-        try:
-            r = await xtrium_client._request(
-                "GET", f"/api/careerflow/batch/{source.external_ref_id}/sop",
-                headers=xtrium_client._headers(),
-            )
-            if r.status_code == 200 and isinstance(r.json(), dict):
-                sop = r.json()
-                if meta is None:
-                    meta = {"sop_code": sop.get("sop_code"), "sop_id": sop.get("sop_id"),
-                            "target_entity": sop.get("entity"), "required_fields": sop.get("required_fields")}
-        except Exception as e:
-            live_error = live_error or str(e)
-
-    origin = "none"
-    saved_at = saved.get("saved_at") if saved else None
-    if _usable_sop(sop):
-        origin = "live"
-        old = saved.get("sop") if saved else None
-        if not (isinstance(old, dict) and old.get("fingerprint") == sop.get("fingerprint")
-                and old.get("markdown") == sop.get("markdown")):
-            saved_at = datetime.now(timezone.utc).isoformat()
-            source.xtrium_sop = {"sop": sop, "meta": meta, "saved_at": saved_at}
-            try:
-                db.commit()
-            except Exception:
-                db.rollback()  # a read must never fail because the save did
-    elif saved and _usable_sop(saved.get("sop")):
-        origin = "saved"
-        sop = saved.get("sop")
-        meta = saved.get("meta") or meta
-    else:
-        sop = None
-
+    got = await _load_sop(source, db, force=True)
     return {
         "source_id": source.id,
         "source_name": source.name,
         "project_id": source.project_id,
         "item_id": source.external_ref_id,
         "website_url": source.website_url,
-        "origin": origin,
-        "saved_at": saved_at,
-        "live_error": live_error,
-        "meta": meta,
-        "sop": sop,
+        "origin": got["origin"],
+        "saved_at": got["saved_at"],
+        "live_error": got["live_error"],
+        "meta": got["meta"],
+        "sop": got["sop"],
     }
 
 

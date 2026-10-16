@@ -13,12 +13,18 @@ export function SopRulesBody({ sourceId }: { sourceId: string }) {
   const [d, setD] = useState<any>(null)
   const [q, setQ] = useState('')
   const [onlyMust, setOnlyMust] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
   useEffect(() => { setD(null); qualityApi.sopRequirementsFor(sourceId).then(setD).catch(() => setD({ error: true })) }, [sourceId])
+  const refresh = async () => {
+    setRefreshing(true)
+    try { const r = await qualityApi.sopRequirementsFor(sourceId, true); setD(r); toast.success(r.just_saved ? 'The SOP changed on Xtrium. The new copy is saved.' : r.origin === 'live' ? 'Checked with Xtrium. The SOP has not changed.' : 'Xtrium could not be reached. Showing the saved copy.') }
+    catch (e) { toast.error(err(e, 'Could not reach Xtrium')) } finally { setRefreshing(false) }
+  }
   const match = (t: string) => !q.trim() || t.toLowerCase().includes(q.trim().toLowerCase())
   const sections = useMemo(() => (d?.sections ?? []).map((s: any) => ({ ...s, rules: s.rules.filter((r: any) => (!onlyMust || r.strength === 'MUST') && (match(r.text) || r.fields.some((f: string) => match(f)))) })).filter((s: any) => s.rules.length), [d, q, onlyMust])  // eslint-disable-line react-hooks/exhaustive-deps
   if (!d) return <Skeletons rows={3} />
   if (d.error) return <Blank title="Couldn't load the SOP" text="Check your connection and try again." />
-  if (!d.has_sop) return <Blank title="No SOP saved for this source" text={d.warnings[0]} />
+  if (!d.has_sop) return <div className="space-y-3"><Blank title="No SOP for this source" text={d.warnings[0]} />{d.from_xtrium && <div className="text-center"><Button size="sm" disabled={refreshing} onClick={refresh}>{refreshing ? 'Asking Xtrium…' : 'Try Xtrium again'}</Button></div>}</div>
   const fields = (d.fields ?? []).filter((f: any) => match(f.name) || match(f.rule || '') || match((f.allowed || []).join(' ')))
   const mine = sections.filter((s: any) => s.matches), other = sections.filter((s: any) => !s.matches)
   const ruleList = (list: any[]) => list.map((s: any) => (
@@ -44,7 +50,9 @@ export function SopRulesBody({ sourceId }: { sourceId: string }) {
         {d.entity && <Chip tone="blue">Entity: {d.entity}</Chip>}
         <Chip tone={d.category ? 'green' : 'amber'}>{d.category ? `Category: ${d.category}` : 'No category set'}</Chip>
         <span className="text-sm text-gray-700">{d.title}</span>
-        <span className="ml-auto text-xs text-gray-500 tabular-nums">{d.counts.required_fields} required fields · {d.counts.must_rules} must rules · {d.counts.matching_sections} of {d.counts.sections} sections name this source</span>
+        <span className="ml-auto flex items-center gap-2 flex-wrap"><span className="text-xs text-gray-500">{d.origin === 'live' ? 'Fetched from Xtrium just now' : `Saved copy${d.saved_at ? ' from ' + String(d.saved_at).slice(0, 16).replace('T', ' ') : ''}`}</span>
+          <Button size="sm" variant="secondary" disabled={refreshing} onClick={refresh} title="Ask Xtrium for the SOP again, in case it was edited">{refreshing ? 'Asking Xtrium…' : 'Refresh from Xtrium'}</Button></span>
+        <span className="basis-full text-xs text-gray-500 tabular-nums">{d.counts.required_fields} required fields · {d.counts.must_rules} must rules · {d.counts.matching_sections} of {d.counts.sections} sections name this source</span>
       </div>
       {d.warnings.length > 0 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900" role="alert">
@@ -103,9 +111,16 @@ export function SopRequirementsOverview({ projectId, onPick }: { projectId: stri
   const [items, setItems] = useState<any[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [onlyWarn, setOnlyWarn] = useState(false)
-  useEffect(() => { setItems(null); qualityApi.sopRequirements(projectId).then(r => setItems(r.items)).catch(() => setItems([])) }, [projectId])
+  const [sync, setSync] = useState<any>(null)
+  const [refreshing, setRefreshing] = useState(false)
+  useEffect(() => { setItems(null); setSync(null); qualityApi.sopRequirements(projectId).then(r => { setItems(r.items); setSync(r.sync) }).catch(() => setItems([])) }, [projectId])
+  const refreshAll = async () => {
+    setRefreshing(true)
+    try { const r = await qualityApi.sopRequirements(projectId, true); setItems(r.items); setSync(r.sync); toast.success(r.sync.changed ? `${r.sync.changed} SOP${r.sync.changed === 1 ? '' : 's'} updated from Xtrium` : 'Checked with Xtrium. Nothing changed.') }
+    catch (e) { toast.error(err(e, 'Could not reach Xtrium')) } finally { setRefreshing(false) }
+  }
   const download = async () => { setBusy(true); try { await qualityApi.exportSopRequirements(projectId) } catch (e) { toast.error(err(e, 'Could not prepare the download')) } finally { setBusy(false) } }
-  if (!items) return <Skeletons rows={3} />
+  if (!items) return <div className="rounded-2xl border border-gray-100 bg-white px-4 py-5" role="status"><p className="m-0 text-sm text-gray-600">Getting each source's SOP from Xtrium. The first time this can take a little while.</p><Skeletons rows={2} /></div>
   const shown = items.filter(x => !onlyWarn || x.warnings.length)
   const bad = items.filter(x => x.warnings.length).length
   return (
@@ -115,9 +130,16 @@ export function SopRequirementsOverview({ projectId, onPick }: { projectId: stri
         <span className="text-xs text-gray-500">{items.length} sources · {bad} with something to settle</span>
         <span className="ml-auto flex items-center gap-2">
           <button type="button" aria-pressed={onlyWarn} onClick={() => setOnlyWarn(v => !v)} className={cn('text-xs font-semibold rounded-full px-3 py-1 border', onlyWarn ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50')}>{onlyWarn ? '✓ ' : ''}Needs attention</button>
+          <Button size="sm" variant="secondary" disabled={refreshing} onClick={refreshAll} title="Ask Xtrium for every source's SOP again, in case any was edited">{refreshing ? 'Asking Xtrium…' : 'Refresh from Xtrium'}</Button>
           <Button size="sm" variant="secondary" disabled={busy || !items.length} onClick={download} title="Every field, rule and warning, with the section and exact line from each SOP">{busy ? 'Preparing…' : 'Download Excel'}</Button>
         </span>
       </div>
+      {sync && (sync.failed?.length > 0 || sync.stopped) && (
+        <div className="px-4 py-2 text-xs text-amber-900 bg-amber-50 border-b border-amber-100" role="alert">
+          {sync.failed.length > 0 && <>Xtrium did not give an SOP for {sync.failed.length} source{sync.failed.length === 1 ? '' : 's'}: {sync.failed.map((f: any) => f.source).join(', ')}. </>}
+          {sync.stopped && <>The run stopped early so Xtrium is not hit too hard. Press Refresh from Xtrium in a minute for the rest.</>}
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className="w-full text-sm min-w-[760px]">
           <thead><tr className="text-left text-xs text-gray-500 bg-gray-50"><th className="font-semibold px-4 py-1.5">Source</th><th className="font-semibold px-3 py-1.5">Category</th><th className="font-semibold px-3 py-1.5">SOP</th><th className="font-semibold px-3 py-1.5">Required</th><th className="font-semibold px-3 py-1.5">Rules</th><th className="font-semibold px-3 py-1.5">To settle</th></tr></thead>
@@ -125,7 +147,7 @@ export function SopRequirementsOverview({ projectId, onPick }: { projectId: stri
             <tr key={x.source_id} className="border-t border-gray-50 align-top">
               <td className="px-4 py-2"><button type="button" className="font-semibold text-gray-900 hover:underline text-left" onClick={() => onPick(x.source_id)}>{x.name}</button></td>
               <td className="px-3 py-2 text-gray-700">{x.category || <span className="text-amber-700">None</span>}</td>
-              <td className="px-3 py-2">{x.has_sop ? <><Chip tone="indigo">{x.sop_code || 'SOP'}</Chip>{x.spec_version && <span className="text-xs text-gray-500"> v{x.spec_version}</span>}</> : <Chip tone="gray">No SOP saved</Chip>}</td>
+              <td className="px-3 py-2">{x.has_sop ? <><Chip tone="indigo">{x.sop_code || 'SOP'}</Chip>{x.spec_version && <span className="text-xs text-gray-500"> v{x.spec_version}</span>}</> : <Chip tone="gray">{x.from_xtrium ? 'No SOP from Xtrium' : 'Not from Xtrium'}</Chip>}</td>
               <td className="px-3 py-2 tabular-nums text-gray-700">{x.has_sop ? x.counts.required_fields ?? x.required_fields.length : ''}</td>
               <td className="px-3 py-2 tabular-nums text-gray-700">{x.has_sop ? `${x.counts.must_rules ?? 0} must · ${x.counts.rules ?? 0}` : ''}</td>
               <td className="px-3 py-2 text-xs text-amber-800 max-w-[360px]">{x.warnings.length ? <details><summary className="cursor-pointer">{x.warnings.length} thing{x.warnings.length === 1 ? '' : 's'}</summary><ul className="m-0 mt-1 pl-4 list-disc">{x.warnings.map((w: string, i: number) => <li key={i}>{w}</li>)}</ul></details> : <span className="text-emerald-700">Clear</span>}</td>

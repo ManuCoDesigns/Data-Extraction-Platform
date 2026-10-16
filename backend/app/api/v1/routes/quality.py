@@ -1093,32 +1093,76 @@ def source_audit(body: SourceAuditBody, db: Session = Depends(get_db), user: Use
     return out
 
 
+async def _ensure_sops(db: Session, srcs: list, force: bool = False, max_fetch: int = 40) -> dict:
+    """Make sure each source has its SOP from Xtrium saved on it. Gentle on Xtrium: sources that already have one are
+    skipped (unless force), calls are one at a time, and the first rate-limit or refusal stops the run."""
+    import asyncio
+    from app.api.v1.routes.integrations import _load_sop
+    info = {"fetched": 0, "already": 0, "changed": 0, "failed": [], "stopped": False, "origin": {}}
+    done = 0
+    for s in srcs:
+        if not s.external_ref_id:
+            continue
+        has = isinstance(s.xtrium_sop, dict) and bool((s.xtrium_sop.get("sop") or {}).get("markdown"))
+        if has and not force:
+            info["already"] += 1
+            info["origin"][s.id] = {"origin": "saved", "live_error": None}
+            continue
+        if done >= max_fetch:
+            info["stopped"] = True
+            break
+        got = await _load_sop(s, db, force=True, deep=force)
+        done += 1
+        info["origin"][s.id] = {"origin": got["origin"], "live_error": got["live_error"]}
+        if got["sop"]:
+            info["fetched"] += 1
+            info["changed"] += 1 if got["just_saved"] else 0
+        else:
+            info["failed"].append({"source": s.name, "error": got["live_error"]})
+            if got["live_error"] and re.search(r"refus|403|429|rate|locked|not retrying", str(got["live_error"]), re.I):
+                info["stopped"] = True
+                break
+        await asyncio.sleep(0.3)
+    return info
+
+
 @router.get("/sop-requirements")
-def sop_requirements_list(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """What every source must follow, read from its saved SOP: category, SOP code and version, required fields, rules and warnings."""
+async def sop_requirements_list(project_id: str | None = None, refresh: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """What every source must follow, read from the SOP Xtrium attached to it: category, SOP code and version, required fields,
+    rules and warnings. Sources with no saved SOP get theirs from Xtrium now. refresh=true asks Xtrium again for all of them."""
     from app.services import sop_requirements as sr
     _need_lead(user)
+    srcs = _visible_sources(db, user, project_id).all()
+    sync = await _ensure_sops(db, srcs, force=refresh)
     out = []
-    for s in _visible_sources(db, user, project_id).all():
-        r = sr.build(s)
-        out.append({k: r[k] for k in ("source_id", "name", "category", "entity", "sop_code", "title", "spec_version", "has_sop", "has_markdown", "required_fields", "counts", "warnings")})
+    for s in srcs:
+        o = sync["origin"].get(s.id, {})
+        r = sr.build(s, origin=o.get("origin"), live_error=o.get("live_error"))
+        out.append({k: r[k] for k in ("source_id", "name", "category", "entity", "sop_code", "title", "spec_version", "has_sop", "has_markdown", "required_fields", "counts", "warnings", "origin", "saved_at", "from_xtrium")})
     out.sort(key=lambda x: (x["has_sop"], -len(x["warnings"]), x["name"].lower()))
-    return {"items": out}
+    return {"items": out, "sync": {k: sync[k] for k in ("fetched", "already", "changed", "failed", "stopped")}}
 
 
 @router.get("/sources/{source_id}/sop-requirements")
-def sop_requirements_source(source_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def sop_requirements_source(source_id: str, refresh: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from app.services import sop_requirements as sr
+    from app.api.v1.routes.integrations import _load_sop
     _need_lead(user)
-    return sr.build(_source(db, user, source_id))
+    s = _source(db, user, source_id)
+    got = await _load_sop(s, db, force=refresh, deep=refresh)
+    out = sr.build(s, origin=got["origin"], live_error=got["live_error"])
+    out["just_saved"] = got["just_saved"]
+    return out
 
 
 @router.get("/sop-requirements/export")
-def sop_requirements_export(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+async def sop_requirements_export(project_id: str | None = None, refresh: bool = False, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     from fastapi.responses import Response
     from app.services import quality_export as qx, sop_requirements as sr
     _need_lead(user)
-    items = [sr.build(s) for s in _visible_sources(db, user, project_id).all()]
+    srcs = _visible_sources(db, user, project_id).all()
+    sync = await _ensure_sops(db, srcs, force=refresh)
+    items = [sr.build(s, origin=sync["origin"].get(s.id, {}).get("origin"), live_error=sync["origin"].get(s.id, {}).get("live_error")) for s in srcs]
     if not items:
         raise HTTPException(status_code=404, detail="No sources to report.")
     items.sort(key=lambda x: x["name"].lower())

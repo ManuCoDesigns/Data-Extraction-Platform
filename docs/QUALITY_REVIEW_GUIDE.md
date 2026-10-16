@@ -22,7 +22,7 @@ The system and the peers point at doubtful fields. Only your check at the real s
 
 ### Step 0. Before you start
 
-- The source has a saved SOP (open the source's SOP page once if it never was). Without it the SOP check cannot run.
+- The source came from Xtrium. Its SOP is fetched from Xtrium automatically the first time you open the source in the desk or load the SOP check tab, and is saved. If Xtrium gives none, the desk header says "No SOP from Xtrium" and the reason is listed. Use **Try Xtrium again** or **Refresh from Xtrium** a minute later.
 - Every peer reviewer has submitted. The Review tab lists "Peer reviewed" sources by default, which means all assigned peers are done.
 - `NIMBLE_API_KEY` is set on the backend if you want "Check on the site".
 
@@ -120,7 +120,7 @@ Keys: `y` confirm the audit's suggestion on the field, `s` side by side, `↑` `
 
 ### What each source must follow (SOP rules)
 
-Every source has an SOP saved on it. **SOP rules** at the top of the desk shows exactly what that source's SOP requires, read from the SOP text and never guessed:
+Every source pulled from Xtrium gets its SOP from Xtrium, fetched gently (sources that already have one are skipped, and a rate limit stops the run instead of retrying). **Refresh from Xtrium** re-checks for edits made on the Xtrium side. **SOP rules** at the top of the desk shows exactly what that source's SOP requires, read from the SOP text and never guessed:
 
 - The SOP code, version, the entity it describes and the category set on the source.
 - **Fields**: each field the SOP names, whether it is required or optional, its allowed values and format, the rule, the section it came from and the exact line (hover a row).

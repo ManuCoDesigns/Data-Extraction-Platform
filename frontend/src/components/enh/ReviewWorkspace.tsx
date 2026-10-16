@@ -195,7 +195,15 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const [siteBusy, setSiteBusy] = useState(false)
   const [panel, setPanel] = useState<'' | 'audit' | 'sop'>('')
   const [audit, setAudit] = useState<any>(null)
+  const [sopInfo, setSopInfo] = useState<any>(null)
   useEffect(() => { setAudit(null); setPanel('') }, [sourceId])
+  // Each source's SOP comes from Xtrium. Get it as soon as the desk opens so the checks have it, then show the desk again with it.
+  useEffect(() => {
+    let live = true
+    setSopInfo(null)
+    qualityApi.sopRequirementsFor(sourceId).then(r => { if (!live) return; setSopInfo(r); if (r.just_saved) load() }).catch(() => { if (live) setSopInfo({ error: true }) })
+    return () => { live = false }
+  }, [sourceId])  // eslint-disable-line react-hooks/exhaustive-deps
   const suggestions = useMemo(() => { const m = new Map<string, AuditRow>(); (audit?.rows ?? []).forEach((r: AuditRow) => m.set(r.record_id + '|' + r.field, r)); return m }, [audit])
   const [render, setRender] = useState(false)
   const [nimble, setNimble] = useState<boolean | null>(null)
@@ -391,7 +399,9 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
     <div className="fixed inset-0 z-[60] bg-gray-50 flex flex-col" role="dialog" aria-modal="true" aria-label="Side by side review">
       <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-white flex-wrap">
         <b className="text-sm text-gray-900 truncate max-w-[40ch]">{d.source}</b>
-        {d.sop_code && <Chip tone="indigo">{d.sop_code}</Chip>}
+        {(d.sop_code || sopInfo?.sop_code) && <Chip tone="indigo">{d.sop_code || sopInfo?.sop_code}</Chip>}
+        {sopInfo && !sopInfo.error && !sopInfo.has_sop && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings?.[0]}><Chip tone="amber">No SOP from Xtrium</Chip></button>}
+        {sopInfo?.has_sop && sopInfo.warnings.length > 0 && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings.join(' ')}><Chip tone="amber">{sopInfo.warnings.length} SOP thing{sopInfo.warnings.length === 1 ? '' : 's'} to settle</Chip></button>}
         <span className="text-xs text-gray-500 tabular-nums">{pctDone}% of doubted fields settled</span>
         <span className="text-xs text-gray-400 hidden xl:inline">↑ ↓ field · c correct · w wrong · m comment · n next doubted · j k record · Esc close</span>
         <span className="ml-auto"><Button size="sm" variant="secondary" onClick={() => setFocus(false)}>Close side by side</Button></span>

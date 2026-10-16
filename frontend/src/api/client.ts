@@ -510,10 +510,10 @@ export const qualityApi = {
     const url = URL.createObjectURL(new Blob([r.data]))
     const a = document.createElement('a'); a.href = url; a.download = `extractor_report_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
   },
-  sopRequirements: (projectId?: string) => api.get('/quality/sop-requirements', { params: { project_id: projectId || undefined } }).then(r => r.data),
-  sopRequirementsFor: (sourceId: string) => api.get(`/quality/sources/${sourceId}/sop-requirements`).then(r => r.data),
+  sopRequirements: (projectId?: string, refresh?: boolean) => api.get('/quality/sop-requirements', { params: { project_id: projectId || undefined, refresh: refresh || undefined }, timeout: 180000 }).then(r => r.data),
+  sopRequirementsFor: (sourceId: string, refresh?: boolean) => api.get(`/quality/sources/${sourceId}/sop-requirements`, { params: { refresh: refresh || undefined }, timeout: 120000 }).then(r => r.data),
   exportSopRequirements: async (projectId?: string) => {
-    const r = await api.get('/quality/sop-requirements/export', { params: { project_id: projectId || undefined }, responseType: 'blob' })
+    const r = await api.get('/quality/sop-requirements/export', { params: { project_id: projectId || undefined }, responseType: 'blob', timeout: 180000 })
     const url = URL.createObjectURL(new Blob([r.data]))
     const a = document.createElement('a'); a.href = url; a.download = `sop_requirements_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
   },

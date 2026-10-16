@@ -192,7 +192,7 @@ def _template_keys(md: str) -> list[str]:
     return out
 
 
-def build(source) -> dict:
+def build(source, origin: str | None = None, live_error: str | None = None) -> dict:
     """The full requirement set for one source. `source` is a Source row (needs name, category, xtrium_sop)."""
     saved = source.xtrium_sop if isinstance(getattr(source, "xtrium_sop", None), dict) else {}
     sop = saved.get("sop") if isinstance(saved.get("sop"), dict) else {}
@@ -207,11 +207,19 @@ def build(source) -> dict:
     md_keys = _template_keys(md)
     out = {"source_id": source.id, "name": source.name, "category": category, "entity": entity, "sop_code": code, "title": sop.get("title"), "spec_version": sop.get("spec_version"),
            "has_sop": bool(sop or meta), "has_markdown": bool(md), "required_fields": required, "template_keys": list(dict.fromkeys((list(tmpl) if tmpl else []) + md_keys)), "derived_fields": derived,
-           "fields": [], "sections": [], "warnings": [], "counts": {}}
+           "fields": [], "sections": [], "warnings": [], "counts": {},
+           "origin": origin or ("saved" if sop else "none"), "saved_at": saved.get("saved_at"), "live_error": live_error, "from_xtrium": bool(getattr(source, "external_ref_id", None))}
     w = out["warnings"]
     if not (sop or meta):
-        w.append("No SOP is saved for this source, so nothing can be checked against it. Open the source and fetch its SOP from Xtrium.")
+        if not out["from_xtrium"]:
+            w.append("This source was not pulled from Xtrium, so it has no Xtrium SOP to check against.")
+        elif live_error:
+            w.append(f"No SOP could be loaded from Xtrium for this source ({live_error}). Try Refresh from Xtrium in a minute.")
+        else:
+            w.append("Xtrium has not provided an SOP for this source's item, so nothing can be checked against it.")
         return out
+    if live_error and out["origin"] == "saved":
+        w.append(f"Xtrium could not be reached ({live_error}). This is the copy saved on {str(out['saved_at'] or 'an earlier date')[:16].replace('T', ' ')}. It may be out of date.")
     if not md:
         w.append("The saved SOP has no text (markdown), only the summary. The rules below come from the required-field list alone.")
     if not required:
