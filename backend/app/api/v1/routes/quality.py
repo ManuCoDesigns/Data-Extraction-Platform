@@ -1084,8 +1084,44 @@ def source_audit(body: SourceAuditBody, db: Session = Depends(get_db), user: Use
     with ThreadPoolExecutor(max_workers=4) as ex:
         pages = dict(ex.map(grab, urls))
     ext = db.query(User).filter(User.id == s.assigned_extractor_id).first() if s.assigned_extractor_id else None
-    out = sa.audit_source(desk, pages, s.name, s.website_url, ext.full_name if ext else None)
+    from app.services import sop_requirements as sr
+    sop = sr.build(s)
+    out = sa.audit_source(desk, pages, s.name, s.website_url, ext.full_name if ext else None, sop=sop if sop.get("has_sop") else None)
     out["pages"] = [{"url": u, "ok": p["ok"], "error": p.get("error"), "final_url": p.get("final_url"), "chars": p.get("chars", 0)} for u, p in pages.items()]
     out["source_id"] = s.id
     out["sop_code"] = desk.get("sop_code")
     return out
+
+
+@router.get("/sop-requirements")
+def sop_requirements_list(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """What every source must follow, read from its saved SOP: category, SOP code and version, required fields, rules and warnings."""
+    from app.services import sop_requirements as sr
+    _need_lead(user)
+    out = []
+    for s in _visible_sources(db, user, project_id).all():
+        r = sr.build(s)
+        out.append({k: r[k] for k in ("source_id", "name", "category", "entity", "sop_code", "title", "spec_version", "has_sop", "has_markdown", "required_fields", "counts", "warnings")})
+    out.sort(key=lambda x: (x["has_sop"], -len(x["warnings"]), x["name"].lower()))
+    return {"items": out}
+
+
+@router.get("/sources/{source_id}/sop-requirements")
+def sop_requirements_source(source_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.services import sop_requirements as sr
+    _need_lead(user)
+    return sr.build(_source(db, user, source_id))
+
+
+@router.get("/sop-requirements/export")
+def sop_requirements_export(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from fastapi.responses import Response
+    from app.services import quality_export as qx, sop_requirements as sr
+    _need_lead(user)
+    items = [sr.build(s) for s in _visible_sources(db, user, project_id).all()]
+    if not items:
+        raise HTTPException(status_code=404, detail="No sources to report.")
+    items.sort(key=lambda x: x["name"].lower())
+    stamp = enh.now_utc().strftime("%Y%m%d")
+    body = qx.sop_requirements_xlsx(items, {"generated": stamp})
+    return Response(content=body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="sop_requirements_{stamp}.xlsx"'})

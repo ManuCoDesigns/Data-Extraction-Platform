@@ -4,6 +4,7 @@ import { qualityApi } from '@/api/client'
 import { Blank, Chip, PAGE, PageHeader, Panel, SelectBox, Skeletons, Tabs, Tile, shortAgo, type Tone } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
 import { ReviewWorkspace } from '@/components/enh/ReviewWorkspace'
+import { SopRequirementsOverview, SopRulesBody } from '@/components/enh/SopRules'
 
 const pc = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${Math.round(v)}%`)
 const scoreTone = (v: number | null | undefined): Tone => (v === null || v === undefined ? 'gray' : v >= 90 ? 'green' : v >= 75 ? 'amber' : 'red')
@@ -296,6 +297,8 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
     if (!ov) return <Skeletons rows={4} />
     if (ov.length === 0) return <Blank title="No sources to check yet" text="Sources show here once work has started on them." />
     return (
+      <div className="space-y-5">
+      <SopRequirementsOverview projectId={projectId} onPick={onPick} />
       <Panel title="Do the records follow each source's SOP?" subtitle="A record follows the SOP when every field the SOP requires is filled in. Open a source to see which fields fall short.">
         <ul className="m-0 p-0 list-none divide-y divide-gray-50">
           {ov.map(x => (
@@ -307,11 +310,13 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
           ))}
         </ul>
       </Panel>
+      </div>
     )
   }
   if (!d) return <Skeletons rows={4} />
   if (d.error) return <Blank title="Couldn't run the SOP check" text="Check your connection and try again." />
   if (!d.known) return <Blank title="No SOP saved for this source" text="Open the source's SOP once so a copy is saved. After that the check can run." />
+  const reqPanel = <Panel title="What this SOP requires" subtitle="Every field, allowed value and rule the SOP states, with the exact line. Rules under another category's heading are shown but not enforced here."><SopRulesBody sourceId={sourceId} /></Panel>
   return (
     <div className="space-y-5">
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
@@ -350,6 +355,7 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
           </ul>
         )}
       </Panel>
+      {reqPanel}
     </div>
   )
 }

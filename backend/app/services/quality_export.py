@@ -168,3 +168,52 @@ def extractor_xlsx(report: dict, error_rows: list[dict], meta: dict) -> bytes:
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
+
+
+def sop_requirements_xlsx(items: list[dict], meta: dict) -> bytes:
+    """What each source must follow, straight from its saved SOP: one row per rule, field and warning, each with its section and quote."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Read me"
+    for i, line in enumerate([
+        "SOP requirements per source.",
+        "",
+        "Everything here is read from the SOP saved on each source. Nothing is added or guessed.",
+        "Sources: one row per source with its category, SOP code and version, and how many rules and warnings it has.",
+        "Fields: every field the SOP names, whether it is required, its allowed values and format, the section it came from and the exact line.",
+        "Rules: every sentence in the SOP that says must, shall, never, only, exactly, at least and similar. 'Matches this source' is yes when the section names the source's category or entity.",
+        "Warnings: things to settle before judging a source strictly: no SOP saved, no text, a different SOP code in the text, no section for the category, a missing version.",
+        "MUST rules are strict. SHOULD rules are advice. A rule under another category's heading is shown but not enforced on this source.",
+        "",
+        "Generated %s." % meta.get("generated", ""),
+    ], 1):
+        ws.cell(i, 1, line)
+    ws.column_dimensions["A"].width = 120
+    head = PatternFill("solid", fgColor="1F2937")
+
+    def sheet(title, cols, rows):
+        w = wb.create_sheet(title)
+        w.append(cols)
+        for c in w[1]:
+            c.font, c.fill = Font(bold=True, color="FFFFFF"), head
+        for r in rows:
+            w.append([_cell(v) for v in r])
+        w.freeze_panes = "A2"
+        for i, c in enumerate(cols, 1):
+            w.column_dimensions[get_column_letter(i)].width = max(14, min(70, len(c) + 6)) if c not in ("Rule", "Quote", "Warning") else 90
+            if c in ("Rule", "Quote", "Warning"):
+                for cell in w[get_column_letter(i)][1:]:
+                    cell.alignment = Alignment(wrap_text=True, vertical="top")
+        return w
+    sheet("Sources", ["Source", "Category", "SOP code", "SOP version", "Entity", "SOP title", "Has SOP text", "Required fields", "Fields", "Sections", "Sections naming this source", "Rules", "MUST rules", "Warnings"],
+          [[x["name"], x["category"], x["sop_code"], x["spec_version"], x["entity"], x["title"], "yes" if x["has_markdown"] else "no", x["counts"].get("required_fields", len(x["required_fields"])), x["counts"].get("fields", ""),
+            x["counts"].get("sections", ""), x["counts"].get("matching_sections", ""), x["counts"].get("rules", ""), x["counts"].get("must_rules", ""), len(x["warnings"])] for x in items])
+    sheet("Fields", ["Source", "Category", "SOP code", "Field", "Required", "Type", "Allowed values", "Format", "Rule", "Section", "Enforced on this source", "Quote"],
+          [[x["name"], x["category"], x["sop_code"], f["name"], "yes" if f["required"] else ("no" if f["required"] is False else "not stated"), f["type"], ", ".join(f["allowed"] or []), f["format"], f["rule"], f["section"],
+            "yes" if f.get("enforce", True) else "no (another category's section)", f["quote"]] for x in items for f in x["fields"]])
+    sheet("Rules", ["Source", "Category", "SOP code", "Section", "Matches this source", "Strength", "Kind", "Fields named", "Rule"],
+          [[x["name"], x["category"], x["sop_code"], " > ".join(sx["path"]) or sx["title"], "yes" if sx["matches"] else "no", r["strength"], r["kind"], ", ".join(r["fields"] or []), r["text"]] for x in items for sx in x["sections"] for r in sx["rules"]])
+    sheet("Warnings", ["Source", "Category", "SOP code", "Warning"], [[x["name"], x["category"], x["sop_code"], w] for x in items for w in x["warnings"]])
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()

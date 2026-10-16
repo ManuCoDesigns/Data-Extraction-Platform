@@ -8,7 +8,8 @@ import { ReviewSidePanel } from '@/components/enh/ReviewSidePanel'
 import { SourceChat } from '@/components/enh/SourceChat'
 import { SourceActivity } from '@/components/enh/SourceActivity'
 import { AskClientModal } from '@/components/enh/AskClient'
-import { SourceAuditPanel } from '@/components/enh/SourceAuditPanel'
+import { SourceAuditPanel, applyAuditRow, type AuditRow } from '@/components/enh/SourceAuditPanel'
+import { SopRulesPanel } from '@/components/enh/SopRules'
 
 // The admin's review desk: every field that something doubts is pulled to the top, with the reason beside it,
 // so a check against the real source is one click per field instead of a hunt through JSON.
@@ -192,7 +193,10 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   }, [focus])
   const [site, setSite] = useState<Record<string, any>>({})
   const [siteBusy, setSiteBusy] = useState(false)
-  const [auditOpen, setAuditOpen] = useState(false)
+  const [panel, setPanel] = useState<'' | 'audit' | 'sop'>('')
+  const [audit, setAudit] = useState<any>(null)
+  useEffect(() => { setAudit(null); setPanel('') }, [sourceId])
+  const suggestions = useMemo(() => { const m = new Map<string, AuditRow>(); (audit?.rows ?? []).forEach((r: AuditRow) => m.set(r.record_id + '|' + r.field, r)); return m }, [audit])
   const [render, setRender] = useState(false)
   const [nimble, setNimble] = useState<boolean | null>(null)
   useEffect(() => { qualityApi.nimbleStatus().then(r => setNimble(r.configured)).catch(() => setNimble(false)) }, [])
@@ -241,6 +245,17 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
     const next = [...recs.slice(i + 1), ...recs.slice(0, Math.max(i, 0))].find((r: any) => r.todo > 0)
     if (next) setRid(next.record_id); else toast.success('Every doubted field in this source is settled')
   }, [rec, d, rid])
+  const confirmSuggestion = async (r: AuditRow) => {
+    try {
+      await applyAuditRow(r)
+      toast.success(`Confirmed ${r.verdict === 'WRONG' ? 'wrong' : 'correct'}. It now counts in the ratings.`)
+      await load()
+      const names: string[] = (rec?.fields ?? []).map((f: any) => f.name)
+      const from = names.indexOf(r.field)
+      const nxt = names.slice(from + 1).find(n => { const x = suggestions.get(rec.record_id + '|' + n); const ff = rec.fields.find((q: any) => q.name === n); return x && x.verdict !== 'HOLD' && !ff?.audit })
+      if (nxt) setActive(nxt)
+    } catch (e) { toast.error(err(e, "Couldn't save that one")) }
+  }
   useEffect(() => { nextTodo() }, [rid, d])  // eslint-disable-line react-hooks/exhaustive-deps
   // Show the verdict at once; the server call happens in the background so the next field is one keypress away.
   const applyLocal = (recordId: string, name: string, verdict: string, truth?: string) => setD((cur: any) => {
@@ -344,7 +359,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
           {d.website && <a href={d.website} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">Open source site</a>}
         </span>
       </div>
-      <p className="hidden md:block text-[11px] text-gray-500 px-1">Keys: ↑ ↓ field · c correct · w wrong · m comment · n next doubted · j k record · s side by side · Esc close</p>
+      <p className="hidden md:block text-[11px] text-gray-500 px-1">Keys: ↑ ↓ field · c correct · w wrong · m comment · y confirm the audit's suggestion · n next doubted · j k record · s side by side · Esc close</p>
       {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-2.5">Every doubted field in this source is settled. Check a few random fields too: turn off Doubted only.</div>}
       {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
         <div className="space-y-2">
@@ -354,7 +369,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
             </div>
           )}
           {shown.length === 0 ? <Blank title={onlyFlagged ? 'Nothing doubted on this record' : 'Nothing to show'} text={onlyFlagged ? 'Turn off Doubted only to check any field at random.' : ''} /> :
-            shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} sopRules={d.sop_required ?? []} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
+            shown.map((f: any) => <FieldRow key={rec.record_id + f.name} suggestion={suggestions.get(rec.record_id + '|' + f.name)} onConfirmSuggestion={confirmSuggestion} rec={rec} f={f} peers={d.peers} sopRules={d.sop_required ?? []} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
         </div>
       )}
       {rec && <RecordBar key={rec.record_id} sourceId={sourceId} rec={rec} todoLeft={todoLeft} onDone={load} onPick={n => { setOnlyFlagged(false); setHideDone(false); setActive(n) }} />}
@@ -405,7 +420,8 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         <Chip tone={d.status === 'approved' ? 'green' : 'gray'}>{d.status === 'approved' ? 'Source approved' : `${d.approved_records}/${d.total_records} approved`}</Chip>
         <span className="hidden md:inline-flex items-center gap-2 text-xs text-gray-500" title="Doubted fields you have settled"><span className="w-24 h-1.5 rounded-full bg-gray-100 overflow-hidden"><span className="block h-1.5 rounded-full bg-emerald-500 transition-all" style={{ width: `${pctDone}%` }} /></span><span className="tabular-nums">{pctDone}% settled</span></span>
         <span className="ml-auto flex items-center gap-1.5">
-          <Button size="sm" variant={auditOpen ? 'primary' : 'secondary'} onClick={() => setAuditOpen(v => !v)} title="Check every field of every record against the live pages, using the SOP">Audit against site</Button>
+          <Button size="sm" variant={panel === 'sop' ? 'primary' : 'secondary'} onClick={() => setPanel(v => v === 'sop' ? '' : 'sop')} title="The fields, allowed values and rules this source's SOP states, with the exact lines">SOP rules</Button>
+          <Button size="sm" variant={panel === 'audit' ? 'primary' : 'secondary'} onClick={() => setPanel(v => v === 'audit' ? '' : 'audit')} title="Check every field of every record against the live pages, using the SOP">Audit against site</Button>
           <Button size="sm" variant="secondary" onClick={() => setAsk(true)} title="Send a question to the client about this source">Ask the client</Button>
           {d.status !== 'approved' && <Button size="sm" disabled={approving || !d.total_records || d.approved_records !== d.total_records} onClick={approveSource} title={d.approved_records === d.total_records ? 'Approve this source' : 'Approve every record first'}>{approving ? 'Approving…' : 'Approve source'}</Button>}
         </span>
@@ -426,8 +442,9 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         )}
       </div>
 
-      {auditOpen && <SourceAuditPanel sourceId={sourceId} nimbleReady={nimble === true} onClose={() => setAuditOpen(false)} onApplied={load}
-        onJump={(recordId, field) => { setRid(recordId); setOnlyFlagged(false); setHideDone(false); setActive(field); setAuditOpen(false) }} />}
+      {panel === 'sop' && <SopRulesPanel sourceId={sourceId} name={d.source} onClose={() => setPanel('')} />}
+      {panel === 'audit' && <SourceAuditPanel sourceId={sourceId} nimbleReady={nimble === true} result={audit} onResult={setAudit} onClose={() => setPanel('')} onApplied={load}
+        onJump={(recordId, field) => { setRid(recordId); setOnlyFlagged(false); setHideDone(false); setActive(field); setPanel('') }} />}
 
       <div className={cn('grid gap-3 items-start', docked ? 'lg:grid-cols-[200px_minmax(0,1fr)_minmax(440px,42%)]' : 'lg:grid-cols-[210px_minmax(0,1fr)]')}>
         <div className="lg:sticky lg:top-3 lg:self-start">{recNav}</div>
@@ -554,7 +571,7 @@ function Stat({ label, value, sub }: { label: string; value: number; sub: string
   return <div><div className="text-2xl font-extrabold tabular-nums text-gray-900 leading-none">{value}</div><div className="text-xs font-semibold text-gray-700 mt-1">{label}</div><div className="text-[11px] text-gray-400">{sub}</div></div>
 }
 
-function FieldRow({ rec, f, peers, sopRules, website, site, active, onActive, onLocal, onReload }: { rec: any; f: any; peers: any[]; sopRules: string[]; website?: string; site?: { state: string; snippet?: string | null }; active: boolean; onActive: () => void; onLocal: (rid: string, name: string, verdict: string, truth?: string) => void; onReload: () => void }) {
+function FieldRow({ suggestion, onConfirmSuggestion, rec, f, peers, sopRules, website, site, active, onActive, onLocal, onReload }: { suggestion?: AuditRow; onConfirmSuggestion?: (r: AuditRow) => void; rec: any; f: any; peers: any[]; sopRules: string[]; website?: string; site?: { state: string; snippet?: string | null }; active: boolean; onActive: () => void; onLocal: (rid: string, name: string, verdict: string, truth?: string) => void; onReload: () => void }) {
   const [same, setSame] = useState(() => { try { return localStorage.getItem('dx.reviewSame') === '1' } catch { return false } })
   const [wrong, setWrong] = useState(false)
   const [truth, setTruth] = useState('')
@@ -580,6 +597,7 @@ function FieldRow({ rec, f, peers, sopRules, website, site, active, onActive, on
       if (e.key === 'c') { e.preventDefault(); mark('correct') }
       else if (e.key === 'w') { e.preventDefault(); setWrong(true) }
       else if (e.key === 'm') { e.preventDefault(); setCmt(true) }
+      else if (e.key === 'y' && suggestion && suggestion.verdict !== 'HOLD' && !verdict) { e.preventDefault(); onConfirmSuggestion?.(suggestion) }
     }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
   })
@@ -623,6 +641,17 @@ function FieldRow({ rec, f, peers, sopRules, website, site, active, onActive, on
           <div className={cn('text-sm mt-1 break-words whitespace-pre-wrap', empty ? 'text-gray-400 italic' : 'text-gray-900 font-medium')}>
             {empty ? 'Empty' : isUrl(f.value) ? <a href={f.value} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline break-all">{f.value}</a> : show(f.value)}
           </div>
+          {suggestion && !verdict && (
+            <div onClick={e => e.stopPropagation()} className={cn('text-xs rounded-lg px-2.5 py-2 mt-1.5 space-y-1', suggestion.verdict === 'WRONG' ? 'bg-red-50 text-red-900' : suggestion.verdict === 'CORRECT' ? 'bg-emerald-50 text-emerald-900' : 'bg-amber-50 text-amber-900')}>
+              <p className="m-0"><b>Audit suggests {suggestion.verdict === 'WRONG' ? 'wrong' : suggestion.verdict === 'CORRECT' ? 'correct' : 'hold'}.</b> {suggestion.comment}</p>
+              {suggestion.source_says && <p className="m-0">Source says: <b>{suggestion.source_says}</b></p>}
+              {suggestion.proof?.quote && <p className="m-0 opacity-80 break-words">“{suggestion.proof.quote}” {suggestion.proof.url && <a href={suggestion.proof.url} target="_blank" rel="noreferrer" className="underline">page</a>}</p>}
+              {suggestion.flag_status && <p className="m-0 opacity-80">Flag: {suggestion.flag_status}{suggestion.caught_by.length ? ` (${suggestion.caught_by.join(', ')})` : ''}</p>}
+              {suggestion.verdict !== 'HOLD'
+                ? <p className="m-0 flex items-center gap-2 flex-wrap"><Button size="sm" onClick={() => onConfirmSuggestion?.(suggestion)} title="You have looked and you agree. Only a confirmed field counts in the ratings (key y)">Confirm {suggestion.verdict === 'WRONG' ? 'wrong' : 'correct'} (y)</Button><span className="opacity-80">A suggestion only. It is not rated until you confirm.</span></p>
+                : <p className="m-0 opacity-80">Not rated. Look at the source and mark it yourself.</p>}
+            </div>
+          )}
           {sigs.filter((s: any) => s.text && s.kind !== 'mention' && s.kind !== 'note' && s.kind !== 'recheck').slice(0, 3).map((s: any, i: number) => <p key={i} className="text-xs text-gray-500 mt-1 mb-0">{s.by ? `${s.by}: ` : ''}{s.text}</p>)}
           {rechecks.map((s: any, i: number) => (
             <div key={'r' + i} className="text-xs bg-amber-50 text-amber-900 rounded-lg px-2.5 py-1.5 mt-1.5">

@@ -343,7 +343,53 @@ def find_missing(pages, recorded, now_iso) -> list[dict]:
     return out[:15]
 
 
-def audit_source(desk: dict, pages: dict, source_name: str, website: str | None, extractor: str | None, now: datetime | None = None) -> dict:
+def _blank(v) -> bool:
+    return v is None or (isinstance(v, str) and not v.strip()) or (isinstance(v, (list, dict)) and not v)
+
+
+def apply_sop(vs: list[dict], rf: dict, specs: dict, template_keys: list[str]) -> list[dict]:
+    """Strict SOP rules on top of the page checks: a required field that is empty, a value outside the SOP's allowed
+    list, and keys the SOP does not list. A rule from the SOP always names its section and quote."""
+    by = {v["field"]: v for v in vs}
+    out = list(vs)
+
+    def put(field, new):
+        if field in by:
+            old = by[field]
+            if old["verdict"] == WRONG:
+                old["comment"] = (old["comment"] + " Also: " + new["comment"]).strip()
+                return
+            out[out.index(old)] = new
+        else:
+            out.append(new)
+        by[field] = new
+    for name, sp in specs.items():
+        val = rf.get(name)
+        where = f"SOP section '{sp.get('section')}'" if sp.get("section") else "the SOP"
+        quote = {"url": None, "quote": sp.get("quote")}
+        if sp.get("required") and _blank(val):
+            put(name, _v(name, val, WRONG, "missing_value", source_says=f"{name} is required by {where} and cannot be empty.", pattern="sop_required", sop_rule=sp.get("quote"),
+                         comment=f"The SOP requires {name}, and it is empty.", proof=quote))
+            continue
+        allowed = sp.get("allowed") or []
+        if allowed and not _blank(val):
+            items = val if isinstance(val, list) else [val]
+            bad = [x for x in items if isinstance(x, (str, int, float)) and str(x).strip() not in allowed]
+            if bad:
+                case_only = all(str(x).strip().lower() in {a.lower() for a in allowed} for x in bad)
+                put(name, _v(name, val, WRONG, "sop_rule", source_says=f"Allowed by {where}: {', '.join(allowed)}.", pattern="sop_allowed_values", sop_rule=sp.get("quote"),
+                             comment=f"{', '.join(map(str, bad))} is not one of the SOP's allowed values" + (" (only the letter case differs)." if case_only else "."), proof=quote))
+    known = set(template_keys) | set(specs)
+    if len(known) >= 3:
+        for k, val in rf.items():
+            if k in known or k in SKIP or k.startswith("_") or _blank(val):
+                continue
+            if k not in by:
+                out.append(_v(k, val, HOLD, comment=f"{k} is not listed in the SOP's deliverable template or fields. It may belong to a different SOP version. Check before removing it.", pattern="sop_unlisted_field"))
+    return out
+
+
+def audit_source(desk: dict, pages: dict, source_name: str, website: str | None, extractor: str | None, now: datetime | None = None, sop: dict | None = None) -> dict:
     """desk is the review desk data (records with fields, signals, peers). pages maps a cited url to
     {ok, error, clean, final_url, chars}. Returns every verdict, the missing records, the decision and attribution."""
     now = now or datetime.now(timezone.utc)
@@ -382,6 +428,9 @@ def audit_source(desk: dict, pages: dict, source_name: str, website: str | None,
             c = check_text(k, val, pages, url)
             if c:
                 vs.append(c)
+        if sop:
+            from app.services import sop_requirements as sr
+            vs = apply_sop(vs, rf, sr.field_specs(sop), sop.get("template_keys") or [])
         for v in vs:
             st, caught, flagged = _flag_status(v["verdict"], sigs.get(v["field"]), peers)
             v.update({"record_id": r["record_id"], "record": r["record"], "source": source_name, "flag_status": st, "flagged": flagged,
@@ -418,5 +467,5 @@ def audit_source(desk: dict, pages: dict, source_name: str, website: str | None,
         "patterns": [{"field": f, "pattern": p, "records": rs, "count": len(rs)} for (f, p), rs in sorted(patterns.items(), key=lambda kv: -len(kv[1]))],
         "attribution": {"extractor": extractor, "errors": len(wrong), "nobody_caught": sum(1 for x in wrong if not x["caught_by_ids"]),
                         "peers": [{"id": p["id"], "name": p["name"], "caught": sum(1 for x in wrong if p["id"] in x["caught_by_ids"]), "missed": sum(1 for x in wrong if p["id"] not in x["caught_by_ids"])} for p in peers]},
-        "version_note": "Judged against the SOP code shown on the desk. Anything that depends on a different SOP version is on HOLD, not wrong.",
+        "version_note": "Judged against the SOP code shown on the desk (" + str((sop or {}).get("sop_code") or "none saved") + "). Anything that depends on a different SOP version is on HOLD, not wrong.",
     }

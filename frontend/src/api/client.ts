@@ -510,6 +510,13 @@ export const qualityApi = {
     const url = URL.createObjectURL(new Blob([r.data]))
     const a = document.createElement('a'); a.href = url; a.download = `extractor_report_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
   },
+  sopRequirements: (projectId?: string) => api.get('/quality/sop-requirements', { params: { project_id: projectId || undefined } }).then(r => r.data),
+  sopRequirementsFor: (sourceId: string) => api.get(`/quality/sources/${sourceId}/sop-requirements`).then(r => r.data),
+  exportSopRequirements: async (projectId?: string) => {
+    const r = await api.get('/quality/sop-requirements/export', { params: { project_id: projectId || undefined }, responseType: 'blob' })
+    const url = URL.createObjectURL(new Blob([r.data]))
+    const a = document.createElement('a'); a.href = url; a.download = `sop_requirements_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
+  },
   nimbleStatus: () => api.get('/quality/nimble/status').then(r => r.data as { configured: boolean }),
   siteCheck: (body: { record_id: string; url?: string; render?: boolean; include_text?: boolean }) => api.post('/quality/review/site-check', body).then(r => r.data),
   sopCheck: (sourceId: string) => api.get(`/quality/sources/${sourceId}/sop-check`).then(r => r.data),

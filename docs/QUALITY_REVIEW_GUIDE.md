@@ -106,7 +106,7 @@ For one record:
 6. If the same value appears on other records, tick **Apply to N more records with this value** to settle them in one go. It only touches fields you have not checked yet, and peer credit still goes only to the record you clicked.
 7. Move on. The next doubted field is selected for you.
 
-Keys: `s` side by side, `↑` `↓` change field, `c` correct, `w` wrong (type the real value, press Enter), `n` next doubted field (continues into the next record that still has work), `j` and `k` change record.
+Keys: `y` confirm the audit's suggestion on the field, `s` side by side, `↑` `↓` change field, `c` correct, `w` wrong (type the real value, press Enter), `n` next doubted field (continues into the next record that still has work), `j` and `k` change record.
 
 **Record actions** sit above the fields: **Comment on the record** (a note about the whole record), **Return for correction** (needs a note; sends it to the extractor and resets the peer reviews) and **Approve record** (your final sign-off; peers must have submitted). The header shows how many records are approved and has **Approve source** once all are, and **Ask the client**. The same chat and activity as the source page are under the records.
 
@@ -117,6 +117,17 @@ Keys: `s` side by side, `↑` `↓` change field, `c` correct, `w` wrong (type t
 - The record shows the fields the extractor changed since you sent it back, as chips you can click. If nothing changed it says so.
 - If the reviewer was right and the extractor fixed it before you looked, marking the new value **Correct** still counts the reviewer as having caught an error. If the old value was actually fine and the flag was a mistake, tick **The old value was fine** before you mark it.
 - Feedback never disappears. The extractor keeps a **Feedback on this source** list on the source page, with each item marked Not changed yet, Changed (waiting for your re-check), or Fixed and checked.
+
+### What each source must follow (SOP rules)
+
+Every source has an SOP saved on it. **SOP rules** at the top of the desk shows exactly what that source's SOP requires, read from the SOP text and never guessed:
+
+- The SOP code, version, the entity it describes and the category set on the source.
+- **Fields**: each field the SOP names, whether it is required or optional, its allowed values and format, the rule, the section it came from and the exact line (hover a row).
+- **Rules that name this source**: the sentences in the sections that match the source's category or entity, marked **Must** (must, shall, never, only, exactly, at least and similar) or **Should** (advice). General and other sections are listed below them.
+- **Settle these first**: a plain list of things that stop a strict check, such as no SOP saved, no SOP text, a different SOP code in the text, no section for the category, no version, or a required field the SOP text never explains.
+
+A rule under another category's heading is shown but marked "not enforced here", so a Regulation rule is never held against a MarketSegment source. In the **SOP check** tab, with no source chosen, a table lists every source with its category, SOP, rule counts and anything to settle, and **Download Excel** gives every field, rule and warning with its section and quote.
 
 ### Optional: audit the whole source against the live site
 
@@ -129,6 +140,10 @@ For every field you get **Correct**, **Wrong** or **Hold**, with the exact text 
 - Each field also shows a **flag status**: Valid (a reviewer or the system flagged a real error, with the reviewer named), Not flagged (an error nobody caught), False flag (flagged but fine) or Stale (changed since it was flagged).
 
 The panel also gives a suggested decision (Send back, Hold or Approve), the repeated defects counted as one pattern, records the pages suggest adding (one verbatim sentence each), who owns the errors, and a list of what was **not scanned**. A page that could not be read or a part of the site that was not visited is reported as a gap, never as clean. The site map is not scanned yet, so suggested records come only from the pages the records cite.
+
+After you run the audit, each field in the desk also shows its own suggestion (what it found, what the source says, the proof and the flag status) so you can work down the fields without going back to the panel. Press **y** on a field to confirm its suggestion and move on to the next suggested field, or use the Confirm button.
+
+The audit also applies the SOP strictly: a required field that is empty, a value outside the SOP's allowed values, and a field the SOP does not list (Hold, because it may be a different SOP version) are reported with the SOP section and quote.
 
 **Everything the audit says is a suggestion.** Running it changes nothing and rates nothing. A field only counts in the accuracy and error ratings after you confirm it yourself, one field at a time: press **Confirm wrong** or **Confirm correct** when you have looked and agree, or **Check myself** to open the field in the desk and mark it your way. There is no apply-all. Peers whose own note pointed at a real error get the credit when you confirm it. **Save as note** leaves a Hold as a comment on the field, which is not a rating. **Download JSON** gives the full audit, one record per field.
 

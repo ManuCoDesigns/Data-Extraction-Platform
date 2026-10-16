@@ -21,12 +21,20 @@ const flagTone = (s: string): Tone => (s.startsWith('VALID') ? 'green' : s.start
 const show = (v: unknown) => (v === null || v === undefined || v === '' ? '(empty)' : typeof v === 'object' ? JSON.stringify(v) : String(v))
 const err = (e: any, d: string) => e?.response?.data?.detail || d
 
+export type AuditRow = Row
+
+/** The one place a suggestion becomes a rating. The admin has looked and agreed, so this is the confirmation. */
+export async function applyAuditRow(r: Row) {
+  if (r.verdict === 'WRONG') await qualityApi.mark({ record_id: r.record_id, field: r.field, verdict: 'incorrect', truth_value: r.source_says || undefined, note: r.comment, category: r.error_kind || 'wrong_value', severity: 'major', credit: r.caught_by_ids })
+  else if (r.verdict === 'CORRECT') await qualityApi.mark({ record_id: r.record_id, field: r.field, verdict: 'correct' })
+  else await qualityApi.comment({ record_id: r.record_id, field: r.field, comment: `Audit hold: ${r.comment}` })
+}
+
 type Filter = 'all' | 'WRONG' | 'HOLD' | 'unflagged' | 'false'
 
-export function SourceAuditPanel({ sourceId, nimbleReady, onApplied, onJump, onClose }: {
-  sourceId: string; nimbleReady: boolean; onApplied: () => void; onJump: (recordId: string, field: string) => void; onClose: () => void
+export function SourceAuditPanel({ sourceId, nimbleReady, result: res, onResult: setRes, onApplied, onJump, onClose }: {
+  sourceId: string; nimbleReady: boolean; result: any; onResult: (r: any) => void; onApplied: () => void; onJump: (recordId: string, field: string) => void; onClose: () => void
 }) {
-  const [res, setRes] = useState<any>(null)
   const [busy, setBusy] = useState(false)
   const [render, setRender] = useState(false)
   const [filter, setFilter] = useState<Filter>('all')
@@ -46,15 +54,7 @@ export function SourceAuditPanel({ sourceId, nimbleReady, onApplied, onJump, onC
     return [...m.entries()].sort((a, b) => b[1].rows.filter(x => x.verdict === 'WRONG').length - a[1].rows.filter(x => x.verdict === 'WRONG').length)
   }, [shown])
 
-  const apply = async (r: Row) => {
-    if (r.verdict === 'WRONG') {
-      await qualityApi.mark({ record_id: r.record_id, field: r.field, verdict: 'incorrect', truth_value: r.source_says || undefined, note: r.comment, category: r.error_kind || 'wrong_value', severity: 'major', credit: r.caught_by_ids })
-    } else if (r.verdict === 'CORRECT') {
-      await qualityApi.mark({ record_id: r.record_id, field: r.field, verdict: 'correct' })
-    } else {
-      await qualityApi.comment({ record_id: r.record_id, field: r.field, comment: `Audit hold: ${r.comment}` })
-    }
-  }
+  const apply = applyAuditRow
   const applyOne = async (r: Row) => {
     setApplying(key(r))
     try { await apply(r); setDone(d => ({ ...d, [key(r)]: true })); onApplied(); toast.success(r.verdict === 'HOLD' ? 'Note saved on the field' : `Confirmed ${r.verdict === 'WRONG' ? 'wrong' : 'correct'}. It now counts in the ratings.`) } catch (e) { toast.error(err(e, 'Could not apply that one')) } finally { setApplying('') }
