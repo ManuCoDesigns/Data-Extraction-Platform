@@ -18,6 +18,7 @@ export function QualityPage() {
   const [days, setDays] = useState('90')
   const [tab, setTab] = useState<Tab>('review')
   const [projectId, setProjectId] = useState('')
+  const [bench, setBench] = useState(!!new URLSearchParams(window.location.search).get('source'))
   const [params] = useSearchParams()
 
   useEffect(() => { qualityApi.sources().then(r => setSources(r.items)).catch(() => setSources([])) }, [tab])
@@ -25,8 +26,8 @@ export function QualityPage() {
   const projects = [...new Map((sources ?? []).map(s => [s.project_id, s.project])).entries()].map(([id, name]) => ({ id, name: name as string }))
 
   return (
-    <div className={PAGE}>
-      <PageHeader title="Quality" subtitle="How accurate the delivered data is, how many errors reviewers caught, and how many got through. Scores come from errors that were checked and from fields an admin verified against the real source." />
+    <div className={tab === 'review' && bench ? 'p-3 lg:p-5 max-w-[1760px] mx-auto space-y-3 animate-fade-in' : PAGE}>
+      <PageHeader title="Quality" subtitle={tab === 'review' && bench ? undefined : "How accurate the delivered data is, how many errors reviewers caught, and how many got through. Scores come from errors that were checked and from fields an admin verified against the real source."} />
       <div className="flex items-center gap-3 flex-wrap">
         <Tabs value={tab} onChange={t => { setTab(t) }} items={[{ key: 'review', label: 'Review' }, { key: 'scores', label: 'Scores' }, { key: 'sop', label: 'SOP check' }, { key: 'findings', label: 'Errors logged', count: (sources ?? []).reduce((n, s) => n + s.open_findings, 0) }, { key: 'audit', label: 'Check against source' }]} />
         {tab !== 'review' && <SelectBox label="Project" value={projectId} onChange={v => { setProjectId(v); setSourceId('') }}>
@@ -43,7 +44,7 @@ export function QualityPage() {
           </SelectBox>
         )}
       </div>
-      {tab === 'review' && <ReviewWorkspace initialSource={params.get('source') || ''} initialProject={params.get('project') || ''} />}
+      {tab === 'review' && <ReviewWorkspace onBench={setBench} initialSource={params.get('source') || ''} initialProject={params.get('project') || ''} />}
       {tab === 'scores' && <Scores sourceId={sourceId} projectId={projectId} days={Number(days)} />}
       {tab === 'sop' && <SopCheck sourceId={sourceId} projectId={projectId} onPick={id => setSourceId(id)} />}
       {tab === 'findings' && <Findings sourceId={sourceId} source={src} />}

@@ -17,7 +17,7 @@ interface Props {
 // closed, only acknowledged ("Got it"), so a notice is never missed just because the bell was not
 // opened. Notices that need action are red and listed first. With several waiting, it rotates
 // through them (paused while the pointer or keyboard is on it).
-export function NotificationBanner({ items, total, onOpen, onAck, onAckAll, onViewAll }: Props) {
+export function NotificationBanner({ items, total, onOpen, onAck, onAckAll, onViewAll, pinned = true }: Props & { pinned?: boolean }) {
   const sorted = useMemo(() => [...items].sort(byImportance), [items])
   const [currentId, setCurrentId] = useState<string | null>(null)
   const [paused, setPaused] = useState(false)
@@ -58,7 +58,7 @@ export function NotificationBanner({ items, total, onOpen, onAck, onAckAll, onVi
 
   return (
     <div role="alert" aria-live="assertive" data-banner
-      className="sticky top-14 md:top-0 z-40"
+      className={pinned ? 'sticky top-14 md:top-0 z-40' : 'relative z-10'}
       onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
       <style>{`@keyframes nb-in{0%{transform:translateY(-8px);opacity:.6}100%{transform:none;opacity:1}}

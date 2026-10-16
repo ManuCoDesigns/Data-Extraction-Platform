@@ -463,6 +463,7 @@ export function AppLayout() {
             items={notifications.filter(n => !n.is_read)} total={unreadTotal}
             onOpen={handleNotifClick} onAck={handleAck} onAckAll={handleMarkAllRead}
             onViewAll={() => navigate('/notifications')}
+            pinned={!location.pathname.startsWith('/quality')}
           />
         )}
         <ConnectionBanner />
