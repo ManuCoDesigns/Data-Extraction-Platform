@@ -120,7 +120,7 @@ Keys: `s` side by side, `↑` `↓` change field, `c` correct, `w` wrong (type t
 
 ### Optional: audit the whole source against the live site
 
-**Audit against site** (top of the desk) reads the pages the records cite and checks every field against the SOP, using the written audit algorithm in `docs/SOURCE_AUDIT_ALGORITHM.md`. It needs Nimble to be set up. It only suggests: nothing changes until you apply it.
+**Audit against site** (top of the desk) reads the pages the records cite and checks every field against the SOP, using the written audit algorithm in `docs/SOURCE_AUDIT_ALGORITHM.md`. It needs Nimble to be set up. It only suggests: nothing is rated until you confirm each field.
 
 For every field you get **Correct**, **Wrong** or **Hold**, with the exact text from the page as proof and, for a wrong field, what the source really says:
 
@@ -130,7 +130,7 @@ For every field you get **Correct**, **Wrong** or **Hold**, with the exact text 
 
 The panel also gives a suggested decision (Send back, Hold or Approve), the repeated defects counted as one pattern, records the pages suggest adding (one verbatim sentence each), who owns the errors, and a list of what was **not scanned**. A page that could not be read or a part of the site that was not visited is reported as a gap, never as clean. The site map is not scanned yet, so suggested records come only from the pages the records cite.
 
-Use **Mark wrong** or **Mark correct** on a single field, or **Apply all** to mark every Wrong field and every Correct field you have not checked yet. Peers whose own note pointed at a real error get the credit. **Save as note** leaves a Hold as a comment on the field. **Download JSON** gives the full audit, one record per field.
+**Everything the audit says is a suggestion.** Running it changes nothing and rates nothing. A field only counts in the accuracy and error ratings after you confirm it yourself, one field at a time: press **Confirm wrong** or **Confirm correct** when you have looked and agree, or **Check myself** to open the field in the desk and mark it your way. There is no apply-all. Peers whose own note pointed at a real error get the credit when you confirm it. **Save as note** leaves a Hold as a comment on the field, which is not a rating. **Download JSON** gives the full audit, one record per field.
 
 ### Step 6. Spot check some fields that nobody doubted
 

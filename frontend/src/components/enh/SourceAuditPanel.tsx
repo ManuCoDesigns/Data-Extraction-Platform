@@ -11,7 +11,7 @@ type Row = {
   comment: string; proof: { url: string | null; quote: string | null } | null; flag_status: string; caught_by: string[]; caught_by_ids: string[]; missed_by: string[]; pattern: string
 }
 const KIND_LABEL: Record<string, string> = { wrong_value: 'Wrong value', missing_value: 'Missing value', unsupported_value: 'Not in the source', format: 'Format', sop_rule: 'SOP rule', schema: 'Schema', duplicate: 'Duplicate', other: 'Other' }
-const VERDICT: Record<string, { label: string; tone: Tone }> = { CORRECT: { label: 'Correct', tone: 'green' }, WRONG: { label: 'Wrong', tone: 'red' }, HOLD: { label: 'Hold', tone: 'amber' } }
+const VERDICT: Record<string, { label: string; tone: Tone }> = { CORRECT: { label: 'Suggests correct', tone: 'green' }, WRONG: { label: 'Suggests wrong', tone: 'red' }, HOLD: { label: 'Hold', tone: 'amber' } }
 const DECISION: Record<string, { label: string; tone: Tone; text: string }> = {
   'SEND BACK': { label: 'Send back', tone: 'red', text: 'At least one field is wrong. Add your comments first, then use Return for correction, because sending back resets the peer reviews.' },
   HOLD: { label: 'Hold', tone: 'amber', text: 'Nothing is proven wrong, but some fields depend on something you must confirm (an SOP version, a page that would not load, or a weak match). Do not approve yet.' },
@@ -23,8 +23,8 @@ const err = (e: any, d: string) => e?.response?.data?.detail || d
 
 type Filter = 'all' | 'WRONG' | 'HOLD' | 'unflagged' | 'false'
 
-export function SourceAuditPanel({ sourceId, nimbleReady, checked, onApplied, onJump, onClose }: {
-  sourceId: string; nimbleReady: boolean; checked: (recordId: string, field: string) => boolean; onApplied: () => void; onJump: (recordId: string, field: string) => void; onClose: () => void
+export function SourceAuditPanel({ sourceId, nimbleReady, onApplied, onJump, onClose }: {
+  sourceId: string; nimbleReady: boolean; onApplied: () => void; onJump: (recordId: string, field: string) => void; onClose: () => void
 }) {
   const [res, setRes] = useState<any>(null)
   const [busy, setBusy] = useState(false)
@@ -32,7 +32,6 @@ export function SourceAuditPanel({ sourceId, nimbleReady, checked, onApplied, on
   const [filter, setFilter] = useState<Filter>('all')
   const [applying, setApplying] = useState<string>('')
   const [done, setDone] = useState<Record<string, boolean>>({})
-  const [holdNotes, setHoldNotes] = useState(false)
 
   const run = async () => {
     setBusy(true); setDone({})
@@ -58,15 +57,7 @@ export function SourceAuditPanel({ sourceId, nimbleReady, checked, onApplied, on
   }
   const applyOne = async (r: Row) => {
     setApplying(key(r))
-    try { await apply(r); setDone(d => ({ ...d, [key(r)]: true })); onApplied(); toast.success(r.verdict === 'HOLD' ? 'Hold note saved on the field' : `Marked ${r.verdict === 'WRONG' ? 'wrong' : 'correct'}`) } catch (e) { toast.error(err(e, 'Could not apply that one')) } finally { setApplying('') }
-  }
-  const applyAll = async () => {
-    const todo = rows.filter(r => !done[key(r)] && (r.verdict === 'WRONG' || (r.verdict === 'CORRECT' && !checked(r.record_id, r.field)) || (holdNotes && r.verdict === 'HOLD')))
-    if (!todo.length) { toast.info('Nothing left to apply'); return }
-    setApplying('all'); let ok = 0
-    for (const r of todo) { try { await apply(r); setDone(d => ({ ...d, [key(r)]: true })); ok++ } catch { /* keep going; the count says what landed */ } }
-    setApplying(''); onApplied()
-    toast[ok === todo.length ? 'success' : 'info'](`${ok} of ${todo.length} applied`)
+    try { await apply(r); setDone(d => ({ ...d, [key(r)]: true })); onApplied(); toast.success(r.verdict === 'HOLD' ? 'Note saved on the field' : `Confirmed ${r.verdict === 'WRONG' ? 'wrong' : 'correct'}. It now counts in the ratings.`) } catch (e) { toast.error(err(e, 'Could not apply that one')) } finally { setApplying('') }
   }
   const download = () => {
     const blob = new Blob([JSON.stringify(res, null, 2)], { type: 'application/json' })
@@ -80,7 +71,7 @@ export function SourceAuditPanel({ sourceId, nimbleReady, checked, onApplied, on
     <section className="rounded-2xl border border-brand-200 bg-white" aria-label="Audit against the live site">
       <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b border-gray-100">
         <h2 className="text-sm font-bold text-gray-900 m-0">Audit against the live site</h2>
-        <span className="text-xs text-gray-500">Reads the pages the records cite and checks every field against the SOP. It only suggests; nothing changes until you apply it.</span>
+        <span className="text-xs text-gray-500">Reads the pages the records cite and checks every field against the SOP. It only suggests. Nothing counts until you confirm each field.</span>
         <span className="ml-auto flex items-center gap-2 flex-wrap">
           <label className="text-xs text-gray-600 flex items-center gap-1" title="Slower. Use it for sites that build their pages with JavaScript."><input type="checkbox" checked={render} onChange={e => setRender(e.target.checked)} />Render pages</label>
           <Button size="sm" disabled={busy || !nimbleReady} onClick={run} title={nimbleReady ? 'Fetch the cited pages and check every field' : 'Add NIMBLE_API_KEY in the server settings to turn this on'}>{busy ? 'Reading the pages…' : res ? 'Run again' : 'Run the audit'}</Button>
@@ -100,6 +91,7 @@ export function SourceAuditPanel({ sourceId, nimbleReady, checked, onApplied, on
               {res.sop_code && <Chip tone="indigo">{res.sop_code}</Chip>}
             </div>
             <p className="text-sm text-gray-700 m-0">{dec.text}</p>
+            <p className="text-sm font-semibold text-gray-900 m-0">These are suggestions. A field only counts in the accuracy and error ratings after you confirm it, one field at a time.</p>
             <p className="text-xs text-gray-500 m-0">{res.version_note}</p>
           </div>
 
@@ -119,8 +111,7 @@ export function SourceAuditPanel({ sourceId, nimbleReady, checked, onApplied, on
               <button key={k} type="button" aria-pressed={filter === k} onClick={() => setFilter(k)} className={cn('text-xs font-semibold rounded-full px-3 py-1 border', filter === k ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50')}>{label}</button>
             ))}
             <span className="ml-auto flex items-center gap-2 flex-wrap">
-              <label className="text-xs text-gray-600 flex items-center gap-1"><input type="checkbox" checked={holdNotes} onChange={e => setHoldNotes(e.target.checked)} />Also save Hold notes on the fields</label>
-              <Button size="sm" disabled={!!applying} onClick={applyAll} title="Marks every Wrong field and every Correct field you have not checked yet. Peers who flagged a real error get the credit.">{applying === 'all' ? 'Applying…' : 'Apply all'}</Button>
+              <span className="text-xs text-gray-600 tabular-nums" aria-live="polite">{Object.keys(done).length} of {rows.length} confirmed by you</span>
               <Button size="sm" variant="secondary" onClick={download} title="The full audit as JSON, one record per field">Download JSON</Button>
             </span>
           </div>
@@ -140,7 +131,9 @@ export function SourceAuditPanel({ sourceId, nimbleReady, checked, onApplied, on
                         {r.error_kind && <Chip tone="gray">{KIND_LABEL[r.error_kind] ?? r.error_kind}</Chip>}
                         {r.flag_status && <Chip tone={flagTone(r.flag_status)} title={r.caught_by.length ? `Pointed at by ${r.caught_by.join(', ')}` : undefined}>{r.flag_status}{r.caught_by.length ? `: ${r.caught_by.join(', ')}` : ''}</Chip>}
                         {r.verdict === 'WRONG' && r.missed_by.length > 0 && <span className="text-[11px] text-gray-500">Missed by {r.missed_by.join(', ')}</span>}
-                        <span className="ml-auto">{done[key(r)] ? <Chip tone="green">Applied</Chip> : <Button size="sm" variant="secondary" disabled={!!applying} onClick={() => applyOne(r)}>{applying === key(r) ? 'Applying…' : r.verdict === 'HOLD' ? 'Save as note' : r.verdict === 'WRONG' ? 'Mark wrong' : 'Mark correct'}</Button>}</span>
+                        <span className="ml-auto flex items-center gap-1.5">{done[key(r)] ? <Chip tone="green">Confirmed by you</Chip> : <>
+                          <Button size="sm" variant="secondary" disabled={!!applying} onClick={() => onJump(r.record_id, r.field)} title="Open the field in the desk, look at the source yourself and mark it your way">Check myself</Button>
+                          <Button size="sm" disabled={!!applying} onClick={() => applyOne(r)} title={r.verdict === 'HOLD' ? 'Leave this as a comment on the field. It is not a rating.' : 'You have looked, and you agree. This is when it counts in the ratings.'}>{applying === key(r) ? 'Saving…' : r.verdict === 'HOLD' ? 'Save as note' : r.verdict === 'WRONG' ? 'Confirm wrong' : 'Confirm correct'}</Button></>}</span>
                       </div>
                       <p className="text-sm text-gray-700 m-0 break-words"><span className="text-gray-500">Delivered: </span>{show(r.delivered)}</p>
                       {r.source_says && <p className="text-sm text-gray-900 m-0 break-words"><span className="text-gray-500">Source says: </span>{r.source_says}</p>}

@@ -427,7 +427,6 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
       </div>
 
       {auditOpen && <SourceAuditPanel sourceId={sourceId} nimbleReady={nimble === true} onClose={() => setAuditOpen(false)} onApplied={load}
-        checked={(recordId, field) => !!d.records.find((r: any) => r.record_id === recordId)?.fields.find((f: any) => f.name === field)?.audit}
         onJump={(recordId, field) => { setRid(recordId); setOnlyFlagged(false); setHideDone(false); setActive(field); setAuditOpen(false) }} />}
 
       <div className={cn('grid gap-3 items-start', docked ? 'lg:grid-cols-[200px_minmax(0,1fr)_minmax(440px,42%)]' : 'lg:grid-cols-[210px_minmax(0,1fr)]')}>
