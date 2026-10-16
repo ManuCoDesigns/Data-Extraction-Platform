@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { qualityApi, sourcesApi } from '@/api/client'
 import { Blank, Chip, Panel, SelectBox, Skeletons, Tabs, type Tone } from '@/components/enh/kit'
 import { CATEGORY_OPTIONS } from '@/components/enh/FlagErrorModal'
@@ -27,7 +28,7 @@ const err = (e: any, d: string) => e?.response?.data?.detail || d
 
 type Scope = 'peer_done' | 'all'
 
-export function ReviewWorkspace({ initialSource = '', initialProject = '' }: { initialSource?: string; initialProject?: string }) {
+export function ReviewWorkspace({ initialSource = '', initialProject = '', onBench }: { initialSource?: string; initialProject?: string; onBench?: (on: boolean) => void }) {
   const [list, setList] = useState<any>(null)
   const [project, setProject] = useState(initialProject)
   const [scope, setScope] = useState<Scope>(initialSource ? 'all' : 'peer_done')
@@ -35,18 +36,27 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '' }: { i
   const [sourceId, setSourceId] = useState(initialSource)
 
   useEffect(() => { setList(null); qualityApi.reviewSources({ project_id: project || undefined, scope }).then(setList).catch(() => setList({ items: [], projects: [] })) }, [project, scope])
+  useEffect(() => { onBench?.(!!sourceId) }, [sourceId])  // eslint-disable-line react-hooks/exhaustive-deps
   const items: any[] = useMemo(() => (list?.items ?? []).filter((s: any) => !q.trim() || s.name.toLowerCase().includes(q.trim().toLowerCase())), [list, q])
   const groups = useMemo(() => {
     const m = new Map<string, any[]>()
     items.forEach(s => { const k = s.project || 'No project'; m.set(k, [...(m.get(k) ?? []), s]) })
     return [...m.entries()]
   }, [items])
+  const at = items.findIndex((x: any) => x.source_id === sourceId)
+  const goSource = (delta: number) => { const n = items[at + delta]; if (n) setSourceId(n.source_id); else toast.success(delta > 0 ? 'That was the last source in this list' : 'That is the first source in this list') }
 
+  if (sourceId) {
+    return (
+      <SourceDesk key={sourceId} sourceId={sourceId} onNextSource={() => goSource(1)} onPrevSource={() => goSource(-1)} position={at >= 0 ? `${at + 1} of ${items.length}` : ''}
+        picker={name => <SourcePicker list={list} groups={groups} project={project} setProject={setProject} scope={scope} setScope={setScope} q={q} setQ={setQ} sourceId={sourceId} name={name} onPick={setSourceId} onClear={() => setSourceId('')} />} />
+    )
+  }
   return (
     <div className="space-y-4">
       <div role="tablist" aria-label="Projects" className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
         {!list ? <div className="h-[84px] w-full rounded-2xl bg-gray-100 animate-pulse" /> : [{ id: '', name: 'All projects', sources: (list.projects ?? []).reduce((n: number, p: any) => n + p.sources, 0), peer_done: (list.projects ?? []).reduce((n: number, p: any) => n + p.peer_done, 0), open: (list.projects ?? []).reduce((n: number, p: any) => n + p.open, 0), checked: (list.projects ?? []).reduce((n: number, p: any) => n + p.checked, 0) }, ...(list.projects ?? [])].map((p: any) => (
-          <button key={p.id || 'all'} type="button" role="tab" aria-selected={project === p.id} onClick={() => { setProject(p.id); setSourceId('') }}
+          <button key={p.id || 'all'} type="button" role="tab" aria-selected={project === p.id} onClick={() => setProject(p.id)}
             className={cn('shrink-0 w-56 text-left rounded-2xl border px-4 py-3 bg-white transition', project === p.id ? 'border-transparent ring-2 ring-brand-400 shadow-card' : 'border-gray-100 hover:border-gray-200')}>
             <span className="block text-sm font-bold text-gray-900 truncate">{p.name || 'Untitled project'}</span>
             <span className="flex items-baseline gap-1.5 mt-1.5"><span className="text-2xl font-extrabold tabular-nums text-emerald-600 leading-none">{p.peer_done}</span><span className="text-xs text-gray-500">peer reviewed of {p.sources}</span></span>
@@ -60,39 +70,78 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '' }: { i
       </div>
       <div className="flex items-center gap-3 flex-wrap">
         <Tabs value={scope} onChange={setScope} items={[{ key: 'peer_done', label: 'Peer reviewed' }, { key: 'all', label: 'All sources' }]} />
-        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" className="text-sm rounded-xl border border-gray-200 px-3 py-1.5 w-48 max-w-full" />
-        <span className="inline-flex items-center gap-1.5"><DownloadButtons project={project} scope={scope} /></span>
-        <span className="text-xs text-gray-400">Keys: ↑ ↓ change field, c correct, w wrong, n next doubted field, j and k change record</span>
+        <input value={q} onChange={e => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" className="text-sm rounded-xl border border-gray-200 px-3 py-2 w-56 max-w-full" />
+        <span className="ml-auto inline-flex items-center gap-1.5"><DownloadButtons project={project} scope={scope} /></span>
       </div>
-      <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)] items-start">
-        <aside className="space-y-4 lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
-          {!list ? <Skeletons rows={5} /> : groups.length === 0 ? (
-            <Blank title={scope === 'peer_done' ? 'No peer-reviewed sources yet' : 'No sources'} text={scope === 'peer_done' ? 'Sources show here once every peer reviewer has submitted. Switch to All sources to look at the rest.' : 'Sources show here once work has started.'} />
-          ) : groups.map(([name, rows]) => (
-            <div key={name}>
-              <h3 className="text-xs font-semibold text-gray-500 m-0 mb-1.5 px-1">{name}</h3>
-              <ul className="m-0 p-0 list-none space-y-1.5">
-                {rows.map(s => (
-                  <li key={s.source_id}>
-                    <button type="button" onClick={() => setSourceId(s.source_id)} className={cn('w-full text-left rounded-xl border px-3 py-2.5 transition bg-white', sourceId === s.source_id ? 'border-transparent ring-2 ring-brand-400' : 'border-gray-100 hover:border-gray-200')}>
-                      <span className="block text-sm font-semibold text-gray-900 truncate">{s.name}</span>
-                      <span className="block text-[11px] text-gray-400 mt-0.5">{s.records} record{s.records === 1 ? '' : 's'}</span>
-                      <span className="flex items-center gap-1.5 flex-wrap mt-1.5">
-                        <Chip tone={s.peer_done ? 'green' : 'gray'}>{s.peer_done ? 'Peers done' : `Peers ${s.peers_done}/${s.peers_total}`}</Chip>
-                        {s.open_findings > 0 && <Chip tone="amber">{s.open_findings} open</Chip>}
-                        {s.audited > 0 && <Chip tone="blue">{s.audited} checked</Chip>}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </aside>
-        <main className="min-w-0">
-          {sourceId ? <SourceDesk key={sourceId} sourceId={sourceId} onNextSource={() => { const i = items.findIndex((x: any) => x.source_id === sourceId); const n = items[i + 1]; if (n) setSourceId(n.source_id); else toast.success('That was the last source in this list') }} /> : <Blank title="Pick a source" text="Choose a source on the left. Fields that peers commented on, the SOP is missing, or the system doubts are pulled to the top." />}
-        </main>
-      </div>
+      {!list ? <Skeletons rows={5} /> : groups.length === 0 ? (
+        <Blank title={scope === 'peer_done' ? 'No peer-reviewed sources yet' : 'No sources'} text={scope === 'peer_done' ? 'Sources show here once every peer reviewer has submitted. Switch to All sources to look at the rest.' : 'Sources show here once work has started.'} />
+      ) : groups.map(([name, rows]) => (
+        <section key={name}>
+          <h3 className="text-xs font-semibold text-gray-500 m-0 mb-2 px-1">{name}</h3>
+          <ul className="m-0 p-0 list-none grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {rows.map(s => <li key={s.source_id}><SourceCard s={s} active={false} onPick={() => setSourceId(s.source_id)} /></li>)}
+          </ul>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+function SourceCard({ s, active, onPick }: { s: any; active: boolean; onPick: () => void }) {
+  return (
+    <button type="button" onClick={onPick} className={cn('w-full h-full text-left rounded-xl border px-3 py-2.5 transition bg-white', active ? 'border-transparent ring-2 ring-brand-400' : 'border-gray-100 hover:border-gray-300')}>
+      <span className="block text-sm font-semibold text-gray-900 truncate">{s.name}</span>
+      <span className="block text-[11px] text-gray-400 mt-0.5">{s.records} record{s.records === 1 ? '' : 's'}</span>
+      <span className="flex items-center gap-1.5 flex-wrap mt-1.5">
+        <Chip tone={s.peer_done ? 'green' : 'gray'}>{s.peer_done ? 'Peers done' : `Peers ${s.peers_done}/${s.peers_total}`}</Chip>
+        {s.open_findings > 0 && <Chip tone="amber">{s.open_findings} open</Chip>}
+        {s.audited > 0 && <Chip tone="blue">{s.audited} checked</Chip>}
+      </span>
+    </button>
+  )
+}
+
+/** Switch source without leaving the desk: one button, a search box and the same list as the picker screen. */
+function SourcePicker({ list, groups, project, setProject, scope, setScope, q, setQ, sourceId, name, onPick, onClear }: {
+  list: any; groups: [string, any[]][]; project: string; setProject: (v: string) => void; scope: Scope; setScope: (v: Scope) => void; q: string; setQ: (v: string) => void
+  sourceId: string; name: string; onPick: (id: string) => void; onClear: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', down); document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
+  }, [open])
+  return (
+    <div ref={ref} className="relative min-w-0">
+      <button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(v => !v)}
+        className="inline-flex items-center gap-2 rounded-xl border border-gray-200 bg-white px-3 py-1.5 text-sm font-bold text-gray-900 hover:bg-gray-50 max-w-[min(340px,70vw)]" title="Switch to another source">
+        <span className="truncate">{name}</span><span aria-hidden className="text-gray-400 text-xs">▾</span>
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Pick a source" className="absolute left-0 top-full mt-2 z-50 w-[min(580px,92vw)] rounded-2xl border border-gray-200 bg-white shadow-xl p-3 space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <SelectBox label="Project" value={project} onChange={setProject} className="!py-1.5"><option value="">All projects</option>{(list?.projects ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</SelectBox>
+            <Tabs value={scope} onChange={setScope} items={[{ key: 'peer_done', label: 'Peer reviewed' }, { key: 'all', label: 'All' }]} />
+            <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" className="text-sm rounded-xl border border-gray-200 px-3 py-1.5 flex-1 min-w-[140px]" />
+          </div>
+          <div className="max-h-[52vh] overflow-y-auto space-y-3 pr-1">
+            {!list ? <Skeletons rows={3} /> : groups.length === 0 ? <p className="text-sm text-gray-500 m-0 px-1">{scope === 'peer_done' ? 'No peer-reviewed sources match. Try All.' : 'No sources match.'}</p> : groups.map(([g, rows]) => (
+              <div key={g}>
+                <h4 className="text-[11px] font-semibold text-gray-500 m-0 mb-1.5 px-1">{g}</h4>
+                <ul className="m-0 p-0 list-none grid gap-1.5 sm:grid-cols-2">{rows.map(s => <li key={s.source_id}><SourceCard s={s} active={s.source_id === sourceId} onPick={() => { onPick(s.source_id); setOpen(false) }} /></li>)}</ul>
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5 border-t border-gray-100 pt-2 flex-wrap [&_button]:whitespace-nowrap">
+            <button type="button" onClick={() => { setOpen(false); onClear() }} className="text-xs font-semibold text-brand-600 hover:underline">Back to all sources</button>
+            <span className="ml-auto text-xs text-gray-500">Download what is listed</span><DownloadButtons project={project} scope={scope} />
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -110,13 +159,23 @@ function DownloadButtons({ project, scope }: { project: string; scope: Scope }) 
   }
   return (
     <>
-      <Button variant="secondary" disabled={!!busy} onClick={() => go('xlsx')} title="Every source in this list, with the peers' comments beside the data">{busy === 'xlsx' ? 'Preparing…' : 'Download Excel'}</Button>
-      <Button variant="secondary" disabled={!!busy} onClick={() => go('json')} title="The same, as JSON for an AI model">{busy === 'json' ? 'Preparing…' : 'JSON'}</Button>
+      <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => go('xlsx')} title="Every source in this list, with the peers' comments beside the data">{busy === 'xlsx' ? 'Preparing…' : 'Download Excel'}</Button>
+      <Button size="sm" variant="secondary" disabled={!!busy} onClick={() => go('json')} title="The same, as JSON for an AI model">{busy === 'json' ? 'Preparing…' : 'JSON'}</Button>
     </>
   )
 }
 
-function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource: () => void }) {
+function useMinWidth(px: number) {
+  const q = `(min-width:${px}px)`
+  const [ok, setOk] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(q).matches)
+  useEffect(() => {
+    const m = window.matchMedia?.(q); if (!m) return
+    const h = () => setOk(m.matches); h(); m.addEventListener?.('change', h); return () => m.removeEventListener?.('change', h)
+  }, [q])
+  return ok
+}
+
+function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: { sourceId: string; onNextSource: () => void; onPrevSource: () => void; position: string; picker: (name: string) => React.ReactNode }) {
   const [d, setD] = useState<any>(null)
   const [rid, setRid] = useState('')
   const [view, setView] = useState<'fields' | 'json'>('fields')
@@ -147,9 +206,15 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
   }
   const [scanBusy, setScanBusy] = useState(false)
   const [toolsOpen, setToolsOpen] = useState(false)
+  const roomy = useMinWidth(1500)
+  const [dock, setDock] = useState(() => { try { return localStorage.getItem('dx.reviewDock') !== '0' } catch { return true } })
+  const toggleDock = () => setDock(v => { const n = !v; try { localStorage.setItem('dx.reviewDock', n ? '1' : '0') } catch { /* ignore */ } return n })
+  const docked = roomy && dock
   const [tool, setTool] = useState<'chat' | 'activity'>('chat')
   const [ask, setAsk] = useState(false)
   const [approving, setApproving] = useState(false)
+  const [overview, setOverview] = useState(() => { try { return localStorage.getItem('dx.reviewOverview') === '1' } catch { return false } })
+  const toggleOverview = () => setOverview(v => { const n = !v; try { localStorage.setItem('dx.reviewOverview', n ? '1' : '0') } catch { /* ignore */ } return n })
   const runScan = async () => {
     setScanBusy(true)
     try { const r = await qualityApi.scan(sourceId); toast.success(r.created ? `System checks found ${r.created} new issue${r.created === 1 ? '' : 's'}` : 'System checks found nothing new'); load() }
@@ -194,6 +259,7 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
     catch (e) { toast.error(err(e, 'Cannot approve yet. Check that every record is approved.')) } finally { setApproving(false) }
   }
 
+  const openSide = () => { if (roomy) toggleDock(); else setFocus(v => !v) }
   const move = (delta: number) => {
     if (!d) return
     const i = d.records.findIndex((r: any) => r.record_id === rid)
@@ -208,7 +274,7 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
       if (e.key === 'j') move(1)
       else if (e.key === 'k') move(-1)
       else if (e.key === 'n') jumpToWork()
-      else if (e.key === 's') setFocus(v => !v)
+      else if (e.key === 's') openSide()
       else if (e.key === 'Escape' && focus) setFocus(false)
       else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         const names = shown.map((f: any) => f.name); if (!names.length) return
@@ -225,65 +291,100 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
   const t = d.totals
   const pctDone = t.flagged ? Math.round(100 * d.records.reduce((n: number, r: any) => n + r.fields.filter((f: any) => f.signals.length && f.audit).length, 0) / t.flagged) : 100
 
+  const inOverlay = focus && !roomy
+  const idx = d.records.findIndex((r: any) => r.record_id === rid)
+  const todoLeft = rec ? rec.fields.filter((f: any) => f.signals.length > 0 && !f.audit).length : 0
+  const steps = flowSteps(d, pctDone)
+  const nextStep = steps.find(x => x.state === 'todo')
+
   const recNav = (
-        <nav aria-label="Records" className="rounded-2xl border border-gray-100 bg-white p-2 xl:max-h-[70vh] overflow-y-auto">
-          <p className="text-[11px] text-gray-400 px-2 py-1 m-0">Riskiest first. Press j and k to move.</p>
-          <ul className="m-0 p-0 list-none">
-            {d.records.map((r: any) => (
-              <li key={r.record_id}>
-                <button type="button" onClick={() => setRid(r.record_id)} className={cn('w-full text-left rounded-lg px-2.5 py-2 text-sm flex items-center gap-2', rid === r.record_id ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-gray-700 hover:bg-gray-50')}>
-                  <span className={cn('w-2 h-2 rounded-full shrink-0', r.todo > 0 ? 'bg-red-500' : r.audited > 0 ? 'bg-emerald-500' : 'bg-gray-300')} aria-hidden />
-                  <span className="truncate flex-1">{r.record}</span>
-                  {r.todo > 0 && <span className="text-[11px] tabular-nums text-red-600 font-semibold">{r.todo}</span>}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+    <>
+      <nav aria-label="Records" className="hidden lg:block rounded-2xl border border-gray-100 bg-white p-1.5 max-h-[calc(100vh-7rem)] overflow-y-auto">
+        <p className="text-[11px] text-gray-400 px-2 py-1 m-0">Records, riskiest first</p>
+        <ul className="m-0 p-0 list-none">
+          {d.records.map((r: any) => (
+            <li key={r.record_id}>
+              <button type="button" onClick={() => setRid(r.record_id)} aria-current={rid === r.record_id} className={cn('w-full text-left rounded-lg px-2.5 py-1.5 text-sm flex items-center gap-2', rid === r.record_id ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-gray-700 hover:bg-gray-50')}>
+                <span className={cn('w-2 h-2 rounded-full shrink-0', r.review_status === 'approved' ? 'bg-emerald-500' : r.todo > 0 ? 'bg-red-500' : r.audited > 0 ? 'bg-sky-500' : 'bg-gray-300')} aria-hidden />
+                <span className="truncate flex-1">{r.record}</span>
+                {r.review_status === 'approved' ? <span className="text-[11px] text-emerald-600" title="Approved">✓</span> : r.todo > 0 ? <span className="text-[11px] tabular-nums text-red-600 font-semibold" title="Doubted fields left">{r.todo}</span> : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      <div className="lg:hidden">
+        <SelectBox label="Record" value={rid} onChange={setRid} className="w-full">
+          {d.records.map((r: any, i: number) => <option key={r.record_id} value={r.record_id}>{i + 1}. {r.record}{r.todo > 0 ? ` (${r.todo} to check)` : ''}</option>)}
+        </SelectBox>
+      </div>
+    </>
   )
+
   const fieldsSection = (
-        <section className="min-w-0 space-y-3">
-          <div className="flex items-center gap-2 flex-wrap">
-            <Tabs value={view} onChange={setView} items={[{ key: 'fields', label: 'Fields' }, { key: 'json', label: 'JSON' }]} />
-            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={onlyFlagged} onChange={e => setOnlyFlagged(e.target.checked)} /> Only doubted fields</label>
-            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5" title="Slower, for sites that build their pages with JavaScript"><input type="checkbox" checked={render} onChange={e => setRender(e.target.checked)} /> Render page</label>
-            <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Hide checked</label>
-            <span className="ml-auto flex gap-1.5 flex-wrap [&_button]:whitespace-nowrap"><Button variant="secondary" onClick={() => setFocus(true)} title="Open the record with the SOP, source text and website beside it (press s)">Side by side</Button><Button variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading the site…' : 'Check on the site'}</Button><Button variant="secondary" onClick={jumpToWork}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button><Button variant="secondary" onClick={onNextSource}>Next source</Button></span>
-          </div>
-          {rec && <RecordActions key={rec.record_id} sourceId={sourceId} rec={rec} onDone={load} onPick={n => { setOnlyFlagged(false); setHideDone(false); setActive(n) }} />}
-          {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-3">Every doubted field in this source is settled. Check a few random fields too by unticking \"Only doubted fields\".</div>}
-          {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
-            <div className="space-y-2.5">
-              {rec.general.length > 0 && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
-                  {rec.general.map((g: any, i: number) => <p key={i} className="m-0"><b>{g.by}</b>: {g.text}</p>)}
-                </div>
-              )}
-              {shown.length === 0 ? <Blank title={onlyFlagged ? 'Nothing doubted on this record' : 'Nothing to show'} text={onlyFlagged ? 'Untick "Only doubted fields" to check any field at random.' : ''} /> :
-                shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} sopRules={d.sop_required ?? []} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
+    <section className="min-w-0 space-y-3">
+      <div className="md:sticky md:top-0 z-20 rounded-xl border border-gray-200 bg-white px-3 py-2 flex items-center gap-2 flex-wrap shadow-sm [&_button]:whitespace-nowrap">
+        <div className="min-w-0 flex items-center gap-1.5">
+          <IconButton label="Previous record" onClick={() => move(-1)}>‹</IconButton>
+          <span className="text-sm font-bold text-gray-900 truncate max-w-[14ch]" title={rec?.record}>{rec?.record ?? 'No record'}</span>
+          <span className="text-xs text-gray-400 tabular-nums">{idx >= 0 ? `${idx + 1}/${d.records.length}` : ''}</span>
+          <IconButton label="Next record" onClick={() => move(1)}>›</IconButton>
+        </div>
+        <FilterChip on={onlyFlagged} onClick={() => setOnlyFlagged(v => !v)} hint="Show only fields that something doubts. Turn it off to spot check any field.">Doubted only</FilterChip>
+        <FilterChip on={view === 'json'} onClick={() => setView(view === 'json' ? 'fields' : 'json')} hint="Read the whole record as JSON">JSON</FilterChip>
+        <span className="ml-auto flex items-center gap-1.5 flex-wrap">
+          <Button size="sm" onClick={jumpToWork} title="Jump to the next doubted field (n)">Next doubted{todoLeft ? ` (${todoLeft})` : ''}</Button>
+          {!inOverlay && <Button size="sm" variant={docked ? 'primary' : 'secondary'} onClick={openSide} title="SOP, source text and website beside the record (s)">Side by side</Button>}
+          <Button size="sm" variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading…' : 'Check site'}</Button>
+          <MoreMenu items={[
+            { label: 'Hide fields I have checked', checked: hideDone, onClick: () => setHideDone(v => !v) },
+            { label: 'Render the page for the site check', hint: 'Slower. For sites that build their pages with JavaScript.', checked: render, onClick: () => setRender(v => !v) },
+            { label: scanBusy ? 'Running system checks…' : 'Run system checks', hint: 'Logs missing fields, bad formats and SOP gaps for the whole source.', onClick: runScan, disabled: scanBusy },
+            ...(d.website ? [{ label: 'Open the source site', href: d.website }] : []),
+            { label: 'Keyboard shortcuts', hint: '↑ ↓ field · c correct · w wrong · m comment · n next doubted · j k record · s side by side · Esc close', onClick: () => toast.info('↑ ↓ field, c correct, w wrong, m comment, n next doubted, j k record, s side by side') },
+          ]} />
+        </span>
+      </div>
+      {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-2.5">Every doubted field in this source is settled. Check a few random fields too: turn off Doubted only.</div>}
+      {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
+        <div className="space-y-2">
+          {rec.general.length > 0 && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              {rec.general.map((g: any, i: number) => <p key={i} className="m-0"><b>{g.by}</b>: {g.text}</p>)}
             </div>
           )}
-        </section>
+          {shown.length === 0 ? <Blank title={onlyFlagged ? 'Nothing doubted on this record' : 'Nothing to show'} text={onlyFlagged ? 'Turn off Doubted only to check any field at random.' : ''} /> :
+            shown.map((f: any) => <FieldRow key={rec.record_id + f.name} rec={rec} f={f} peers={d.peers} sopRules={d.sop_required ?? []} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
+        </div>
+      )}
+      {rec && <RecordBar key={rec.record_id} sourceId={sourceId} rec={rec} todoLeft={todoLeft} onDone={load} onPick={n => { setOnlyFlagged(false); setHideDone(false); setActive(n) }} />}
+    </section>
   )
   const activeValue = rec?.fields?.find((f: any) => f.name === active)?.value
-  if (focus) return (
+  const peerNotes = d.peers.some((p: any) => p.comment) && (
+    <div className="space-y-1.5">
+      {d.peers.filter((p: any) => p.comment).map((p: any) => (
+        <div key={p.id} className="rounded-xl bg-gray-50 px-3 py-2 text-sm"><span className="font-semibold text-gray-900">{p.name}</span><span className="text-gray-400"> wrote </span><span className="text-gray-700">{p.comment}</span>
+          {p.fields?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1"><span className="text-[11px] text-gray-500">Fields it points at:</span>{p.fields.map((n: string) => <Chip key={n} tone="red">{n}</Chip>)}</span>}
+          {p.unknown?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1"><span className="text-[11px] text-gray-500">Named but not a field on this source:</span>{p.unknown.map((n: string) => <Chip key={n} tone="amber" title="Not in the record, the schema or the SOP. Check it by hand.">{n}</Chip>)}</span>}
+        </div>
+      ))}
+    </div>
+  )
+
+  if (inOverlay) return createPortal(
     <div className="fixed inset-0 z-[60] bg-gray-50 flex flex-col" role="dialog" aria-modal="true" aria-label="Side by side review">
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-gray-200 bg-white flex-wrap">
-        <b className="text-sm text-gray-900">{d.source}</b>
+      <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-white flex-wrap">
+        <b className="text-sm text-gray-900 truncate max-w-[40ch]">{d.source}</b>
         {d.sop_code && <Chip tone="indigo">{d.sop_code}</Chip>}
         <span className="text-xs text-gray-500 tabular-nums">{pctDone}% of doubted fields settled</span>
-        <span className="text-xs text-gray-400 hidden md:inline">Keys: ↑ ↓ field, c correct, w wrong, n next doubted, j k record, Esc close</span>
-        <span className="ml-auto"><Button variant="secondary" onClick={() => setFocus(false)}>Close side by side</Button></span>
+        <span className="text-xs text-gray-400 hidden xl:inline">↑ ↓ field · c correct · w wrong · m comment · n next doubted · j k record · Esc close</span>
+        <span className="ml-auto"><Button size="sm" variant="secondary" onClick={() => setFocus(false)}>Close side by side</Button></span>
       </div>
-      <div className="flex-1 min-h-0 grid gap-4 p-4 lg:grid-cols-[190px_minmax(0,1fr)_minmax(380px,46%)] overflow-y-auto lg:overflow-hidden">
+      <div className="flex-1 min-h-0 grid gap-3 p-3 lg:grid-cols-[180px_minmax(0,1fr)_minmax(380px,46%)] overflow-y-auto lg:overflow-hidden">
         <div className="lg:overflow-y-auto">{recNav}</div>
         <div className="lg:overflow-y-auto min-w-0 space-y-3 pr-1">
-          {d.peers.some((p: any) => p.comment) && (
-            <div className="space-y-1.5">{d.peers.filter((p: any) => p.comment).map((p: any) => (
-              <div key={p.id} className="rounded-xl bg-white border border-gray-100 px-3 py-2 text-sm"><b className="text-gray-900">{p.name}</b><span className="text-gray-400"> wrote </span><span className="text-gray-700">{p.comment}</span>
-                {p.fields?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1">{p.fields.map((n: string) => <Chip key={n} tone="red">{n}</Chip>)}</span>}</div>
-            ))}</div>
-          )}
+          {peerNotes}
           {fieldsSection}
         </div>
         <div className="min-h-[70vh] lg:min-h-0 lg:h-full">
@@ -291,43 +392,52 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
             pageText={site[rid]?.ok ? site[rid].text : undefined} pageBusy={siteBusy} nimbleReady={nimble === true} onFetchPage={runSite} />
         </div>
       </div>
-    </div>
-  )
+    </div>, document.body)
 
   return (
-    <div className="space-y-4">
-      <Panel title={d.source} subtitle={d.peer_done ? 'Every peer reviewer has submitted.' : 'Some peer reviewers have not submitted yet.'}
-        actions={<div className="flex items-center gap-1.5 flex-wrap [&_button]:whitespace-nowrap">{d.sop_code && <Chip tone="indigo">{d.sop_code}</Chip>}<Chip tone={d.status === 'approved' ? 'green' : 'gray'}>{d.status === 'approved' ? 'Source approved' : `${d.approved_records}/${d.total_records} records approved`}</Chip>
-          <Button variant="secondary" onClick={() => setAsk(true)} title="Send a question to the client about this source">Ask the client</Button>
-          {d.status !== 'approved' && <Button disabled={approving || !d.total_records || d.approved_records !== d.total_records} onClick={approveSource} title={d.approved_records === d.total_records ? 'Approve this source' : 'Approve every record first'}>{approving ? 'Approving…' : 'Approve source'}</Button>}{d.website && <a href={d.website} target="_blank" rel="noreferrer" className="text-xs font-semibold text-brand-600 hover:underline">Open the source site</a>}</div>}>
-        <div className="grid gap-3 grid-cols-2 sm:grid-cols-4 text-sm">
-          <Stat label="Fields doubted" value={t.flagged} sub={`of ${t.fields}`} />
-          <Stat label="Peer comments" value={t.comments} sub="on a field" />
-          <Stat label="Peer mentions" value={t.mentions} sub="in their notes" />
-          <Stat label="Checked at source" value={t.audited} sub="fields so far" />
-        </div>
-        <div className="mt-3"><div className="flex justify-between text-xs text-gray-500 mb-1"><span>Doubted fields settled</span><span className="tabular-nums">{pctDone}%</span></div>
-          <div className="h-1.5 rounded-full bg-gray-100"><div className="h-1.5 rounded-full bg-emerald-500 transition-all" style={{ width: `${pctDone}%` }} /></div></div>
-        {d.peers.some((p: any) => p.comment) && (
-          <div className="mt-4 space-y-2">
-            {d.peers.filter((p: any) => p.comment).map((p: any) => (
-              <div key={p.id} className="rounded-xl bg-gray-50 px-3.5 py-2.5 text-sm"><span className="font-semibold text-gray-900">{p.name}</span><span className="text-gray-400"> wrote </span><span className="text-gray-700">{p.comment}</span>
-                {p.fields?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1.5"><span className="text-[11px] text-gray-500">Fields it points at:</span>{p.fields.map((n: string) => <Chip key={n} tone="red">{n}</Chip>)}</span>}</div>
-            ))}
+    <div className="space-y-3">
+      <div className="rounded-2xl border border-gray-100 bg-white px-3 py-2 flex items-center gap-2 flex-wrap [&_button]:whitespace-nowrap">
+        {picker(d.source)}
+        <span className="inline-flex items-center gap-0.5"><IconButton label="Previous source" onClick={onPrevSource}>‹</IconButton><IconButton label="Next source" onClick={onNextSource}>›</IconButton></span>
+        {position && <span className="text-xs text-gray-400 tabular-nums hidden sm:inline">{position}</span>}
+        {d.sop_code && <Chip tone="indigo">{d.sop_code}</Chip>}
+        <Chip tone={d.peer_done ? 'green' : 'amber'} title={d.peer_done ? 'Every peer reviewer has submitted' : 'Some peer reviewers have not submitted yet'}>{d.peer_done ? 'Peers done' : 'Waiting for peers'}</Chip>
+        <Chip tone={d.status === 'approved' ? 'green' : 'gray'}>{d.status === 'approved' ? 'Source approved' : `${d.approved_records}/${d.total_records} approved`}</Chip>
+        <span className="hidden md:inline-flex items-center gap-2 text-xs text-gray-500" title="Doubted fields you have settled"><span className="w-24 h-1.5 rounded-full bg-gray-100 overflow-hidden"><span className="block h-1.5 rounded-full bg-emerald-500 transition-all" style={{ width: `${pctDone}%` }} /></span><span className="tabular-nums">{pctDone}% settled</span></span>
+        <span className="ml-auto flex items-center gap-1.5">
+          <Button size="sm" variant="secondary" onClick={() => setAsk(true)} title="Send a question to the client about this source">Ask the client</Button>
+          {d.status !== 'approved' && <Button size="sm" disabled={approving || !d.total_records || d.approved_records !== d.total_records} onClick={approveSource} title={d.approved_records === d.total_records ? 'Approve this source' : 'Approve every record first'}>{approving ? 'Approving…' : 'Approve source'}</Button>}
+        </span>
+      </div>
+
+      <div className="rounded-2xl border border-gray-100 bg-white">
+        <button type="button" onClick={toggleOverview} aria-expanded={overview} className="w-full flex items-center gap-x-3 gap-y-1 flex-wrap px-4 py-2 text-left text-sm">
+          <span className="font-bold text-gray-900">Overview</span>
+          <span className="text-gray-500 tabular-nums">{t.flagged} doubted of {t.fields} fields · {t.comments + t.mentions} peer pointers · {t.audited} checked</span>
+          <Chip tone={nextStep ? 'amber' : 'green'}>{nextStep ? `Next: ${nextStep.label.toLowerCase()}` : 'All steps done'}</Chip>
+          <span className="ml-auto text-xs font-semibold text-brand-600">{overview ? 'Hide' : 'Show peer notes and steps'} <span aria-hidden>{overview ? '▴' : '▾'}</span></span>
+        </button>
+        {overview && (
+          <div className="px-4 pb-3 space-y-3 border-t border-gray-50 pt-3">
+            {peerNotes}
+            <ReviewFlow steps={steps} busy={scanBusy} onScan={runScan} />
           </div>
         )}
-      </Panel>
+      </div>
 
-      <ReviewFlow d={d} pctDone={pctDone} busy={scanBusy} onScan={runScan} />
-
-      <div className="grid gap-4 xl:grid-cols-[230px_minmax(0,1fr)] items-start">
-        {recNav}
-
+      <div className={cn('grid gap-3 items-start', docked ? 'lg:grid-cols-[200px_minmax(0,1fr)_minmax(440px,42%)]' : 'lg:grid-cols-[210px_minmax(0,1fr)]')}>
+        <div className="lg:sticky lg:top-3 lg:self-start">{recNav}</div>
         {fieldsSection}
+        {docked && (
+          <div className="sticky top-3 self-start h-[calc(100vh-1.5rem)]">
+            <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} activeValue={activeValue} activeField={active}
+              pageText={site[rid]?.ok ? site[rid].text : undefined} pageBusy={siteBusy} nimbleReady={nimble === true} onFetchPage={runSite} />
+          </div>
+        )}
       </div>
 
       <Panel title="Source discussion and activity" subtitle="The same chat and history as the source page, so you do not have to leave the desk."
-        actions={<Button variant="secondary" onClick={() => setToolsOpen(v => !v)}>{toolsOpen ? 'Hide' : 'Show'}</Button>}>
+        actions={<Button size="sm" variant="secondary" onClick={() => setToolsOpen(v => !v)}>{toolsOpen ? 'Hide' : 'Show'}</Button>}>
         {toolsOpen && (
           <div className="space-y-3">
             <Tabs value={tool} onChange={setTool} items={[{ key: 'chat', label: 'Discussion' }, { key: 'activity', label: 'Activity' }]} />
@@ -340,8 +450,50 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
   )
 }
 
-/** Final sign-off on one record, and a note on the whole record, without leaving the desk. */
-function RecordActions({ sourceId, rec, onDone, onPick }: { sourceId: string; rec: any; onDone: () => void; onPick: (name: string) => void }) {
+function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: React.ReactNode }) {
+  return <button type="button" aria-label={label} title={label} onClick={onClick} className="w-7 h-7 inline-flex items-center justify-center rounded-lg border border-gray-200 bg-white text-gray-600 hover:bg-gray-50 hover:text-gray-900 text-base leading-none">{children}</button>
+}
+
+function FilterChip({ on, onClick, hint, children }: { on: boolean; onClick: () => void; hint?: string; children: React.ReactNode }) {
+  return (
+    <button type="button" aria-pressed={on} title={hint} onClick={onClick}
+      className={cn('text-xs font-semibold rounded-full px-3 py-1 border transition', on ? 'bg-brand-50 border-brand-200 text-brand-700' : 'bg-white border-gray-200 text-gray-500 hover:text-gray-800')}>
+      {on ? '✓ ' : ''}{children}
+    </button>
+  )
+}
+
+type MenuItem = { label: string; hint?: string; checked?: boolean; href?: string; disabled?: boolean; onClick?: () => void }
+function MoreMenu({ items }: { items: MenuItem[] }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const down = (e: MouseEvent) => { if (!ref.current?.contains(e.target as Node)) setOpen(false) }
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false) }
+    document.addEventListener('mousedown', down); document.addEventListener('keydown', key)
+    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key) }
+  }, [open])
+  return (
+    <div ref={ref} className="relative">
+      <Button size="sm" variant="secondary" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(v => !v)} title="More">More ▾</Button>
+      {open && (
+        <div role="menu" className="absolute right-0 top-full mt-1.5 z-40 w-72 rounded-xl border border-gray-200 bg-white shadow-xl p-1">
+          {items.map((it, i) => {
+            const body = <><span className="flex items-center gap-2 text-sm font-medium text-gray-900">{it.checked !== undefined && <span aria-hidden className="w-4 text-brand-600">{it.checked ? '✓' : ''}</span>}{it.label}</span>{it.hint && <span className="block text-[11px] text-gray-500 mt-0.5 leading-snug">{it.hint}</span>}</>
+            const cls = 'w-full text-left rounded-lg px-3 py-2 hover:bg-gray-50 disabled:opacity-50 block'
+            return it.href
+              ? <a key={i} role="menuitem" href={it.href} target="_blank" rel="noreferrer" className={cls} onClick={() => setOpen(false)}>{body}</a>
+              : <button key={i} type="button" role="menuitem" disabled={it.disabled} className={cls} onClick={() => { it.onClick?.(); setOpen(false) }}>{body}</button>
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/** Always-reachable sign-off for the record you are on: a note, send it back, or approve it. */
+function RecordBar({ sourceId, rec, todoLeft, onDone, onPick }: { sourceId: string; rec: any; todoLeft: number; onDone: () => void; onPick: (name: string) => void }) {
   const [mode, setMode] = useState<'' | 'return' | 'comment'>('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -353,55 +505,61 @@ function RecordActions({ sourceId, rec, onDone, onPick }: { sourceId: string; re
     try { await fn(); toast.success(ok); setMode(''); setNote(''); onDone() }
     catch (e) { toast.error(err(e, 'That did not save')) } finally { setBusy(false) }
   }
+  const changed: string[] = rec.changed_since_return ?? []
   return (
-    <div className="rounded-xl border border-gray-100 bg-white px-4 py-2.5 space-y-2">
-      <div className="flex items-center gap-2 flex-wrap [&_button]:whitespace-nowrap">
-        <span className="text-xs text-gray-500">This record</span><Chip tone={tone}>{text}</Chip>
-        {rec.corrections > 0 && <span className="text-xs text-gray-500">sent back {rec.corrections} time{rec.corrections === 1 ? '' : 's'}</span>}
-        <span className="ml-auto flex gap-1.5 flex-wrap">
-          <Button variant="secondary" onClick={() => setMode(mode === 'comment' ? '' : 'comment')}>Comment on the record</Button>
-          <Button variant="secondary" disabled={busy} onClick={() => setMode(mode === 'return' ? '' : 'return')}>Return for correction</Button>
-          <Button disabled={busy || status === 'approved'} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'approve', note: '' }), 'Record approved')}>{status === 'approved' ? 'Approved' : 'Approve record'}</Button>
-        </span>
-      </div>
-      {rec.changed_since_return?.length > 0 && (
-        <div className="flex items-center gap-1.5 flex-wrap text-xs text-gray-600">
-          <span>Changed by the extractor since you sent it back:</span>
-          {rec.changed_since_return.map((n: string) => <button key={n} type="button" onClick={() => onPick(n)}><Chip tone="blue">{n}</Chip></button>)}
-        </div>
-      )}
-      {rec.returned_at && !rec.changed_since_return?.length && rec.corrections > 0 && <p className="text-xs text-amber-700 m-0">Sent back, and nothing has changed on this record yet.</p>}
+    <div className="sticky bottom-3 z-20 rounded-2xl border border-gray-200 bg-white shadow-lg px-3 py-2 space-y-2" aria-label="Record sign-off">
       {mode !== '' && (
         <div className="space-y-2">
           <textarea autoFocus value={note} onChange={e => setNote(e.target.value)} rows={2} maxLength={2000}
             placeholder={mode === 'return' ? 'Tell the extractor what to fix. Your field notes go with it.' : 'A note about the whole record'}
             className="w-full text-sm rounded-lg border border-gray-200 px-3 py-2" />
-          <div className="flex gap-1.5 justify-end">
-            <Button variant="secondary" onClick={() => { setMode(''); setNote('') }}>Cancel</Button>
-            {mode === 'return'
-              ? <Button disabled={busy || !note.trim()} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'return', note: note.trim() }), 'Sent back to the extractor')}>Send back</Button>
-              : <Button disabled={busy || !note.trim()} onClick={() => run(() => qualityApi.comment({ record_id: rec.record_id, comment: note.trim() }), 'Comment saved')}>Save comment</Button>}
-          </div>
         </div>
       )}
+      <div className="flex items-center gap-2 flex-wrap [&_button]:whitespace-nowrap">
+        <Chip tone={tone}>{text}</Chip>
+        {rec.corrections > 0 && <span className="text-xs text-gray-500">sent back {rec.corrections}×</span>}
+        {todoLeft > 0 && status !== 'approved' && <span className="text-xs text-amber-700">{todoLeft} doubted field{todoLeft === 1 ? '' : 's'} not settled</span>}
+        {changed.length > 0 && (
+          <span className="flex items-center gap-1 flex-wrap text-xs text-gray-600 min-w-0"><span>Changed since you sent it back:</span>
+            {changed.slice(0, 4).map(n => <button key={n} type="button" onClick={() => onPick(n)}><Chip tone="blue">{n}</Chip></button>)}
+            {changed.length > 4 && <span className="text-gray-400">+{changed.length - 4}</span>}
+          </span>
+        )}
+        {rec.returned_at && changed.length === 0 && rec.corrections > 0 && <span className="text-xs text-amber-700">Nothing has changed since you sent it back</span>}
+        <span className="ml-auto flex gap-1.5 flex-wrap justify-end">
+          {mode !== '' && <Button size="sm" variant="ghost" onClick={() => { setMode(''); setNote('') }}>Cancel</Button>}
+          {mode === 'return'
+            ? <Button size="sm" variant="danger" disabled={busy || !note.trim()} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'return', note: note.trim() }), 'Sent back to the extractor')}>Send back</Button>
+            : mode === 'comment'
+              ? <Button size="sm" disabled={busy || !note.trim()} onClick={() => run(() => qualityApi.comment({ record_id: rec.record_id, comment: note.trim() }), 'Comment saved')}>Save comment</Button>
+              : <>
+                <Button size="sm" variant="secondary" onClick={() => setMode('comment')}>Comment</Button>
+                <Button size="sm" variant="secondary" disabled={busy} onClick={() => setMode('return')}><span className="hidden sm:inline">Return for correction</span><span className="sm:hidden">Return</span></Button>
+                <Button size="sm" variant="success" disabled={busy || status === 'approved'} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'approve', note: '' }), 'Record approved')}>{status === 'approved' ? 'Approved' : <><span className="hidden sm:inline">Approve record</span><span className="sm:hidden">Approve</span></>}</Button>
+              </>}
+        </span>
+      </div>
     </div>
   )
 }
 
-function ReviewFlow({ d, pctDone, busy, onScan }: { d: any; pctDone: number; busy: boolean; onScan: () => void }) {
+type FlowStep = { n: string; label: string; state: 'done' | 'todo' | 'na'; hint: string }
+function flowSteps(d: any, pctDone: number): FlowStep[] {
   const t = d.totals
-  const steps: { n: string; label: string; state: 'done' | 'todo' | 'na'; hint: string; action?: React.ReactNode }[] = [
+  return [
     { n: '1', label: 'Peers submitted', state: d.peer_done ? 'done' : 'todo', hint: d.peer_done ? 'All peers are done' : 'Wait for the peers before you settle fields' },
-    { n: '2', label: 'System checks', state: t.system_findings > 0 ? 'done' : 'todo', hint: t.system_findings > 0 ? `${t.system_findings} found by the checks` : 'Not run yet, or found nothing',
-      action: <button type="button" disabled={busy} onClick={onScan} className="text-[11px] font-semibold text-brand-600 hover:underline disabled:opacity-50">{busy ? 'Running…' : 'Run now'}</button> },
+    { n: '2', label: 'System checks', state: t.system_findings > 0 ? 'done' : 'todo', hint: t.system_findings > 0 ? `${t.system_findings} found by the checks` : 'Not run yet, or found nothing' },
     { n: '3', label: 'SOP', state: t.sop_rate === null ? 'na' : t.sop_rate >= 100 ? 'done' : 'todo', hint: t.sop_rate === null ? 'No SOP saved' : `${Math.round(t.sop_rate)}% of records have every required field` },
     { n: '4', label: 'Doubted fields', state: pctDone >= 100 ? 'done' : 'todo', hint: `${pctDone}% settled` },
     { n: '5', label: 'Spot check', state: t.audited >= 30 ? 'done' : 'todo', hint: `${t.audited} of 30 fields checked at the source` },
     { n: '6', label: 'Open errors', state: t.open_findings === 0 ? 'done' : 'todo', hint: t.open_findings === 0 ? 'None waiting' : `${t.open_findings} to settle in Errors logged` },
   ]
+}
+
+function ReviewFlow({ steps, busy, onScan }: { steps: FlowStep[]; busy: boolean; onScan: () => void }) {
   const next = steps.find(s => s.state === 'todo')
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white px-4 py-3">
+    <div>
       <div className="flex items-center gap-2 mb-2 flex-wrap"><h3 className="text-sm font-bold text-gray-900 m-0">Review steps</h3>
         <span className="text-xs text-gray-500">{next ? `Next: ${next.label.toLowerCase()}` : 'All steps done. Approve the source or send records back.'}</span></div>
       <ol className="m-0 p-0 list-none grid gap-2 grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
@@ -409,7 +567,7 @@ function ReviewFlow({ d, pctDone, busy, onScan }: { d: any; pctDone: number; bus
           <li key={s.n} className={cn('rounded-xl border px-3 py-2', s.state === 'done' ? 'border-emerald-200 bg-emerald-50' : s.state === 'na' ? 'border-gray-100 bg-gray-50' : s === next ? 'border-amber-300 bg-amber-50' : 'border-gray-100')}>
             <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-900"><span aria-hidden className={s.state === 'done' ? 'text-emerald-600' : 'text-gray-400'}>{s.state === 'done' ? '✓' : s.n}</span>{s.label}</div>
             <div className="text-[11px] text-gray-500 mt-0.5 leading-snug">{s.hint}</div>
-            {s.action && s.state !== 'done' && <div className="mt-1">{s.action}</div>}
+            {s.n === '2' && s.state !== 'done' && <div className="mt-1"><button type="button" disabled={busy} onClick={onScan} className="text-[11px] font-semibold text-brand-600 hover:underline disabled:opacity-50">{busy ? 'Running…' : 'Run now'}</button></div>}
           </li>
         ))}
       </ol>
@@ -516,8 +674,8 @@ function FieldRow({ rec, f, peers, sopRules, website, site, active, onActive, on
         </div>
         {!wrong && (
           <div className="flex gap-1.5 shrink-0">
-            <Button variant={verdict === 'correct' ? 'primary' : 'secondary'} disabled={busy} onClick={e => { e.stopPropagation(); mark('correct') }}>Correct</Button>
-            <Button variant={verdict === 'incorrect' ? 'primary' : 'secondary'} disabled={busy} onClick={e => { e.stopPropagation(); setWrong(true) }}>Wrong</Button>
+            <Button size="sm" variant={verdict === 'correct' ? 'primary' : 'secondary'} disabled={busy} onClick={e => { e.stopPropagation(); mark('correct') }}>Correct</Button>
+            <Button size="sm" variant={verdict === 'incorrect' ? 'primary' : 'secondary'} disabled={busy} onClick={e => { e.stopPropagation(); setWrong(true) }}>Wrong</Button>
           </div>
         )}
       </div>
