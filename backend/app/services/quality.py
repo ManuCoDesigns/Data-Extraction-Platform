@@ -267,26 +267,73 @@ def compute_summary(findings: list, audits: list, records_by_source: dict, extra
     }
 
 
-def sop_check(fields: dict, required: list[str], allowed: set | None) -> dict:
-    """Does one record follow the SOP's field list? Missing = required but empty or a placeholder like "N/A"."""
+def _nk(k) -> str:
+    return re.sub(r"[^a-z0-9]", "", str(k or "").lower())
+
+
+def _lookup(fields: dict, name: str):
+    """The record's value for an SOP field. Exact key first, then the same name ignoring case, spaces and underscores."""
+    if name in fields:
+        return name, fields[name]
+    n = _nk(name)
+    for k, v in fields.items():
+        if _nk(k) == n:
+            return k, v
+    return None, None
+
+
+def sop_check(fields: dict, required: list[str], allowed: set | None, specs: dict | None = None) -> dict:
+    """Does one record follow the SOP? missing = required but empty or a placeholder like "N/A".
+    bad = a value outside the SOP's allowed list. unmapped = SOP fields the record has no key for at all."""
     fields = fields or {}
-    missing = [f for f in required if not _present(fields.get(f)) or str(fields.get(f)).strip().lower() in PLACEHOLDERS]
-    extra = sorted(k for k in fields if allowed is not None and k not in allowed and k not in SKIP_FIELDS and _present(fields[k]))
-    return {"missing": missing, "extra": extra}
+    specs = specs or {}
+    missing, bad, unmapped, used = [], [], [], set()
+    for f in required:
+        key, val = _lookup(fields, f)
+        if key is None:
+            unmapped.append(f)
+        if key is not None:
+            used.add(key)
+        if not _present(val) or str(val).strip().lower() in PLACEHOLDERS:
+            missing.append(f)
+    for name, sp in specs.items():
+        key, val = _lookup(fields, name)
+        if key is not None:
+            used.add(key)
+        al = sp.get("allowed") or []
+        if al and key is not None and _present(val) and str(val).strip().lower() not in PLACEHOLDERS:
+            items = val if isinstance(val, list) else [val]
+            off = [str(x).strip() for x in items if isinstance(x, (str, int, float)) and str(x).strip() not in al]
+            if off:
+                bad.append({"field": name, "value": ", ".join(off), "allowed": al, "case_only": all(x.lower() in {a.lower() for a in al} for x in off)})
+    known = {_nk(k) for k in (allowed or set())} | {_nk(k) for k in specs}
+    extra = sorted(k for k in fields if allowed is not None and _nk(k) not in known and k not in SKIP_FIELDS and not str(k).startswith("_") and _present(fields[k]))
+    return {"missing": missing, "extra": extra, "bad": bad, "unmapped": unmapped}
 
 
-def sop_report(records: list[tuple[str, str, dict]], required: list[str], allowed: set | None) -> dict:
+def sop_report(records: list[tuple[str, str, dict]], required: list[str], allowed: set | None, specs: dict | None = None) -> dict:
     """records = (record_id, label, fields). Field-by-field and record-by-record view of SOP compliance."""
-    by_field = {f: {"field": f, "filled": 0, "missing": 0} for f in required}
+    specs = specs or {}
+    names = list(dict.fromkeys(list(required) + [n for n, sp in specs.items() if sp.get("allowed")]))
+    by_field = {f: {"field": f, "required": f in required, "filled": 0, "missing": 0, "bad": 0, "absent": 0, "allowed": (specs.get(f) or {}).get("allowed") or [], "section": (specs.get(f) or {}).get("section")} for f in names}
     extra_count: Counter = Counter()
     failing, ok = [], 0
     for rid, label, fields in records:
-        r = sop_check(fields, required, allowed)
-        for f in required:
-            by_field[f]["missing" if f in r["missing"] else "filled"] += 1
+        r = sop_check(fields, required, allowed, specs)
+        badf = {x["field"] for x in r["bad"]}
+        for f in names:
+            row = by_field[f]
+            if f in r["missing"]:
+                row["missing"] += 1
+                if f in r["unmapped"]:
+                    row["absent"] += 1
+            elif f in badf:
+                row["bad"] += 1
+            else:
+                row["filled"] += 1
         extra_count.update(r["extra"])
-        if r["missing"]:
-            failing.append({"record_id": rid, "record": label, "missing": r["missing"], "extra": r["extra"]})
+        if r["missing"] or r["bad"]:
+            failing.append({"record_id": rid, "record": label, "missing": r["missing"], "bad": r["bad"], "extra": r["extra"]})
         else:
             ok += 1
     n = len(records)

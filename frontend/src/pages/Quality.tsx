@@ -299,13 +299,15 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
     return (
       <div className="space-y-5">
       <SopRequirementsOverview projectId={projectId} onPick={onPick} />
-      <Panel title="Do the records follow each source's SOP?" subtitle="A record follows the SOP when every field the SOP requires is filled in. Open a source to see which fields fall short.">
+      <Panel title="Do the records follow each source's SOP?" subtitle="Checked against what the SOP text requires for the source's category: required fields filled in, and values inside the SOP's allowed lists. Open a source to see each field.">
         <ul className="m-0 p-0 list-none divide-y divide-gray-50">
           {ov.map(x => (
             <li key={x.source_id} className="py-2.5 flex items-center gap-3 flex-wrap">
               <button type="button" onClick={() => onPick(x.source_id)} className="text-sm font-semibold text-gray-900 hover:underline text-left flex-1 min-w-[160px]">{x.name}</button>
               {x.sop_code && <Chip tone="indigo">{x.sop_code}</Chip>}
-              {x.known ? <><span className="text-sm text-gray-500 tabular-nums">{x.compliant} of {x.records} records</span><Chip tone={scoreTone(x.rate)}>{pc(x.rate)}</Chip></> : <Chip tone="gray">No SOP saved</Chip>}
+              {x.known && <span className="text-xs text-gray-500">{x.required_count} required{x.category ? ` · ${x.category}` : ''}</span>}
+              {x.known && x.warnings > 0 && <Chip tone="amber">{x.warnings} to settle</Chip>}
+              {x.known ? <><span className="text-sm text-gray-500 tabular-nums">{x.compliant} of {x.records} records</span><Chip tone={scoreTone(x.rate)}>{pc(x.rate)}</Chip></> : <Chip tone="gray">No SOP from Xtrium</Chip>}
             </li>
           ))}
         </ul>
@@ -315,22 +317,29 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
   }
   if (!d) return <Skeletons rows={4} />
   if (d.error) return <Blank title="Couldn't run the SOP check" text="Check your connection and try again." />
-  if (!d.known) return <Blank title="No SOP saved for this source" text="Open the source's SOP once so a copy is saved. After that the check can run." />
+  if (!d.known) return <Blank title="No SOP from Xtrium for this source" text="The SOP is fetched from Xtrium when the source opens in the Review tab. Open it there, or use Refresh from Xtrium in the SOP rules panel." />
   const reqPanel = <Panel title="What this SOP requires" subtitle="Every field, allowed value and rule the SOP states, with the exact line. Rules under another category's heading are shown but not enforced here."><SopRulesBody sourceId={sourceId} /></Panel>
   return (
     <div className="space-y-5">
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <Tile label="Follow the SOP" value={pc(d.rate)} tone={scoreTone(d.rate)} hint={`${d.compliant} of ${d.records} records have every required field`} />
-        <Tile label="Records falling short" value={d.failing_total} tone={d.failing_total ? 'amber' : 'green'} hint="Missing at least one required field" />
-        <Tile label="Required fields" value={d.required.length} hint={d.sop_code ?? ''} />
+        <Tile label="Records falling short" value={d.failing_total} tone={d.failing_total ? 'amber' : 'green'} hint="A required field is empty, or a value is outside the allowed list" />
+        <Tile label="Required fields" value={d.required.length} hint={[d.sop_code, d.entity, d.category && `category ${d.category}`].filter(Boolean).join(' · ')} />
         <Tile label="Fields not in the SOP" value={d.extra_fields.length} tone={d.extra_fields.length ? 'amber' : 'gray'} hint="Filled in but not listed by the SOP" />
       </div>
+      {d.warnings?.length > 0 && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <div className="font-semibold mb-1">Settle these before trusting the percentage</div>
+          <ul className="m-0 pl-5 space-y-0.5">{d.warnings.map((w: string, i: number) => <li key={i}>{w}</li>)}</ul>
+        </div>
+      )}
       <div className="grid gap-5 lg:grid-cols-2">
-        <Panel title="Required fields" subtitle="How often each one is filled in, weakest first">
+        <Panel title="Fields the SOP checks" subtitle="Required fields and fields with allowed values, weakest first. Names are matched ignoring case and underscores.">
           <ul className="m-0 p-0 list-none space-y-2">
             {d.by_field.map((f: any) => (
               <li key={f.field} className="text-sm">
-                <div className="flex justify-between"><span className="text-gray-800">{f.field}</span><span className="tabular-nums text-gray-600">{f.filled} filled · {f.missing} missing</span></div>
+                <div className="flex justify-between"><span className="text-gray-800">{f.field}</span><span className="tabular-nums text-gray-600">{f.filled} ok · {f.missing} {f.absent ? `empty (${f.absent} never delivered)` : 'empty'}{f.bad ? ` · ${f.bad} not allowed` : ''}</span></div>
+                {f.allowed?.length > 0 && <div className="text-xs text-gray-500">allowed: {f.allowed.join(', ')}</div>}
                 <div className="h-1.5 rounded-full bg-gray-100 mt-1"><div className={`h-1.5 rounded-full ${f.pct >= 90 ? 'bg-emerald-500' : f.pct >= 75 ? 'bg-amber-500' : 'bg-red-500'}`} style={{ width: `${f.pct ?? 0}%` }} /></div>
               </li>
             ))}
@@ -348,8 +357,9 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
             {d.failing.map((r: any) => (
               <li key={r.record_id} className="py-2 text-sm flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-gray-900">{r.record}</span>
-                <span className="text-gray-500">missing</span>
+                {r.missing.length > 0 && <span className="text-gray-500">missing</span>}
                 {r.missing.map((m: string) => <Chip key={m} tone="red">{m}</Chip>)}
+                {(r.bad || []).map((b: any) => <span key={b.field} className="text-xs text-gray-600"><Chip tone="amber">{b.field}</Chip> {b.value} is not in: {b.allowed.join(', ')}</span>)}
               </li>
             ))}
           </ul>
