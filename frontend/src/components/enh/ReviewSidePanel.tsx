@@ -3,6 +3,7 @@ import { xtriumApi } from '@/api/client'
 import { SopViewer } from '@/components/SopViewer'
 import { Blank, Chip, Skeletons, Tabs } from '@/components/enh/kit'
 import { Button } from '@/components/ui'
+import { PageReader } from '@/components/enh/PageReader'
 
 type Tab = 'sop' | 'text' | 'web' | 'page'
 
@@ -70,8 +71,8 @@ export function ReviewSidePanel({ sourceId, website, rec, sopRequired, activeVal
         ) : <Blank title="No website to show" text="This record and source have no web address." />)}
         {tab === 'page' && (pageText ? (
           <div>
-            <p className="text-xs text-gray-500 mt-0 mb-3">The page as Nimble read it. {activeField ? <>Matches for <b>{activeField}</b> are highlighted.</> : 'Click a field to highlight its value here.'}</p>
-            <Highlighted text={pageText} needle={activeValue} />
+            <p className="text-xs text-gray-500 mt-0 mb-1">The page as Nimble read it. {activeField ? <>Matches for <b>{activeField}</b> are highlighted.</> : 'Click a field to highlight its value here.'}</p>
+            <PageReader text={pageText} needle={activeValue} field={activeField} />
           </div>
         ) : (
           <Blank title="Read the page here" text={nimbleReady ? 'Nimble fetches the source website and shows its text here, with the value of the field you are on highlighted.' : 'Add NIMBLE_API_KEY in the server settings to turn this on.'}
