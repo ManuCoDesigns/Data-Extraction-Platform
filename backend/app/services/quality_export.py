@@ -118,3 +118,53 @@ def to_xlsx(data: dict) -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def extractor_xlsx(report: dict, error_rows: list[dict], meta: dict) -> bytes:
+    """The extractor assessment: one row per extractor, one per source, and every error with what happened to it."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Read me"
+    for i, line in enumerate([
+        "Extractor accuracy and error rate.",
+        "",
+        "Every error stays in these numbers after the extractor fixes it. An error is one field on one record, counted once.",
+        "Errors per 100 fields = errors / fields filled in x 100.",
+        "First-pass accuracy = checked fields that were right the first time an admin checked them.",
+        "Final accuracy = checked fields that are right now. Checks on values the extractor changed since are waiting for a re-check and are left out.",
+        "Caught by reviewers = errors a reviewer pointed at before the admin did. Fixed = errors that are right now.",
+        "Rework rate = records that were sent back at least once / records.",
+        "Under 30 checked fields the numbers are low confidence.",
+        "",
+        "Period: %s. Generated %s." % (meta.get("period", "all time"), meta.get("generated", "")),
+    ], 1):
+        ws.cell(i, 1, line)
+    ws.column_dimensions["A"].width = 120
+    head = PatternFill("solid", fgColor="1F2937")
+
+    def sheet(title, cols, rows):
+        w = wb.create_sheet(title)
+        w.append(cols)
+        for c in w[1]:
+            c.font, c.fill = Font(bold=True, color="FFFFFF"), head
+        for r in rows:
+            w.append([_cell(v) for v in r])
+        w.freeze_panes = "A2"
+        for i, c in enumerate(cols, 1):
+            w.column_dimensions[get_column_letter(i)].width = max(12, min(48, len(c) + 4))
+        return w
+
+    ex = report["extractors"]
+    sheet("Extractors", ["Extractor", "Sources", "Records", "Fields", "Errors", "Errors per 100 fields", "Checked fields", "First-pass accuracy %", "Final accuracy %", "Waiting re-check",
+                         "Caught by reviewers", "Fixed", "Still wrong", "Records sent back", "Rework rate %", "Times sent back", "Confidence"],
+          [[x["name"], len(x["sources"]), x["records"], x["fields"], x["errors"], x["errors_per_100"], x["audited"], x["first_pass_accuracy"], x["final_accuracy"], x["waiting_recheck"],
+            x["caught"], x["fixed"], x["still_wrong"], x["returned_records"], x["rework_rate"], x["returns"], x["confidence"]] for x in ex])
+    sheet("Per source", ["Extractor", "Source", "Records", "Fields", "Errors", "Errors per 100 fields", "Checked fields", "First-pass accuracy %", "Final accuracy %", "Waiting re-check",
+                         "Caught by reviewers", "Fixed", "Still wrong", "Records sent back", "Times sent back"],
+          [[x["name"], d["source"], d["records"], d["fields"], d["errors"], d["errors_per_100"], d["audited"], d["first_pass_accuracy"], d["final_accuracy"], d["waiting_recheck"],
+            d["caught"], d["fixed"], d["still_wrong"], d["returned_records"], d["returns"]] for x in ex for d in x["sources"]])
+    sheet("Errors", ["Extractor", "Source", "Record", "Field", "Value when found", "Value now", "What the source says", "Found by", "Caught by reviewer", "Status", "Kind", "Severity", "Note"],
+          [[e["extractor"], e["source"], e["record"], e["field"], e["was"], e["now"], e["truth"], e["found_by"], e["caught_by"], e["status"], e["kind"], e["severity"], e["note"]] for e in error_rows])
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()

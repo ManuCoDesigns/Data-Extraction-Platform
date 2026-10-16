@@ -493,7 +493,7 @@ export const qualityApi = {
   sources: (projectId?: string) => api.get('/quality/sources', { params: { project_id: projectId || undefined } }).then(r => r.data),
   reviewSources: (params: { project_id?: string; scope?: string }) => api.get('/quality/review/sources', { params }).then(r => r.data),
   reviewSource: (sourceId: string) => api.get(`/quality/review/sources/${sourceId}`).then(r => r.data),
-  mark: (body: { record_id: string; field: string; verdict: string; truth_value?: string; note?: string; category?: string; severity?: string; credit?: string[]; same_value?: boolean }) => api.post('/quality/review/mark', body).then(r => r.data),
+  mark: (body: { record_id: string; field: string; verdict: string; truth_value?: string; note?: string; category?: string; severity?: string; credit?: string[]; same_value?: boolean; original_ok?: boolean }) => api.post('/quality/review/mark', body).then(r => r.data),
   comment: (body: { record_id: string; field?: string; comment: string; sop_rule?: string; kind?: string }) => api.post('/quality/review/comment', body).then(r => r.data),
   deleteComment: (params: { record_id: string; field: string; ts: string }) => api.delete('/quality/review/comment', { params }).then(r => r.data),
   signals: (sourceId: string) => api.get(`/quality/sources/${sourceId}/signals`).then(r => r.data),
@@ -501,6 +501,13 @@ export const qualityApi = {
     const r = await api.get('/quality/export', { params, responseType: 'blob' })
     const url = URL.createObjectURL(new Blob([r.data]))
     const a = document.createElement('a'); a.href = url; a.download = `peer_reviewed_sources_${new Date().toISOString().slice(0, 10)}.${params.format}`; a.click(); URL.revokeObjectURL(url)
+  },
+  feedback: (sourceId: string) => api.get(`/quality/sources/${sourceId}/feedback`).then(r => r.data),
+  extractorReport: (params: { project_id?: string; source_id?: string; user_id?: string; days?: number }) => api.get('/quality/extractor-report', { params }).then(r => r.data),
+  exportExtractorReport: async (params: { project_id?: string; source_id?: string; user_id?: string; days?: number }) => {
+    const r = await api.get('/quality/extractor-report/export', { params, responseType: 'blob' })
+    const url = URL.createObjectURL(new Blob([r.data]))
+    const a = document.createElement('a'); a.href = url; a.download = `extractor_report_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
   },
   nimbleStatus: () => api.get('/quality/nimble/status').then(r => r.data as { configured: boolean }),
   siteCheck: (body: { record_id: string; url?: string; render?: boolean; include_text?: boolean }) => api.post('/quality/review/site-check', body).then(r => r.data),

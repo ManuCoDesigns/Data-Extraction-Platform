@@ -4,6 +4,7 @@ The system can check what is structural: required fields, types, allowed values,
 duplicates. It cannot know what a source really says, so factual errors are confirmed by an admin and the
 ground-truth field checks (audits) are what the process scores are measured against.
 """
+import json
 import re
 from collections import Counter, defaultdict
 
@@ -108,7 +109,103 @@ def pct(a, b):
     return round(100 * a / b, 1) if b else None
 
 
-def compute_summary(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict) -> dict:
+def _eq(a, b) -> bool:
+    def n(v):
+        if v is None:
+            return ""
+        return v.strip() if isinstance(v, str) else json.dumps(v, sort_keys=True, default=str)
+    return n(a) == n(b)
+
+
+def extractor_report(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict, source_names: dict | None = None) -> dict:
+    """What each extractor delivered and how accurate it was, counting everything that was ever found.
+
+    An error stays in the numbers after the extractor fixes it. Each error is one record and field, counted once,
+    from a confirmed finding or from a first check an admin marked wrong. Fixing it lowers the delivered error rate
+    (final accuracy) but not the first-pass numbers, so returns and rework are visible instead of hidden.
+    """
+    source_names = source_names or {}
+    rec_by_id = {r.id: (sid, r) for sid, rs in records_by_source.items() for r in rs}
+    errs: dict = {}      # (record, field) -> info
+    for f in findings:
+        if f.status == "confirmed" and f.field and f.record_id in rec_by_id:
+            e = errs.setdefault((f.record_id, f.field), {"reviewer": False, "fixed": False, "first": False})
+            e["reviewer"] = e["reviewer"] or f.origin == "reviewer"
+            e["fixed"] = e["fixed"] or bool(getattr(f, "fixed_before_final", False))
+    aud_final: dict = {}
+    for a in audits:
+        pair = rec_by_id.get(a.record_id)
+        if not pair:
+            continue
+        sid, r = pair
+        stale = not _eq(a.extracted_value, (r.extracted_fields or {}).get(a.field))
+        first = getattr(a, "first_verdict", None) or a.verdict
+        aud_final[(a.record_id, a.field)] = (a, stale, first)
+        if first == "incorrect" or (a.verdict == "incorrect" and not stale):
+            e = errs.setdefault((a.record_id, a.field), {"reviewer": False, "fixed": False, "first": False})
+            e["first"] = e["first"] or first == "incorrect"
+        if first == "incorrect" and (a.verdict == "correct" and not stale):
+            errs[(a.record_id, a.field)]["fixed"] = True
+    out: dict = {}
+
+    def blank(sid):
+        return {"source_id": sid, "source": source_names.get(sid, ""), "records": 0, "fields": 0, "returned_records": 0, "returns": 0, "audited": 0, "first_wrong": 0,
+                "final_wrong": 0, "waiting_recheck": 0, "errors": 0, "caught": 0, "fixed": 0}
+    per: dict = {}
+    for sid, rs in records_by_source.items():
+        d = per.setdefault(sid, blank(sid))
+        for r in rs:
+            d["records"] += 1
+            d["fields"] += count_fields(r)
+            c = getattr(r, "correction_count", 0) or 0
+            d["returns"] += c
+            d["returned_records"] += 1 if c else 0
+    for (rid, fld), (a, stale, first) in aud_final.items():
+        d = per[rec_by_id[rid][0]]
+        d["audited"] += 1
+        d["first_wrong"] += 1 if first == "incorrect" else 0
+        if stale:
+            d["waiting_recheck"] += 1
+        elif a.verdict == "incorrect":
+            d["final_wrong"] += 1
+    for (rid, fld), e in errs.items():
+        d = per[rec_by_id[rid][0]]
+        d["errors"] += 1
+        d["caught"] += 1 if e["reviewer"] else 0
+        d["fixed"] += 1 if e["fixed"] else 0
+    rows = []
+    for sid, d in per.items():
+        d["errors_per_100"] = round(100 * d["errors"] / d["fields"], 1) if d["fields"] else None
+        d["first_pass_accuracy"] = pct(d["audited"] - d["first_wrong"], d["audited"])
+        d["final_accuracy"] = pct(d["audited"] - d["waiting_recheck"] - d["final_wrong"], d["audited"] - d["waiting_recheck"])
+        d["still_wrong"] = max(0, d["errors"] - d["fixed"])
+        d["extractor_id"] = extractor_of.get(sid)
+        rows.append(d)
+    by_ext: dict = {}
+    for d in rows:
+        u = d["extractor_id"]
+        if not u:
+            continue
+        x = by_ext.setdefault(u, {"user_id": u, "name": names.get(u, "Unknown"), **{k: 0 for k in ("records", "fields", "returned_records", "returns", "audited", "first_wrong", "final_wrong", "waiting_recheck", "errors", "caught", "fixed")}, "sources": []})
+        for k in ("records", "fields", "returned_records", "returns", "audited", "first_wrong", "final_wrong", "waiting_recheck", "errors", "caught", "fixed"):
+            x[k] += d[k]
+        x["sources"].append(d)
+    ext = []
+    for x in by_ext.values():
+        x["errors_per_100"] = round(100 * x["errors"] / x["fields"], 1) if x["fields"] else None
+        x["first_pass_accuracy"] = pct(x["audited"] - x["first_wrong"], x["audited"])
+        x["final_accuracy"] = pct(x["audited"] - x["waiting_recheck"] - x["final_wrong"], x["audited"] - x["waiting_recheck"])
+        x["still_wrong"] = max(0, x["errors"] - x["fixed"])
+        x["caught_rate"] = pct(x["caught"], x["errors"])
+        x["rework_rate"] = pct(x["returned_records"], x["records"])
+        x["confidence"] = "low" if x["audited"] < 30 else "ok"
+        x["sources"].sort(key=lambda z: -(z["errors_per_100"] or 0))
+        ext.append(x)
+    ext.sort(key=lambda z: -(z["errors_per_100"] or 0))
+    return {"extractors": ext}
+
+
+def compute_summary(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict, source_names: dict | None = None) -> dict:
     """Process scores from logged findings and ground-truth audits.
 
     final accuracy   = audited fields that were right / audited fields (what was actually delivered)
@@ -123,11 +220,17 @@ def compute_summary(findings: list, audits: list, records_by_source: dict, extra
     s_conf = [f for f in system if f.status == "confirmed"]
     s_dis = [f for f in system if f.status == "dismissed"]
     caught_keys = {(f.record_id, f.field) for f in r_conf}
-    a_bad = [a for a in audits if a.verdict == "incorrect"]
+    rec_fields = {r.id: (r.extracted_fields or {}) for rs in records_by_source.values() for r in rs}
+    # A check made on a value the extractor has since changed is out of date. It stops counting towards final accuracy
+    # until the admin looks again, but an error it found stays in the error counts and in first-pass accuracy.
+    stale = {a.id for a in audits if a.record_id in rec_fields and not _eq(a.extracted_value, rec_fields[a.record_id].get(a.field))}
+    live = [a for a in audits if a.id not in stale]
+    a_bad = [a for a in audits if (getattr(a, "first_verdict", None) or a.verdict) == "incorrect" or (a.verdict == "incorrect" and a.id not in stale)]
+    live_bad = [a for a in live if a.verdict == "incorrect"]
     escaped = [a for a in a_bad if (a.record_id, a.field) not in caught_keys]
     confirmed_all = [f for f in findings if f.status == "confirmed"]
 
-    final_acc = pct(len(audits) - len(a_bad), len(audits))
+    final_acc = pct(len(live) - len(live_bad), len(live))
     catch = pct(len(r_conf), len(r_conf) + len(escaped)) if (r_conf or escaped) else None
     precision = pct(len(r_conf), len(r_conf) + len(r_dis))
     parts = [(final_acc, 0.5), (catch, 0.3), (precision, 0.2)]
@@ -137,26 +240,8 @@ def compute_summary(findings: list, audits: list, records_by_source: dict, extra
     by_cat = Counter(f.category for f in confirmed_all)
     by_sev = Counter(f.severity for f in confirmed_all)
 
-    ext = defaultdict(lambda: {"fields": 0, "errors": 0, "audited": 0, "audit_wrong": 0, "sources": set()})
-    for sid, rs in records_by_source.items():
-        e = extractor_of.get(sid)
-        if not e:
-            continue
-        ext[e]["fields"] += sum(count_fields(r) for r in rs)
-        ext[e]["sources"].add(sid)
-    for f in confirmed_all:
-        e = extractor_of.get(f.source_id)
-        if e:
-            ext[e]["errors"] += 1
-    for a in audits:
-        e = extractor_of.get(a.source_id)
-        if e:
-            ext[e]["audited"] += 1
-            ext[e]["audit_wrong"] += 1 if a.verdict == "incorrect" else 0
-    extractors = sorted(({"user_id": u, "name": names.get(u, "Unknown"), "sources": len(d["sources"]), "fields": d["fields"], "errors": d["errors"],
-                          "errors_per_100": round(100 * d["errors"] / d["fields"], 1) if d["fields"] else None,
-                          "audited": d["audited"], "audit_accuracy": pct(d["audited"] - d["audit_wrong"], d["audited"])} for u, d in ext.items()),
-                        key=lambda x: -(x["errors_per_100"] or 0))
+    rep = extractor_report(findings, audits, records_by_source, extractor_of, names, source_names)
+    extractors = [{**x, "errors_per_100": x["errors_per_100"], "audit_accuracy": x["final_accuracy"], "sources": len(x["sources"]), "source_rows": x["sources"]} for x in rep["extractors"]]
     rev = defaultdict(lambda: {"raised": 0, "confirmed": 0, "dismissed": 0, "open": 0})
     for f in reviewer:
         if not f.raised_by:
@@ -169,7 +254,7 @@ def compute_summary(findings: list, audits: list, records_by_source: dict, extra
 
     return {
         "scores": {"process": score, "final_accuracy": final_acc, "review_catch_rate": catch, "reviewer_precision": precision},
-        "counts": {"fields": fields_total, "audited": len(audits), "audited_wrong": len(a_bad), "escaped": len(escaped),
+        "counts": {"fields": fields_total, "audited": len(audits), "audited_wrong": len(a_bad), "escaped": len(escaped), "waiting_recheck": len(stale), "fixed_before_final": sum(1 for f in findings if getattr(f, "fixed_before_final", False)),
                    "reviewer_findings": len(reviewer), "reviewer_confirmed": len(r_conf), "reviewer_dismissed": len(r_dis),
                    "reviewer_open": len(reviewer) - len(r_conf) - len(r_dis), "system_findings": len(system),
                    "system_confirmed": len(s_conf), "system_dismissed": len(s_dis), "open": sum(1 for f in findings if f.status == "open"),
@@ -234,7 +319,7 @@ def mentioned_fields(text: str, names: list[str]) -> list[str]:
     return out
 
 
-SIGNAL_WEIGHT = {"comment": 5, "finding": 4, "mention": 3, "sop": 3, "system": 2, "ai": 2, "web": 2, "note": 1}
+SIGNAL_WEIGHT = {"comment": 5, "finding": 4, "mention": 3, "sop": 3, "system": 2, "ai": 2, "web": 2, "note": 1, "recheck": 6}
 
 
 def _norm(t: str) -> str:

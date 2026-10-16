@@ -101,6 +101,14 @@ Keys: `s` side by side, `↑` `↓` change field, `c` correct, `w` wrong (type t
 
 **Record actions** sit above the fields: **Comment on the record** (a note about the whole record), **Return for correction** (needs a note; sends it to the extractor and resets the peer reviews) and **Approve record** (your final sign-off; peers must have submitted). The header shows how many records are approved and has **Approve source** once all are, and **Ask the client**. The same chat and activity as the source page are under the records.
 
+**After a return.** When the extractor fixes and resubmits, the desk does the comparing for you:
+
+- A field you checked earlier whose value has changed loses its old verdict and goes back on the list marked **Changed since flagged**, with the old and the new value side by side. Your old verdict is shown as "Last check".
+- A field a reviewer flagged, whose value the extractor then changed, shows the same marker. Check the new value against the source.
+- The record shows the fields the extractor changed since you sent it back, as chips you can click. If nothing changed it says so.
+- If the reviewer was right and the extractor fixed it before you looked, marking the new value **Correct** still counts the reviewer as having caught an error. If the old value was actually fine and the flag was a mistake, tick **The old value was fine** before you mark it.
+- Feedback never disappears. The extractor keeps a **Feedback on this source** list on the source page, with each item marked Not changed yet, Changed (waiting for your re-check), or Fixed and checked.
+
 ### Step 6. Spot check some fields that nobody doubted
 
 Untick **Only doubted fields** and check a spread of ordinary fields. This matters. If you only check doubted fields, errors nobody noticed never show up, and the scores look better than the data really is.
@@ -158,6 +166,21 @@ In the Review tab, **Download Excel** (or **JSON**) gives every peer-reviewed so
 Colour bands on the tiles: 90% and above green, 75 to 89 amber, below 75 red.
 
 The Scores page also breaks errors down by kind and severity, and has a table per extractor (errors per 100 fields, accuracy on checked fields) and per reviewer (logged, confirmed, dismissed, open, precision).
+
+### Extractor report
+
+Quality, Scores, **Extractor report**. It counts every error ever found, so rework does not hide a weak first pass. An error is one field on one record, counted once, whether it came from a confirmed finding or from a first check you marked wrong.
+
+| Column | Meaning |
+|---|---|
+| Errors, per 100 | Errors found, and errors / fields filled in x 100 |
+| First pass | Checked fields that were right the first time they were checked |
+| Final | Checked fields that are right now. Checks on values changed since are left out until you check again |
+| Caught by reviewers | Errors a reviewer pointed at before you did |
+| Fixed, Still wrong | What happened to those errors |
+| Sent back | Records returned at least once, out of all records |
+
+Click an extractor to see each source. **Download Excel** gives the extractor sheet, a per-source sheet and a list of every error with the value when found, the value now, what the source says and who found it. The period defaults to all time.
 
 **Read the scores with the sample in mind.** Final accuracy and catch rate are only as good as the fields you actually checked. A random spread gives an honest number. Checking only doubted fields makes accuracy look worse and catch rate look better than the truth.
 

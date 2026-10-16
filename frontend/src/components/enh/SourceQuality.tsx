@@ -4,7 +4,7 @@ import { Chip, Panel, Tile, type Tone } from '@/components/enh/kit'
 export type Signal = { kind: string; severity?: string; text?: string; by?: string }
 export const SIGNAL_LABEL: Record<string, { label: string; tone: Tone }> = {
   comment: { label: 'Peer comment', tone: 'red' }, mention: { label: 'Peer mentioned', tone: 'red' }, finding: { label: 'Error logged', tone: 'amber' },
-  sop: { label: 'SOP', tone: 'indigo' }, system: { label: 'System check', tone: 'blue' }, ai: { label: 'AI or web flag', tone: 'purple' }, note: { label: 'Admin note', tone: 'indigo' },
+  sop: { label: 'SOP', tone: 'indigo' }, system: { label: 'System check', tone: 'blue' }, ai: { label: 'AI or web flag', tone: 'purple' }, note: { label: 'Admin note', tone: 'indigo' }, recheck: { label: 'Changed since flagged', tone: 'amber' },
 }
 const pc = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${Math.round(v)}%`)
 

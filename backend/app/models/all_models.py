@@ -390,6 +390,7 @@ class SourcePeerReview(Base):
     status = Column(String(20), nullable=False, default="pending")   # pending | submitted
     comment = Column(Text, nullable=True)
     submitted_at = Column(DateTime(timezone=True), nullable=True)
+    snapshot = Column(JSON, nullable=True)   # every record as it was when this peer submitted: {record_id: fields}
     assigned_by = Column(String(36), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_utc)
 
@@ -508,6 +509,8 @@ class ExtractedRecord(Base):
     review_started_at       = Column(DateTime(timezone=True), nullable=True)
     admin_review_started_at = Column(DateTime(timezone=True), nullable=True)
     reviewer_field_comments = Column(JSON, default=dict, server_default="{}")
+    fields_at_return = Column(JSON, nullable=True)            # the record as it was the last time it was sent back
+    last_returned_at = Column(DateTime(timezone=True), nullable=True)
 
     job = relationship("ExtractionJob", back_populates="records")
     reviewer = relationship("User", foreign_keys=[reviewed_by])
@@ -772,6 +775,7 @@ class QualityFinding(Base):
     resolved_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     resolved_at = Column(DateTime(timezone=True), nullable=True)
     resolve_note = Column(Text, nullable=True)
+    fixed_before_final = Column(Boolean, default=False, server_default='false', nullable=False)   # reviewer was right, the extractor fixed it before the admin looked
     created_at = Column(DateTime(timezone=True), default=now_utc, index=True)
 
 
@@ -790,3 +794,8 @@ class FieldAudit(Base):
     note = Column(Text, nullable=True)
     audited_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     audited_at = Column(DateTime(timezone=True), default=now_utc, index=True)
+    # The first verdict is never overwritten, so an error the extractor fixed after a return still counts against first-pass accuracy.
+    first_verdict = Column(String(10), nullable=True)
+    first_value = Column(JSON, nullable=True)
+    first_at = Column(DateTime(timezone=True), nullable=True)
+    times_checked = Column(Integer, default=1, server_default='1', nullable=False)

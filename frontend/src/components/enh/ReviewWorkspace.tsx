@@ -12,6 +12,7 @@ import { AskClientModal } from '@/components/enh/AskClient'
 // so a check against the real source is one click per field instead of a hunt through JSON.
 
 const KIND: Record<string, { label: string; tone: Tone; rank: number }> = {
+  recheck: { label: 'Changed since flagged', tone: 'amber', rank: -1 },
   comment: { label: 'Peer comment', tone: 'red', rank: 0 },
   mention: { label: 'Peer mentioned', tone: 'red', rank: 1 },
   finding: { label: 'Error logged', tone: 'amber', rank: 2 },
@@ -249,7 +250,7 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
             <label className="text-sm text-gray-600 inline-flex items-center gap-1.5"><input type="checkbox" checked={hideDone} onChange={e => setHideDone(e.target.checked)} /> Hide checked</label>
             <span className="ml-auto flex gap-1.5 flex-wrap [&_button]:whitespace-nowrap"><Button variant="secondary" onClick={() => setFocus(true)} title="Open the record with the SOP, source text and website beside it (press s)">Side by side</Button><Button variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading the site…' : 'Check on the site'}</Button><Button variant="secondary" onClick={jumpToWork}>Next doubted field</Button><Button variant="secondary" onClick={() => move(-1)}>Previous</Button><Button variant="secondary" onClick={() => move(1)}>Next record</Button><Button variant="secondary" onClick={onNextSource}>Next source</Button></span>
           </div>
-          {rec && <RecordActions key={rec.record_id} sourceId={sourceId} rec={rec} onDone={load} />}
+          {rec && <RecordActions key={rec.record_id} sourceId={sourceId} rec={rec} onDone={load} onPick={n => { setOnlyFlagged(false); setHideDone(false); setActive(n) }} />}
           {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-3">Every doubted field in this source is settled. Check a few random fields too by unticking \"Only doubted fields\".</div>}
           {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
             <div className="space-y-2.5">
@@ -340,7 +341,7 @@ function SourceDesk({ sourceId, onNextSource }: { sourceId: string; onNextSource
 }
 
 /** Final sign-off on one record, and a note on the whole record, without leaving the desk. */
-function RecordActions({ sourceId, rec, onDone }: { sourceId: string; rec: any; onDone: () => void }) {
+function RecordActions({ sourceId, rec, onDone, onPick }: { sourceId: string; rec: any; onDone: () => void; onPick: (name: string) => void }) {
   const [mode, setMode] = useState<'' | 'return' | 'comment'>('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
@@ -363,6 +364,13 @@ function RecordActions({ sourceId, rec, onDone }: { sourceId: string; rec: any; 
           <Button disabled={busy || status === 'approved'} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'approve', note: '' }), 'Record approved')}>{status === 'approved' ? 'Approved' : 'Approve record'}</Button>
         </span>
       </div>
+      {rec.changed_since_return?.length > 0 && (
+        <div className="flex items-center gap-1.5 flex-wrap text-xs text-gray-600">
+          <span>Changed by the extractor since you sent it back:</span>
+          {rec.changed_since_return.map((n: string) => <button key={n} type="button" onClick={() => onPick(n)}><Chip tone="blue">{n}</Chip></button>)}
+        </div>
+      )}
+      {rec.returned_at && !rec.changed_since_return?.length && rec.corrections > 0 && <p className="text-xs text-amber-700 m-0">Sent back, and nothing has changed on this record yet.</p>}
       {mode !== '' && (
         <div className="space-y-2">
           <textarea autoFocus value={note} onChange={e => setNote(e.target.value)} rows={2} maxLength={2000}
@@ -420,6 +428,7 @@ function FieldRow({ rec, f, peers, sopRules, website, site, active, onActive, on
   const [category, setCategory] = useState('wrong_value')
   const [credit, setCredit] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
+  const [originalOk, setOriginalOk] = useState(false)
   const [cmt, setCmt] = useState(false)
   const [ctext, setCtext] = useState('')
   const [crule, setCrule] = useState('')
@@ -449,7 +458,8 @@ function FieldRow({ rec, f, peers, sopRules, website, site, active, onActive, on
     const withSame = same && f.same_count > 0
     onLocal(rec.record_id, f.name, v, t); setWrong(false); setTruth('')
     try {
-      const r = await qualityApi.mark({ record_id: rec.record_id, field: f.name, verdict: v, truth_value: t, category, credit: v === 'incorrect' ? credit : [], same_value: withSame })
+      const r = await qualityApi.mark({ record_id: rec.record_id, field: f.name, verdict: v, truth_value: t, category, credit: v === 'incorrect' ? credit : [], same_value: withSame, original_ok: v === 'correct' && originalOk })
+      if (r.fixed_credit) toast.success('Counted as a catch. The reviewer was right and the extractor fixed it.')
       if (withSame) { toast.success(`Also marked ${r.also_marked} other record${r.also_marked === 1 ? '' : 's'} with the same value`); onReload() }
     } catch (e) { toast.error(err(e, "Couldn't save that. Showing the saved state again.")); onReload() }
   }
@@ -463,6 +473,7 @@ function FieldRow({ rec, f, peers, sopRules, website, site, active, onActive, on
     try { await qualityApi.deleteComment({ record_id: rec.record_id, field: f.name, ts }); onReload() } catch (e) { toast.error(err(e, "Couldn't remove it")) }
   }
   const notes = f.signals.filter((s: any) => s.kind === 'note')
+  const rechecks = f.signals.filter((s: any) => s.kind === 'recheck')
   const setSameSaved = (v: boolean) => { setSame(v); try { localStorage.setItem('dx.reviewSame', v ? '1' : '0') } catch { /* ignore */ } }
   const host = (() => { try { return website ? new URL(website).hostname.replace(/^www\./, '') : '' } catch { return '' } })()
   const findUrl = host && typeof f.value === 'string' && f.value.trim() && f.value.length <= 90 && !isUrl(f.value)
@@ -479,7 +490,15 @@ function FieldRow({ rec, f, peers, sopRules, website, site, active, onActive, on
           <div className={cn('text-sm mt-1 break-words whitespace-pre-wrap', empty ? 'text-gray-400 italic' : 'text-gray-900 font-medium')}>
             {empty ? 'Empty' : isUrl(f.value) ? <a href={f.value} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline break-all">{f.value}</a> : show(f.value)}
           </div>
-          {sigs.filter((s: any) => s.text && s.kind !== 'mention' && s.kind !== 'note').slice(0, 3).map((s: any, i: number) => <p key={i} className="text-xs text-gray-500 mt-1 mb-0">{s.by ? `${s.by}: ` : ''}{s.text}</p>)}
+          {sigs.filter((s: any) => s.text && s.kind !== 'mention' && s.kind !== 'note' && s.kind !== 'recheck').slice(0, 3).map((s: any, i: number) => <p key={i} className="text-xs text-gray-500 mt-1 mb-0">{s.by ? `${s.by}: ` : ''}{s.text}</p>)}
+          {rechecks.map((s: any, i: number) => (
+            <div key={'r' + i} className="text-xs bg-amber-50 text-amber-900 rounded-lg px-2.5 py-1.5 mt-1.5">
+              <p className="m-0"><b>Look again.</b> {s.text}</p>
+              <p className="m-0 mt-0.5">Then: <b>{show(s.was) || 'empty'}</b>. Now: <b>{show(s.now) || 'empty'}</b>.</p>
+              {s.by_id && !verdict && <label className="inline-flex items-center gap-1.5 mt-1" onClick={e => e.stopPropagation()}><input type="checkbox" checked={originalOk} onChange={e => setOriginalOk(e.target.checked)} />The old value was fine, so the flag was a mistake</label>}
+            </div>
+          ))}
+          {f.prior && !verdict && <p className="text-xs text-gray-500 mt-1 mb-0">Last check: marked <b>{f.prior.verdict === 'incorrect' ? 'wrong' : 'correct'}</b> when it said <b>{show(f.prior.value) || 'empty'}</b>.</p>}
           {notes.map((s: any, i: number) => (
             <p key={'n' + i} className="text-xs text-indigo-800 bg-indigo-50 rounded-lg px-2.5 py-1.5 mt-1.5 mb-0 break-words">
               <b>{s.by}</b>{s.sop_rule ? <span> on <b>{s.sop_rule}</b></span> : null}: {s.text}

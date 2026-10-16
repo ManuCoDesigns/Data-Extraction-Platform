@@ -13,6 +13,7 @@ import { SourceActivity } from '@/components/enh/SourceActivity'
 import { SourceChat } from '@/components/enh/SourceChat'
 import { FlagErrorModal } from '@/components/enh/FlagErrorModal'
 import { SourceQuality } from '@/components/enh/SourceQuality'
+import { FeedbackPanel } from '@/components/enh/FeedbackPanel'
 import { SourceRequiredCard } from '@/components/enh/RequiredFields'
 import { LinkChip } from '@/pages/DataHealth'
 import {
@@ -1101,6 +1102,8 @@ function SourceDetailInner() {
       </Card>
 
       <PeerReviewPanel sourceId={source.id} onChanged={load} />
+
+      <FeedbackPanel sourceId={source.id} refreshKey={source.updated_at} onOpenRecord={rid => { const i = records.findIndex((x: any) => x.id === rid); if (i >= 0) setActiveRecordIndex(i) }} />
 
       <SourceQuality data={qsig} isLead={isLeadUser} sourceId={source.id} projectId={source.project_id} onOpenRecord={rid => { const i = records.findIndex((x: any) => x.id === rid); if (i >= 0) setActiveRecordIndex(i) }} />
 

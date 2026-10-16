@@ -1539,6 +1539,7 @@ def fix_record(
     if record.review_status == ReviewStatus.REJECTED and is_valid:
         record.review_status = ReviewStatus.PENDING
 
+    source.updated_at = datetime.now(timezone.utc)
     db.flush()
     _recompute_counts(source, db)
     if source.invalid_records == 0 and source.status == SourceStatus.NEEDS_FIXES:
@@ -1587,7 +1588,7 @@ def review_source_record(
         record.revision_count = (record.revision_count or 0) + 1
         record.admin_review_started_at = now
         if payload.note:
-            fc = record.reviewer_field_comments or {}
+            fc = {k: list(v or []) for k, v in (record.reviewer_field_comments or {}).items()}
             fc.setdefault("_general", []).append({
                 "comment": payload.note, "user": current_user.email,
                 "role": "reviewer", "ts": now.isoformat(),
@@ -1601,8 +1602,9 @@ def review_source_record(
     else:
         record.review_status = ReviewStatus.REJECTED
         record.correction_count = (record.correction_count or 0) + 1
+        _remember_return(record, now)
         if payload.note:
-            fc = record.reviewer_field_comments or {}
+            fc = {k: list(v or []) for k, v in (record.reviewer_field_comments or {}).items()}
             fc.setdefault("_general", []).append({
                 "comment": payload.note, "user": current_user.email,
                 "role": "reviewer", "type": "rejection", "ts": now.isoformat(),
@@ -1671,11 +1673,11 @@ def admin_review_record(
         record.admin_reviewed_at = now
         record.admin_review_note = note
         if field_comments:
-            fc = record.reviewer_field_comments or {}
+            fc = {k: list(v or []) for k, v in (record.reviewer_field_comments or {}).items()}
             for field, comment in field_comments.items():
                 fc.setdefault(field, []).append({
                     "comment": comment, "user": current_user.email,
-                    "role": "admin", "ts": now.isoformat(),
+                    "role": "admin", "ts": now.isoformat(), "value_at": _value_at(record, field),
                 })
             record.reviewer_field_comments = fc
         db.add(AuditLog(
@@ -1689,14 +1691,15 @@ def admin_review_record(
         notify(db, source.assigned_extractor_id, f"Returned for correction: '{source.name}'",
                note or "An admin returned a record for correction.", src_link(source), "sent_back", ACTION)
         record.correction_count = (record.correction_count or 0) + 1
+        _remember_return(record, now)
         record.admin_review_note = note
         record.extraction_started_at = record.extraction_started_at or now
         if field_comments:
-            fc = record.reviewer_field_comments or {}
+            fc = {k: list(v or []) for k, v in (record.reviewer_field_comments or {}).items()}
             for field, comment in field_comments.items():
                 fc.setdefault(field, []).append({
                     "comment": comment, "user": current_user.email,
-                    "role": "admin", "ts": now.isoformat(), "type": "correction",
+                    "role": "admin", "ts": now.isoformat(), "type": "correction", "value_at": _value_at(record, field),
                 })
             record.reviewer_field_comments = fc
         db.add(AuditLog(
@@ -1833,6 +1836,17 @@ class PeerReviewSubmit(BaseModel):
     comment: str
 
 
+def _remember_return(record: ExtractedRecord, now) -> None:
+    """Keep the record exactly as it was when it was sent back, so the next review can see what changed."""
+    record.fields_at_return = dict(record.extracted_fields or {})
+    record.last_returned_at = now
+
+
+def _value_at(record: ExtractedRecord, field: str):
+    v = (record.extracted_fields or {}).get(field)
+    return v if isinstance(v, (str, int, float, bool, type(None), list, dict)) else str(v)
+
+
 def _reset_peer_reviews(source: Source):
     """Work was sent back: peers who had finished must look again (their old comment stays visible)."""
     for r in source.peer_reviews:
@@ -1958,6 +1972,12 @@ def submit_peer_review(
     row.status = "submitted"
     row.comment = comment
     row.submitted_at = now
+    # What the peer was looking at. If the extractor changes a field afterwards, the peer is still credited for catching it.
+    snap = {}
+    for rid, ef in (db.query(ExtractedRecord.id, ExtractedRecord.extracted_fields).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+                    .filter(ExtractionJob.source_id == source_id).all()):
+        snap[rid] = {k: (v if isinstance(v, (str, int, float, bool, type(None), list, dict)) else str(v)) for k, v in (ef or {}).items() if not str(k).startswith("_")}
+    row.snapshot = snap
     if source.status == SourceStatus.READY_FOR_REVIEW:
         source.status = SourceStatus.IN_REVIEW
         source.review_started_at = source.review_started_at or now

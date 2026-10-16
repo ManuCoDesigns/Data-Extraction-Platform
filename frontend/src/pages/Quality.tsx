@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { qualityApi } from '@/api/client'
 import { Blank, Chip, PAGE, PageHeader, Panel, SelectBox, Skeletons, Tabs, Tile, shortAgo, type Tone } from '@/components/enh/kit'
@@ -93,15 +93,8 @@ function Scores({ sourceId, projectId, days }: { sourceId: string; projectId: st
             </ul>
           )}
         </Panel>
-        <Panel title="Extractors" subtitle="Errors per 100 fields, and accuracy on fields checked at the source">
-          {d.extractors.length === 0 ? <Blank title="No data yet" /> : (
-            <table className="w-full text-sm"><thead><tr className="text-left text-xs text-gray-500"><th className="py-1 font-semibold">Name</th><th className="font-semibold">Errors/100</th><th className="font-semibold">Checked</th><th className="font-semibold">Accuracy</th></tr></thead>
-              <tbody>{d.extractors.map((e: any) => (
-                <tr key={e.user_id} className="border-t border-gray-50"><td className="py-1.5 text-gray-900">{e.name}</td><td className="tabular-nums">{e.errors_per_100 ?? '–'}</td><td className="tabular-nums">{e.audited}</td><td><Chip tone={scoreTone(e.audit_accuracy)}>{pc(e.audit_accuracy)}</Chip></td></tr>
-              ))}</tbody></table>
-          )}
-        </Panel>
       </div>
+      <ExtractorReport sourceId={sourceId} projectId={projectId} />
       <Panel title="Reviewers" subtitle="How many of each reviewer's logged errors turned out to be real">
         {d.reviewers.length === 0 ? <Blank title="No errors logged yet" text="Reviewers flag errors from a record in the source page." /> : (
           <table className="w-full text-sm"><thead><tr className="text-left text-xs text-gray-500"><th className="py-1 font-semibold">Name</th><th className="font-semibold">Logged</th><th className="font-semibold">Confirmed</th><th className="font-semibold">Dismissed</th><th className="font-semibold">Open</th><th className="font-semibold">Precision</th></tr></thead>
@@ -111,6 +104,53 @@ function Scores({ sourceId, projectId, days }: { sourceId: string; projectId: st
         )}
       </Panel>
     </div>
+  )
+}
+
+function ExtractorReport({ sourceId, projectId }: { sourceId: string; projectId: string }) {
+  const [d, setD] = useState<any>(null)
+  const [days, setDays] = useState('0')
+  const [open, setOpen] = useState<string>('')
+  const [busy, setBusy] = useState(false)
+  const filt = { source_id: sourceId || undefined, project_id: projectId || undefined, days: Number(days) || undefined }
+  useEffect(() => { setD(null); qualityApi.extractorReport(filt).then(setD).catch(() => setD({ error: true })) }, [sourceId, projectId, days])  // eslint-disable-line react-hooks/exhaustive-deps
+  const download = async () => { setBusy(true); try { await qualityApi.exportExtractorReport(filt) } catch (e) { toast.error(err(e, 'Nothing to download yet')) } finally { setBusy(false) } }
+  const th = 'font-semibold py-1 pr-3 whitespace-nowrap'
+  return (
+    <Panel title="Extractor report" subtitle="Every error ever found stays counted, even after the extractor fixes it. First pass is how they did before any rework."
+      actions={<div className="flex items-center gap-2 flex-wrap">
+        <SelectBox label="Period" value={days} onChange={setDays}><option value="0">All time</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option></SelectBox>
+        <Button variant="secondary" disabled={busy || !d?.extractors?.length} onClick={download}>{busy ? 'Preparing…' : 'Download Excel'}</Button>
+      </div>}>
+      {!d ? <Skeletons rows={3} /> : d.error ? <Blank title="Couldn't load the report" /> : d.extractors.length === 0 ? <Blank title="No extractor data yet" text="Extractors appear here once they have a source with records." /> : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[860px]">
+            <thead><tr className="text-left text-xs text-gray-500"><th className={th}>Extractor</th><th className={th}>Fields</th><th className={th}>Errors</th><th className={th}>Per 100</th><th className={th}>Checked</th><th className={th}>First pass</th><th className={th}>Final</th><th className={th}>Caught by reviewers</th><th className={th}>Fixed</th><th className={th}>Still wrong</th><th className={th}>Sent back</th></tr></thead>
+            <tbody>
+              {d.extractors.map((e: any) => (
+                <Fragment key={e.user_id}>
+                  <tr className="border-t border-gray-50 cursor-pointer hover:bg-gray-50" onClick={() => setOpen(open === e.user_id ? '' : e.user_id)}>
+                    <td className="py-1.5 pr-3 text-gray-900 font-medium">{open === e.user_id ? '▾' : '▸'} {e.name}{e.confidence === 'low' && <span className="ml-1.5 text-[11px] text-amber-700" title="Fewer than 30 fields checked">low confidence</span>}</td>
+                    <td className="tabular-nums pr-3">{e.fields}</td><td className="tabular-nums pr-3">{e.errors}</td><td className="tabular-nums pr-3">{e.errors_per_100 ?? '–'}</td><td className="tabular-nums pr-3">{e.audited}</td>
+                    <td className="pr-3"><Chip tone={scoreTone(e.first_pass_accuracy)}>{pc(e.first_pass_accuracy)}</Chip></td><td className="pr-3"><Chip tone={scoreTone(e.final_accuracy)}>{pc(e.final_accuracy)}</Chip></td>
+                    <td className="tabular-nums pr-3">{e.caught}</td><td className="tabular-nums pr-3">{e.fixed}</td><td className="tabular-nums pr-3">{e.still_wrong ? <span className="text-red-600 font-semibold">{e.still_wrong}</span> : 0}</td>
+                    <td className="tabular-nums pr-3">{e.returned_records}<span className="text-gray-400"> of {e.records}</span></td>
+                  </tr>
+                  {open === e.user_id && e.sources.map((x: any) => (
+                    <tr key={e.user_id + x.source_id} className="bg-gray-50 text-gray-700">
+                      <td className="py-1 pl-6 pr-3 truncate max-w-[220px]">{x.source}</td><td className="tabular-nums pr-3">{x.fields}</td><td className="tabular-nums pr-3">{x.errors}</td><td className="tabular-nums pr-3">{x.errors_per_100 ?? '–'}</td><td className="tabular-nums pr-3">{x.audited}</td>
+                      <td className="pr-3">{pc(x.first_pass_accuracy)}</td><td className="pr-3">{pc(x.final_accuracy)}{x.waiting_recheck > 0 && <span className="text-[11px] text-blue-700"> ({x.waiting_recheck} to re-check)</span>}</td>
+                      <td className="tabular-nums pr-3">{x.caught}</td><td className="tabular-nums pr-3">{x.fixed}</td><td className="tabular-nums pr-3">{x.still_wrong}</td><td className="tabular-nums pr-3">{x.returned_records}<span className="text-gray-400"> of {x.records}</span></td>
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+          <p className="text-xs text-gray-500 mt-3 mb-0">Click a name to see their sources. First pass counts fields as wrong if they were wrong when first checked, even if fixed later. Final counts what is right now. Fields the extractor changed after a check are left out of Final until you check them again.</p>
+        </div>
+      )}
+    </Panel>
   )
 }
 

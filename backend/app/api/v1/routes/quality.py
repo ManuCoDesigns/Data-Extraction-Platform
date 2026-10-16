@@ -37,6 +37,50 @@ def _source(db: Session, user: User, source_id: str) -> Source:
     return s
 
 
+_MISSING = object()
+
+
+def _same(a, b) -> bool:
+    """Do two field values say the same thing? Spaces at the ends and empty versus missing do not count as a change."""
+    def n(v):
+        if v is None:
+            return ""
+        if isinstance(v, str):
+            return v.strip()
+        import json as _j
+        return _j.dumps(v, sort_keys=True, default=str)
+    return n(a) == n(b)
+
+
+def _earlier_value(rec: ExtractedRecord, s: Source, uid: str | None, field: str):
+    """What this person saw for the field: the record when they submitted their review, otherwise when it was last sent back."""
+    if uid:
+        row = next((p for p in s.peer_reviews if p.user_id == uid and p.snapshot), None)
+        snap = (row.snapshot or {}).get(rec.id) if row else None
+        if isinstance(snap, dict) and field in snap:
+            return snap[field]
+    back = rec.fields_at_return
+    if isinstance(back, dict) and field in back:
+        return back[field]
+    return _MISSING
+
+
+def _short(v, n: int = 60) -> str:
+    t = "empty" if v in (None, "") else (v if isinstance(v, str) else str(v))
+    t = t.strip().replace("\n", " ")
+    return '"%s"' % (t if len(t) <= n else t[:n] + "…") if t != "empty" else "empty"
+
+
+def _changed_since(rec: ExtractedRecord) -> list[str]:
+    """Fields the extractor changed since the record was last sent back."""
+    back = rec.fields_at_return
+    if not isinstance(back, dict):
+        return []
+    now = rec.extracted_fields or {}
+    keys = {k for k in set(back) | set(now) if not str(k).startswith("_")}
+    return sorted(k for k in keys if not _same(back.get(k), now.get(k)))
+
+
 def _record_source_id(db: Session, rec: ExtractedRecord) -> str:
     job = db.query(ExtractionJob).filter(ExtractionJob.id == rec.job_id).first()
     if not job or not job.source_id:
@@ -288,8 +332,13 @@ def save_audit(body: AuditBody, db: Session = Depends(get_db), user: User = Depe
         raise HTTPException(status_code=422, detail="Add what the source really says, or a short note.")
     a = db.query(FieldAudit).filter(FieldAudit.record_id == rec.id, FieldAudit.field == body.field).first()
     if not a:
-        a = FieldAudit(source_id=s.id, record_id=rec.id, field=body.field, verdict=body.verdict)
+        _v = rec.extracted_fields.get(body.field)
+        a = FieldAudit(source_id=s.id, record_id=rec.id, field=body.field, verdict=body.verdict, first_verdict=body.verdict, first_value=_v, first_at=enh.now_utc(), times_checked=1)
         db.add(a)
+    else:
+        if not a.first_verdict:
+            a.first_verdict, a.first_value, a.first_at = a.verdict, a.extracted_value, a.audited_at
+        a.times_checked = (a.times_checked or 1) + 1
     a.verdict, a.truth_value, a.note = body.verdict, truth, (body.note or "").strip() or None
     a.extracted_value, a.audited_by, a.audited_at = rec.extracted_fields.get(body.field), user.id, enh.now_utc()
     db.commit()
@@ -346,10 +395,160 @@ def quality_summary(project_id: str | None = None, source_id: str | None = None,
         recs.setdefault(sid, []).append(r)
     ext_of = {s.id: s.assigned_extractor_id for s in srcs}
     uids = {f.raised_by for f in findings} | set(v for v in ext_of.values() if v)
-    out = q.compute_summary(findings, audits, recs, ext_of, _names(db, uids))
+    out = q.compute_summary(findings, audits, recs, ext_of, _names(db, uids), {s.id: s.name for s in srcs})
     out["days"] = days
     out["sources"] = len(ids)
     return out
+
+
+def _extractor_data(db: Session, user: User, project_id, source_id, user_id, days: int):
+    srcs = _visible_sources(db, user, project_id).all()
+    if source_id:
+        srcs = [x for x in srcs if x.id == source_id]
+    if user_id:
+        srcs = [x for x in srcs if x.assigned_extractor_id == user_id]
+    ids = [x.id for x in srcs]
+    if not ids:
+        return {"extractors": []}, [], srcs, {}
+    findings = db.query(QualityFinding).filter(QualityFinding.source_id.in_(ids)).all()
+    audits = db.query(FieldAudit).filter(FieldAudit.source_id.in_(ids)).all()
+    if days:
+        since = enh.now_utc() - timedelta(days=days)
+        findings = [f for f in findings if enh_aware(f.created_at) >= since]
+        audits = [a for a in audits if enh_aware(a.audited_at) >= since]
+    recs: dict = {}
+    for r, sid in (db.query(ExtractedRecord, ExtractionJob.source_id).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id).filter(ExtractionJob.source_id.in_(ids)).all()):
+        recs.setdefault(sid, []).append(r)
+    ext_of = {x.id: x.assigned_extractor_id for x in srcs}
+    names = _names(db, {f.raised_by for f in findings if f.raised_by} | {v for v in ext_of.values() if v})
+    report = q.extractor_report(findings, audits, recs, ext_of, names, {x.id: x.name for x in srcs})
+    return report, (findings, audits, recs, ext_of, names), srcs, {x.id: x for x in srcs}
+
+
+@router.get("/extractor-report")
+def extractor_report(project_id: str | None = None, source_id: str | None = None, user_id: str | None = None, days: int = Query(0, ge=0, le=3650),
+                     db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Accuracy and error rate per extractor, counting everything ever found. Errors the extractor fixed after a return stay in."""
+    _need_lead(user)
+    report, _, _, _ = _extractor_data(db, user, project_id, source_id, user_id, days)
+    return {**report, "days": days}
+
+
+@router.get("/extractor-report/export")
+def extractor_report_export(project_id: str | None = None, source_id: str | None = None, user_id: str | None = None, days: int = Query(0, ge=0, le=3650), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from fastapi.responses import Response
+    from app.services import quality_export as qx
+    _need_lead(user)
+    report, pack, srcs, by_id = _extractor_data(db, user, project_id, source_id, user_id, days)
+    if not report["extractors"]:
+        raise HTTPException(status_code=404, detail="Nothing to report yet.")
+    findings, audits, recs, ext_of, names = pack
+    labels = {r.id: _label(r, i) for rs in recs.values() for i, r in enumerate(rs)}
+    rec_by = {r.id: r for rs in recs.values() for r in rs}
+    uname = _names(db, {x for x in ext_of.values() if x})
+    rows: dict = {}
+    for f in findings:
+        if f.status == "confirmed" and f.field and f.record_id in rec_by:
+            r = rows.setdefault((f.record_id, f.field), {"extractor": uname.get(ext_of.get(f.source_id), ""), "source": by_id[f.source_id].name, "record": labels.get(f.record_id, ""), "field": f.field,
+                                                         "was": f.extracted_value, "now": (rec_by[f.record_id].extracted_fields or {}).get(f.field), "truth": f.truth_value, "found_by": "", "caught_by": "",
+                                                         "status": "Fixed before final review" if f.fixed_before_final else "Confirmed", "kind": q.CATEGORIES.get(f.category, f.category), "severity": f.severity, "note": f.note})
+            r["found_by"] = (r["found_by"] + ", " if r["found_by"] else "") + ("System checks" if f.origin == "system" else (names.get(f.raised_by) or "Reviewer"))
+            if f.origin == "reviewer":
+                r["caught_by"] = (r["caught_by"] + ", " if r["caught_by"] else "") + (names.get(f.raised_by) or "Reviewer")
+    for a in audits:
+        r0 = rec_by.get(a.record_id)
+        if not r0:
+            continue
+        first = a.first_verdict or a.verdict
+        now = (r0.extracted_fields or {}).get(a.field)
+        stale = not _same(a.extracted_value, now)
+        if first == "incorrect" or (a.verdict == "incorrect" and not stale):
+            r = rows.setdefault((a.record_id, a.field), {"extractor": uname.get(ext_of.get(a.source_id), ""), "source": by_id[a.source_id].name, "record": labels.get(a.record_id, ""), "field": a.field,
+                                                         "was": a.first_value if a.first_verdict else a.extracted_value, "now": now, "truth": a.truth_value, "found_by": "Admin check", "caught_by": "",
+                                                         "status": "", "kind": "", "severity": "", "note": a.note})
+            if "Admin check" not in r["found_by"]:
+                r["found_by"] = (r["found_by"] + ", " if r["found_by"] else "") + "Admin check"
+            r["truth"] = r["truth"] or a.truth_value
+            r["status"] = "Waiting for a re-check" if stale else ("Still wrong" if a.verdict == "incorrect" else "Fixed after it was found")
+    rows_out = sorted(rows.values(), key=lambda x: (x["extractor"], x["source"], x["record"], x["field"]))
+    stamp = enh.now_utc().strftime("%Y%m%d")
+    body = qx.extractor_xlsx(report, rows_out, {"period": "all time" if not days else f"last {days} days", "generated": stamp})
+    return Response(content=body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="extractor_report_{stamp}.xlsx"'})
+
+
+@router.get("/sources/{source_id}/feedback")
+def source_feedback(source_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Everything reviewers and admins said about this source, kept for good. Each item says whether the field has been
+    changed since, and whether an admin has checked it again. Extractors use it to work through the feedback, admins to recheck."""
+    s = _source(db, user, source_id)
+    lead = _lead(user)
+    is_ext = user.id == s.assigned_extractor_id
+    if not (lead or is_ext or user.id in _owner_ids(s)):
+        raise HTTPException(status_code=403, detail="You are not on this source.")
+    recs = _records(db, s.id)
+    labels = {r.id: _label(r, i) for i, r in enumerate(recs)}
+    findings = db.query(QualityFinding).filter(QualityFinding.source_id == s.id, QualityFinding.origin == "reviewer").all()
+    audits = {(a.record_id, a.field): a for a in db.query(FieldAudit).filter(FieldAudit.source_id == s.id).all()}
+    emails = {e.get("user") for r in recs for lst in (r.reviewer_field_comments or {}).values() for e in (lst or []) if isinstance(e, dict)}
+    ulookup = _email_ids(db, emails)
+    names = _names(db, {f.raised_by for f in findings if f.raised_by})
+    out, counts = [], {"waiting": 0, "changed": 0, "checked": 0}
+
+    def state(field, was, now, rec, kind):
+        a = audits.get((rec.id, field)) if field and field != "_general" else None
+        live = bool(a and _same(a.extracted_value, now))
+        if live and a.verdict == "correct":
+            return "checked_ok"
+        if live and a.verdict == "incorrect":
+            return "still_wrong"
+        if was is _MISSING:
+            return "unknown"
+        return "changed" if not _same(was, now) else "waiting"
+
+    for rec in recs:
+        ef = rec.extracted_fields or {}
+        items = []
+        for field, lst in (rec.reviewer_field_comments or {}).items():
+            for e in (lst or []):
+                if not isinstance(e, dict) or not e.get("comment"):
+                    continue
+                role = e.get("role") or "reviewer"
+                u = ulookup.get(e.get("user"))
+                who = (u.full_name if u else None) or e.get("user") or "Someone"
+                mine = bool(u and u.id == user.id)
+                if not (lead or is_ext or mine or role == "admin"):
+                    continue
+                kind = e.get("type") or ("note" if role == "admin" else "comment")
+                if field == "_general":
+                    st = "info"
+                    was = _MISSING
+                else:
+                    was = e["value_at"] if "value_at" in e else (rec.fields_at_return.get(field, _MISSING) if isinstance(rec.fields_at_return, dict) and kind in ("correction", "rejection") else _MISSING)
+                    st = state(field, was, ef.get(field), rec, kind)
+                items.append({"kind": kind, "field": field if field != "_general" else None, "by": who, "role": role, "text": e["comment"], "ts": e.get("ts"), "sop_rule": e.get("sop_rule"),
+                              "was": None if was is _MISSING else was, "now": ef.get(field) if field != "_general" else None, "state": st})
+        for f in findings:
+            if f.record_id != rec.id or not (lead or is_ext or f.raised_by == user.id):
+                continue
+            now = ef.get(f.field) if f.field else None
+            st = "dismissed" if f.status == "dismissed" else ("checked_ok" if f.fixed_before_final else state(f.field, f.extracted_value, now, rec, "flag") if f.field else "info")
+            if f.status == "confirmed" and f.field and st in ("waiting", "changed", "unknown"):
+                st = "confirmed"
+            items.append({"kind": "flag", "field": f.field, "by": names.get(f.raised_by) or "Reviewer", "role": "reviewer", "text": f.note or q.CATEGORIES.get(f.category, f.category), "ts": f.created_at.isoformat() if f.created_at else None,
+                          "severity": f.severity, "was": f.extracted_value, "now": now, "state": st, "status": f.status, "finding_id": f.id})
+        if not items:
+            continue
+        items.sort(key=lambda x: x.get("ts") or "")
+        for it in items:
+            if it["state"] in ("waiting", "confirmed", "still_wrong"):
+                counts["waiting"] += 1
+            elif it["state"] == "changed":
+                counts["changed"] += 1
+            elif it["state"] == "checked_ok":
+                counts["checked"] += 1
+        out.append({"record_id": rec.id, "record": labels[rec.id], "review_status": getattr(rec.review_status, "value", rec.review_status), "returned": rec.correction_count or 0,
+                    "returned_at": rec.last_returned_at.isoformat() if rec.last_returned_at else None, "changed_since_return": _changed_since(rec), "items": items})
+    return {"source_id": s.id, "records": out, "counts": counts}
 
 
 def enh_aware(dt):
@@ -501,11 +700,29 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
             fl = by_rf.get((r.id, name), [])
             for f in fl:
                 if f.status != "dismissed" and (full or f.raised_by == uid):
-                    sig[name].append({"kind": "finding", "severity": f.severity, "text": f.note or f.rule or f.category, "by": names.get(f.raised_by) or "System checks", "by_id": f.raised_by, "status": f.status, "finding_id": f.id})
+                    sig[name].append({"kind": "finding", "severity": f.severity, "text": f.note or f.rule or f.category, "by": names.get(f.raised_by) or "System checks", "by_id": f.raised_by, "status": f.status, "finding_id": f.id,
+                                      "was": f.extracted_value, "fixed": bool(f.fixed_before_final)})
+                # A reviewer flagged an earlier value and the extractor has changed it since: look again, and credit the catch.
+                if f.origin == "reviewer" and f.status == "open" and (full or f.raised_by == uid) and f.extracted_value is not None and not _same(f.extracted_value, ef.get(name)):
+                    sig[name].append({"kind": "recheck", "severity": "major", "by": names.get(f.raised_by) or "A reviewer", "by_id": f.raised_by, "was": f.extracted_value, "now": ef.get(name),
+                                      "text": "Flagged earlier (it said %s). The extractor has changed it since." % _short(f.extracted_value)})
+            if full:
+                for e in ((r.reviewer_field_comments or {}).get(name) or []):
+                    if isinstance(e, dict) and e.get("type") in ("correction", "rejection") and "value_at" in e and not _same(e["value_at"], ef.get(name)) \
+                            and not any(x["kind"] == "recheck" for x in sig[name]):
+                        sig[name].append({"kind": "recheck", "severity": "major", "by": e.get("user"), "was": e.get("value_at"), "now": ef.get(name),
+                                          "text": "You asked for a fix (it said %s). The extractor has changed it since." % _short(e.get("value_at"))})
             a = audits.get((r.id, name)) if full else None
+            stale = bool(a and not _same(a.extracted_value, ef.get(name)))
+            prior = None
+            if stale:
+                prior = {"verdict": a.verdict, "truth_value": a.truth_value, "value": a.extracted_value, "at": a.audited_at.isoformat() if a.audited_at else None}
+                sig[name].append({"kind": "recheck", "severity": "major", "by": "You", "was": a.extracted_value, "now": ef.get(name),
+                                  "text": "You marked it %s when it said %s. It has changed since, so check it again." % ("wrong" if a.verdict == "incorrect" else "correct", _short(a.extracted_value))})
+                a = None
             weight = sum(q.SIGNAL_WEIGHT.get(x["kind"], 1) for x in sig[name])
-            fields_out.append({"name": name, "value": ef.get(name), "signals": sig[name], "weight": weight,
-                               "audit": {"id": a.id, "verdict": a.verdict, "truth_value": a.truth_value, "note": a.note} if a else None})
+            fields_out.append({"name": name, "value": ef.get(name), "signals": sig[name], "weight": weight, "prior": prior,
+                               "audit": {"id": a.id, "verdict": a.verdict, "truth_value": a.truth_value, "note": a.note, "first_verdict": a.first_verdict, "times_checked": a.times_checked} if a else None})
             tot["fields"] += 1
             tot["flagged"] += 1 if sig[name] else 0
             tot["audited"] += 1 if a else 0
@@ -514,7 +731,8 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
         risk = sum(f["weight"] for f in fields_out if not f["audit"])
         out.append({"record_id": r.id, "record": _label(r, i), "fields": fields_out, "general": general, "risk": risk, "raw": (r.raw_text or "")[:20000],
                     "todo": sum(1 for f in fields_out if f["signals"] and not f["audit"]), "audited": sum(1 for f in fields_out if f["audit"]),
-                    "review_status": getattr(r.review_status, "value", r.review_status), "admin_note": r.admin_review_note, "corrections": r.correction_count or 0})
+                    "review_status": getattr(r.review_status, "value", r.review_status), "admin_note": r.admin_review_note, "corrections": r.correction_count or 0,
+                    "returned_at": r.last_returned_at.isoformat() if r.last_returned_at else None, "changed_since_return": _changed_since(r)})
     if full:
         import json as _json
         tally: dict = {}
@@ -604,6 +822,7 @@ class MarkBody(BaseModel):
     severity: str = "major"
     credit: list[str] = []
     same_value: bool = False
+    original_ok: bool = False   # the reviewer flagged an earlier value that was actually fine
 
 
 def _commit_or_retry(db: Session, redo):
@@ -643,8 +862,12 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
     value = (rec.extracted_fields or {}).get(body.field)
     a = db.query(FieldAudit).filter(FieldAudit.record_id == rec.id, FieldAudit.field == body.field).first()
     if not a:
-        a = FieldAudit(source_id=s.id, record_id=rec.id, field=body.field, verdict=body.verdict)
+        a = FieldAudit(source_id=s.id, record_id=rec.id, field=body.field, verdict=body.verdict, first_verdict=body.verdict, first_value=value, first_at=now, times_checked=1)
         db.add(a)
+    else:
+        if not a.first_verdict:
+            a.first_verdict, a.first_value, a.first_at = a.verdict, a.extracted_value, a.audited_at
+        a.times_checked = (a.times_checked or 1) + 1
     a.verdict, a.truth_value, a.note, a.extracted_value, a.audited_by, a.audited_at = body.verdict, truth, note, value, user.id, now
     try:
         db.flush()
@@ -660,11 +883,17 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
     credit = set(commenters) | {c for c in body.credit if c in _owner_ids(s)}
     touched = 0
     existing = db.query(QualityFinding).filter(QualityFinding.record_id == rec.id, QualityFinding.field == body.field, QualityFinding.origin == "reviewer").all()
+    fixed_credit = 0
     for f in existing:
         if f.status == "open":
-            f.status = "confirmed" if wrong else "dismissed"
-            f.truth_value, f.resolved_by, f.resolved_at, f.resolve_note = truth, user.id, now, "Settled in the review workspace."
+            # The reviewer flagged an earlier value and the extractor has changed it since. The flag was a real catch.
+            fixed = (not wrong) and not body.original_ok and f.extracted_value is not None and not _same(f.extracted_value, value)
+            f.status = "confirmed" if (wrong or fixed) else "dismissed"
+            f.fixed_before_final = bool(fixed)
+            f.truth_value, f.resolved_by, f.resolved_at = truth, user.id, now
+            f.resolve_note = "The reviewer was right. The extractor fixed it before the final review." if fixed else "Settled in the review workspace."
             touched += 1
+            fixed_credit += 1 if fixed else 0
     if wrong:
         have = {f.raised_by for f in existing}
         for uid in credit:
@@ -677,10 +906,15 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
         have = {f.raised_by for f in existing}
         for uid in commenters:
             if uid not in have:
-                db.add(QualityFinding(source_id=s.id, record_id=rec.id, field=body.field, category="other", severity="minor", origin="reviewer", raised_by=uid,
-                                      note="A peer reviewer commented on this field.", extracted_value=value, status="dismissed", auto_verdict="needs_human",
-                                      auto_note="Picked up from the reviewer's comment.", resolved_by=user.id, resolved_at=now, resolve_note="The source supports the value."))
+                earlier = _earlier_value(rec, s, uid, body.field)
+                fixed = (not body.original_ok) and earlier is not _MISSING and not _same(earlier, value)
+                db.add(QualityFinding(source_id=s.id, record_id=rec.id, field=body.field, category="wrong_value" if fixed else "other", severity="major" if fixed else "minor", origin="reviewer", raised_by=uid,
+                                      note="A peer reviewer commented on this field.", extracted_value=earlier if fixed else value, status="confirmed" if fixed else "dismissed",
+                                      auto_verdict="supported" if fixed else "needs_human", auto_note="Picked up from the reviewer's comment.", fixed_before_final=bool(fixed),
+                                      truth_value=truth if fixed else None, resolved_by=user.id, resolved_at=now,
+                                      resolve_note="The reviewer was right. The extractor fixed it before the final review." if fixed else "The source supports the value."))
                 touched += 1
+                fixed_credit += 1 if fixed else 0
     also = 0
     if body.same_value and value not in (None, ""):
         for r in _records(db, s.id):
@@ -688,10 +922,11 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
                 continue
             if db.query(FieldAudit.id).filter(FieldAudit.record_id == r.id, FieldAudit.field == body.field).first():
                 continue
-            db.add(FieldAudit(source_id=s.id, record_id=r.id, field=body.field, verdict=body.verdict, extracted_value=value, truth_value=truth, note=note, audited_by=user.id, audited_at=now))
+            db.add(FieldAudit(source_id=s.id, record_id=r.id, field=body.field, verdict=body.verdict, extracted_value=value, truth_value=truth, note=note, audited_by=user.id, audited_at=now,
+                              first_verdict=body.verdict, first_value=value, first_at=now, times_checked=1))
             also += 1
     db.commit()
-    return {"id": a.id, "verdict": a.verdict, "findings_settled": touched, "also_marked": also}
+    return {"id": a.id, "verdict": a.verdict, "findings_settled": touched, "also_marked": also, "fixed_credit": fixed_credit}
 
 
 # ─── Download of peer-reviewed sources ─────────────────────────────────────────
