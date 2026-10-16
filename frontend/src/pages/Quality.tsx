@@ -307,7 +307,7 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
               {x.sop_code && <Chip tone="indigo">{x.sop_code}</Chip>}
               {x.known && <span className="text-xs text-gray-500">{x.required_count} required{x.category ? ` · ${x.category}` : ''}</span>}
               {x.known && x.warnings > 0 && <Chip tone="amber">{x.warnings} to settle</Chip>}
-              {x.known ? <><span className="text-sm text-gray-500 tabular-nums">{x.compliant} of {x.records} records</span><Chip tone={scoreTone(x.rate)}>{pc(x.rate)}</Chip></> : <Chip tone="gray">No SOP from Xtrium</Chip>}
+              {x.known ? <><span className="text-sm text-gray-500 tabular-nums">{x.compliant} of {x.records} records</span><Chip tone={scoreTone(x.rate)}>{pc(x.rate)}</Chip></> : <Chip tone="gray">No SOP saved</Chip>}
             </li>
           ))}
         </ul>
@@ -317,7 +317,7 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
   }
   if (!d) return <Skeletons rows={4} />
   if (d.error) return <Blank title="Couldn't run the SOP check" text="Check your connection and try again." />
-  if (!d.known) return <Blank title="No SOP from Xtrium for this source" text="The SOP is fetched from Xtrium when the source opens in the Review tab. Open it there, or use Refresh from Xtrium in the SOP rules panel." />
+  if (!d.known) return <Blank title="No SOP saved on this source" text="The SOP is saved when a source is pulled from Xtrium. This one has none yet. Open Review, then SOP rules, and use Refresh from Xtrium once." />
   const reqPanel = <Panel title="What this SOP requires" subtitle="Every field, allowed value and rule the SOP states, with the exact line. Rules under another category's heading are shown but not enforced here."><SopRulesBody sourceId={sourceId} /></Panel>
   return (
     <div className="space-y-5">

@@ -1108,6 +1108,10 @@ async def _ensure_sops(db: Session, srcs: list, force: bool = False, max_fetch: 
             info["already"] += 1
             info["origin"][s.id] = {"origin": "saved", "live_error": None}
             continue
+        if not force:
+            # Screens read what was saved when the source was pulled. Xtrium is only called on an explicit refresh.
+            info["origin"][s.id] = {"origin": "none", "live_error": None}
+            continue
         if done >= max_fetch:
             info["stopped"] = True
             break
@@ -1149,7 +1153,12 @@ async def sop_requirements_source(source_id: str, refresh: bool = False, db: Ses
     from app.api.v1.routes.integrations import _load_sop
     _need_lead(user)
     s = _source(db, user, source_id)
-    got = await _load_sop(s, db, force=refresh, deep=refresh)
+    if not refresh:
+        has = isinstance(s.xtrium_sop, dict) and bool((s.xtrium_sop.get("sop") or {}).get("markdown"))
+        out = sr.build(s, origin="saved" if has else "none", live_error=None)
+        out["just_saved"] = False
+        return out
+    got = await _load_sop(s, db, force=True, deep=True)
     out = sr.build(s, origin=got["origin"], live_error=got["live_error"])
     out["just_saved"] = got["just_saved"]
     return out

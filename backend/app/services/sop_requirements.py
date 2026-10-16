@@ -216,7 +216,7 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
         elif live_error:
             w.append(f"No SOP could be loaded from Xtrium for this source ({live_error}). Try Refresh from Xtrium in a minute.")
         else:
-            w.append("Xtrium has not provided an SOP for this source's item, so nothing can be checked against it.")
+            w.append("No SOP was saved on this source when it was pulled from Xtrium. Use Refresh from Xtrium once to fetch it. After that it is kept here.")
         return out
     if live_error and out["origin"] == "saved":
         w.append(f"Xtrium could not be reached ({live_error}). This is the copy saved on {str(out['saved_at'] or 'an earlier date')[:16].replace('T', ' ')}. It may be out of date.")

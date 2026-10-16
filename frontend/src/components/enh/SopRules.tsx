@@ -24,7 +24,7 @@ export function SopRulesBody({ sourceId }: { sourceId: string }) {
   const sections = useMemo(() => (d?.sections ?? []).map((s: any) => ({ ...s, rules: s.rules.filter((r: any) => (!onlyMust || r.strength === 'MUST') && (match(r.text) || r.fields.some((f: string) => match(f)))) })).filter((s: any) => s.rules.length), [d, q, onlyMust])  // eslint-disable-line react-hooks/exhaustive-deps
   if (!d) return <Skeletons rows={3} />
   if (d.error) return <Blank title="Couldn't load the SOP" text="Check your connection and try again." />
-  if (!d.has_sop) return <div className="space-y-3"><Blank title="No SOP for this source" text={d.warnings[0]} />{d.from_xtrium && <div className="text-center"><Button size="sm" disabled={refreshing} onClick={refresh}>{refreshing ? 'Asking Xtrium…' : 'Try Xtrium again'}</Button></div>}</div>
+  if (!d.has_sop) return <div className="space-y-3"><Blank title="No SOP for this source" text={d.warnings[0]} />{d.from_xtrium && <div className="text-center"><Button size="sm" disabled={refreshing} onClick={refresh}>{refreshing ? 'Asking Xtrium…' : 'Fetch it from Xtrium once'}</Button></div>}</div>
   const fields = (d.fields ?? []).filter((f: any) => match(f.name) || match(f.rule || '') || match((f.allowed || []).join(' ')))
   const mine = sections.filter((s: any) => s.matches), other = sections.filter((s: any) => !s.matches)
   const ruleList = (list: any[]) => list.map((s: any) => (
@@ -120,7 +120,7 @@ export function SopRequirementsOverview({ projectId, onPick }: { projectId: stri
     catch (e) { toast.error(err(e, 'Could not reach Xtrium')) } finally { setRefreshing(false) }
   }
   const download = async () => { setBusy(true); try { await qualityApi.exportSopRequirements(projectId) } catch (e) { toast.error(err(e, 'Could not prepare the download')) } finally { setBusy(false) } }
-  if (!items) return <div className="rounded-2xl border border-gray-100 bg-white px-4 py-5" role="status"><p className="m-0 text-sm text-gray-600">Getting each source's SOP from Xtrium. The first time this can take a little while.</p><Skeletons rows={2} /></div>
+  if (!items) return <div className="rounded-2xl border border-gray-100 bg-white px-4 py-5" role="status"><p className="m-0 text-sm text-gray-600">Reading each source's saved SOP.</p><Skeletons rows={2} /></div>
   const shown = items.filter(x => !onlyWarn || x.warnings.length)
   const bad = items.filter(x => x.warnings.length).length
   return (

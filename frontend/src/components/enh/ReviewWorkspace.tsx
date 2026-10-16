@@ -197,7 +197,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const [audit, setAudit] = useState<any>(null)
   const [sopInfo, setSopInfo] = useState<any>(null)
   useEffect(() => { setAudit(null); setPanel('') }, [sourceId])
-  // Each source's SOP comes from Xtrium. Get it as soon as the desk opens so the checks have it, then show the desk again with it.
+  // The SOP was saved on the source when it was pulled from Xtrium. This only reads that saved copy; it never calls Xtrium.
   useEffect(() => {
     let live = true
     setSopInfo(null)
@@ -400,7 +400,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
       <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-white flex-wrap">
         <b className="text-sm text-gray-900 truncate max-w-[40ch]">{d.source}</b>
         {(d.sop_code || sopInfo?.sop_code) && <Chip tone="indigo">{d.sop_code || sopInfo?.sop_code}</Chip>}
-        {sopInfo && !sopInfo.error && !sopInfo.has_sop && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings?.[0]}><Chip tone="amber">No SOP from Xtrium</Chip></button>}
+        {sopInfo && !sopInfo.error && !sopInfo.has_sop && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings?.[0]}><Chip tone="amber">No SOP saved</Chip></button>}
         {sopInfo?.has_sop && sopInfo.warnings.length > 0 && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings.join(' ')}><Chip tone="amber">{sopInfo.warnings.length} SOP thing{sopInfo.warnings.length === 1 ? '' : 's'} to settle</Chip></button>}
         <span className="text-xs text-gray-500 tabular-nums">{pctDone}% of doubted fields settled</span>
         <span className="text-xs text-gray-400 hidden xl:inline">↑ ↓ field · c correct · w wrong · m comment · n next doubted · j k record · Esc close</span>
