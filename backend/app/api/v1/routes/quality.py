@@ -1,6 +1,7 @@
 """Quality: log errors on records, let the system confirm what it can, check fields against the real source,
 and score the process from those checks."""
 import random
+import re
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -208,8 +209,21 @@ def resolve_finding(finding_id: str, body: ResolveBody, db: Session = Depends(ge
 
 
 def _sop_for(s: Source) -> dict:
+    """The SOP as this source must follow it: the strict reader's enforced fields (required ones, allowed values), joined
+    with Xtrium's structured list. Rules under another category's heading are not held against this source."""
     from app.api.v1.routes.integrations import _sop_requirements
-    return _sop_requirements(s)
+    from app.services import sop_requirements as sr
+    base = _sop_requirements(s)
+    try:
+        b = sr.build(s)
+    except Exception:
+        return {**base, "specs": {}, "entity": None, "category": getattr(s, "category", None), "warnings": []}
+    specs = sr.field_specs(b)
+    required = list(dict.fromkeys(list(base["required"]) + [n for n, sp in specs.items() if sp.get("required")]))
+    keys = set(b.get("template_keys") or []) | set(specs) | set(required)
+    return {"known": base["known"], "sop_code": base["sop_code"] or b.get("sop_code"), "required": required, "specs": specs, "blocks": sr.block_specs(b),
+            "allowed": keys if (b.get("template_keys") or len(specs) >= 3) else base["allowed"], "entity": b.get("entity"), "category": getattr(s, "category", None),
+            "warnings": b.get("warnings") or [], "spec_version": b.get("spec_version"), "stale": b.get("stale"), "no_contract": b.get("no_contract")}
 
 
 @router.get("/sources/{source_id}/sop-check")
@@ -218,11 +232,12 @@ def sop_check_source(source_id: str, db: Session = Depends(get_db), user: User =
     _need_lead(user)
     s = _source(db, user, source_id)
     req = _sop_for(s)
-    base = {"source_id": s.id, "source": s.name, "known": bool(req["known"] and req["required"]), "sop_code": req["sop_code"], "required": req["required"]}
+    base = {"source_id": s.id, "source": s.name, "known": bool(req["known"] and req["required"]), "sop_code": req["sop_code"], "required": req["required"],
+            "entity": req.get("entity"), "category": req.get("category"), "spec_version": req.get("spec_version"), "warnings": req.get("warnings") or []}
     if not base["known"]:
         return {**base, "records": 0, "compliant": 0, "rate": None, "by_field": [], "extra_fields": [], "failing": [], "failing_total": 0}
     recs = [(r.id, _label(r, i), r.extracted_fields or {}) for i, r in enumerate(_records(db, s.id))]
-    return {**base, **q.sop_report(recs, req["required"], req["allowed"])}
+    return {**base, **q.sop_report(recs, req["required"], req["allowed"], req.get("specs"), req.get("blocks"))}
 
 
 @router.get("/sop-overview")
@@ -232,10 +247,11 @@ def sop_overview(project_id: str | None = None, db: Session = Depends(get_db), u
     out = []
     for s in _visible_sources(db, user, project_id).filter(Source.status != SourceStatus.NOT_STARTED).all():
         req = _sop_for(s)
-        row = {"source_id": s.id, "name": s.name, "sop_code": req["sop_code"], "known": bool(req["known"] and req["required"]), "records": 0, "compliant": 0, "rate": None}
+        row = {"source_id": s.id, "name": s.name, "sop_code": req["sop_code"], "entity": req.get("entity"), "category": req.get("category"), "required_count": len(req["required"]),
+               "warnings": len(req.get("warnings") or []), "stale": bool(req.get("stale")), "no_contract": bool(req.get("no_contract")), "known": bool(req["known"] and req["required"]), "records": 0, "compliant": 0, "rate": None}
         if row["known"]:
             recs = [(r.id, "", r.extracted_fields or {}) for r in _records(db, s.id)]
-            rep = q.sop_report(recs, req["required"], req["allowed"])
+            rep = q.sop_report(recs, req["required"], req["allowed"], req.get("specs"), req.get("blocks"))
             row.update(records=rep["records"], compliant=rep["compliant"], rate=rep["rate"])
         out.append(row)
     return {"items": sorted(out, key=lambda x: (not x["known"], x["rate"] if x["rate"] is not None else 101, x["name"]))}
@@ -256,11 +272,12 @@ def scan_source(source_id: str, db: Session = Depends(get_db), user: User = Depe
     for r in recs:
         hits = q.check_record(r.extracted_fields or {}, fields)
         if sop_on:
-            sc = q.sop_check(r.extracted_fields or {}, req["required"], req["allowed"])
+            sc = q.sop_check(r.extracted_fields or {}, req["required"], req["allowed"], req.get("specs"), req.get("blocks"))
             already = {h["field"] for h in hits if h["category"] == "missing_value"}
             code = req["sop_code"] or "the SOP"
             hits += [{"field": f, "category": "sop_rule", "rule": "sop_required", "severity": "major", "message": f"{code} requires this field and it is empty."} for f in sc["missing"] if f not in already]
             hits += [{"field": f, "category": "sop_rule", "rule": "sop_extra", "severity": "minor", "message": f"{code} does not list this field."} for f in sc["extra"]]
+            hits += [{"field": x["field"], "category": "sop_rule", "rule": "sop_allowed_values", "severity": "major", "message": (f"{code} allows only: {', '.join(x['allowed'])}. This record has: {x['value']}." if x["allowed"] else f"{code}: {x['value']} is {x.get('reason')}.")} for x in sc["bad"] if not x.get("case_only")]
         for h in hits:
             key = (r.id, h["field"], h["rule"])
             if key in have:
@@ -687,13 +704,19 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
     out, tot = [], {"fields": 0, "flagged": 0, "audited": 0, "comments": 0, "mentions": 0}
     for i, r in enumerate(recs):
         ef = r.extracted_fields or {}
-        order = [k for k in ef if k not in q.SKIP_FIELDS] + [f for f in (req["required"] if sop_on else []) if f not in ef]
-        sig: dict = {k: [] for k in order}
         hits = q.check_record(ef, schema)
+        order = [k for k in ef if k not in q.SKIP_FIELDS]
+        # A field the extractor left out still gets a row, so it can be seen, commented on and marked.
+        for extra in [f for f in (req["required"] if sop_on else [])] + [x.get("name") for x in schema] + [h["field"] for h in hits]:
+            if extra and extra not in order and extra not in q.SKIP_FIELDS and not str(extra).startswith("_"):
+                order.append(extra)
+        sig: dict = {k: [] for k in order}
         for h in hits:
             sig.setdefault(h["field"], []).append({"kind": "system", "severity": h["severity"], "text": h["message"]})
         if sop_on:
-            sc = q.sop_check(ef, req["required"], req["allowed"])
+            sc = q.sop_check(ef, req["required"], req["allowed"], req.get("specs"), req.get("blocks"))
+            for x in [y for y in sc["bad"] if not y.get("case_only")]:
+                sig.setdefault(x["field"], []).append({"kind": "sop", "severity": "major", "text": f"{req['sop_code'] or 'The SOP'} " + (f"allows only: {', '.join(x['allowed'])}." if x["allowed"] else f"says this value is {x.get('reason')}.")})
             for f in sc["missing"]:
                 sig.setdefault(f, []).append({"kind": "sop", "severity": "major", "text": f"{req['sop_code'] or 'The SOP'} requires this field and it is empty."})
             for f in sc["extra"]:
@@ -721,13 +744,13 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
                     continue
                 if field == "_general":
                     general.append(item)
-                    for m in q.mentioned_fields(e["comment"], list(sig.keys())):
+                    for m in q.mentioned_fields(e["comment"], list(sig.keys()), ef):
                         sig[m].append({"kind": "mention", "severity": "major", "text": e["comment"], "by": who, "by_id": item["by_id"]})
                 elif field in sig:
                     sig[field].append({"kind": "comment", "severity": "major", "text": e["comment"], "by": who, "by_id": item["by_id"], "role": e.get("role")})
         for p in peers:
             if p["comment"]:
-                for m in q.mentioned_fields(p["comment"], list(sig.keys())):
+                for m in q.mentioned_fields(p["comment"], list(sig.keys()), ef):
                     sig[m].append({"kind": "mention", "severity": "major", "text": p["comment"], "by": p["name"], "by_id": p["id"]})
         fields_out = []
         for name in order:
@@ -786,9 +809,22 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
     tot["open_findings"] = sum(1 for f in findings if f.status == "open")
     tot["sop_rate"] = q.pct(sum(1 for r in out if not any(x["kind"] == "sop" and "empty" in x["text"] for f in r["fields"] for x in f["signals"])), len(out)) if sop_on else None
     return {"source_id": s.id, "source": s.name, "project_id": s.project_id, "website": s.website_url, "sop_code": req["sop_code"] if sop_on else None,
-            "sop_required": req["required"] if sop_on else [], "peers": [{"id": p["id"], "name": p["name"], "comment": p["comment"], "fields": q.mentioned_fields(p["comment"], all_names)} for p in peers], "peer_done": total > 0 and done == total,
+            "sop_required": req["required"] if sop_on else [], "peers": [{"id": p["id"], "name": p["name"], "comment": p["comment"], "fields": sorted({m for x in recs for m in q.mentioned_fields(p["comment"], all_names, x.extracted_fields or {})}),
+                       "why": _peer_why(p["comment"], all_names, recs),
+                       "unknown": sorted({m for m in re.findall(r"`([A-Za-z][A-Za-z0-9_]{2,40})`", p["comment"] or "") if m not in all_names and "_" in m})} for p in peers], "peer_done": total > 0 and done == total,
             "totals": tot, "records": out,
             "status": getattr(s.status, "value", s.status), "approved_records": sum(1 for r in out if r["review_status"] == "approved"), "total_records": len(out)}
+
+
+def _peer_why(comment: str, names: list, recs: list) -> dict:
+    """For each field a peer note points at: the sentence that did it and the reason, so a wrong credit can be spotted."""
+    from app.services import peer_notes
+    out: dict = {}
+    for x in recs:
+        for f, w in peer_notes.explain(comment or "", x.extracted_fields or {}, list(names)).items():
+            if f not in out or w["score"] > out[f]["score"]:
+                out[f] = w
+    return out
 
 
 class CommentBody(BaseModel):
@@ -1045,7 +1081,7 @@ def site_check(body: SiteCheckBody, db: Session = Depends(get_db), user: User = 
     res = nimble.extract(url, render=body.render)
     if not res["ok"]:
         return {"ok": False, "error": res["error"], "url": res["url"], "fields": {}}
-    out = {k: q.find_in_text(v, res["text"]) for k, v in (rec.extracted_fields or {}).items() if k not in q.SKIP_FIELDS}
+    out = {k: q.site_state(k, q.find_in_text(v, res["text"])) for k, v in (rec.extracted_fields or {}).items() if k not in q.SKIP_FIELDS}
     return {"ok": True, "url": res["url"], "cached": bool(res.get("cached")), "fields": out, "text": res["text"][:80000]}
 
 

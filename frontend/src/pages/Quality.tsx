@@ -361,7 +361,7 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
                 <span className="font-semibold text-gray-900">{r.record}</span>
                 {r.missing.length > 0 && <span className="text-gray-500">missing</span>}
                 {r.missing.map((m: string) => <Chip key={m} tone="red">{m}</Chip>)}
-                {(r.bad || []).map((b: any) => <span key={b.field} className="text-xs text-gray-600"><Chip tone="amber">{b.field}</Chip> {b.value} is not in: {b.allowed.join(', ')}</span>)}
+                {(r.bad || []).map((b: any) => <span key={b.field} className="text-xs text-gray-600"><Chip tone="amber">{b.field}</Chip> {b.value} {b.allowed?.length ? `is not in: ${b.allowed.join(', ')}` : `is ${b.reason}`}</span>)}
               </li>
             ))}
           </ul>

@@ -93,6 +93,28 @@ def _enum_from(text: str) -> list[str]:
     return []
 
 
+NOT_FIELD_SECTIONS = re.compile(r"normali[sz]ation|convention|strict value|quality rules?|acceptance|pitfall|modality|pre-?filled|evidence from|guidance|scope|how to extract|typical sources", re.I)
+NESTED_RE = re.compile(r"^`?([A-Za-z_][A-Za-z0-9_]*)`?\s*\((?:array|list|object|nested)\b", re.I)
+RANGE_RE = re.compile(r"range:\s*(-?[\d.]+|-?inf)\s*to\s*\+?(-?[\d.]+|\+?inf)", re.I)
+
+
+def split_allowed(cell: str) -> tuple[list[str], str | None]:
+    """The 'Allowed values / format' cell: an enum only when it is a 'one of' list (or a plain list of single tokens).
+    Anything else (ranges, ISO formats, units) is a format, never a list of allowed values."""
+    t = _clean(cell or "")
+    if not t:
+        return [], None
+    m = re.match(r"^(?:one of|allowed values?|accepted values?|valid values?|enum(?:eration)?)\s*[:\-]?\s*(.+)$", t, re.I)
+    if m:
+        vals = [v.strip(" .;\"'`") for v in re.split(r"\s*[,|;]\s*", m.group(1)) if v.strip(" .;\"'`")]
+        if vals:
+            return vals, None
+    parts = [v.strip(" .;\"'`") for v in re.split(r"\s*[,|]\s*", t)]
+    if len(parts) >= 2 and all(re.fullmatch(r"[A-Za-z0-9_\-\.]{1,40}", v) for v in parts) and not re.search(r"(YYYY|ISO|range|unit)", t, re.I):
+        return parts, None
+    return [], t
+
+
 def _kind(text: str) -> str:
     if PROV_RE.search(text):
         return "provenance"
@@ -133,7 +155,7 @@ def _rules_in(section: dict) -> tuple[list[dict], list[dict]]:
                 rows.append(_split_row(lines[i]))
                 i += 1
             col = lambda *keys: next((j for j, h in enumerate(head) if any(k in h for k in keys)), None)
-            cf, cr, ct, ca, cfm, cd = col("field", "key", "attribute", "column", "property", "name"), col("required", "mandatory", "req", "optional"), col("type"), col("allowed", "values", "enum", "options"), col("format", "pattern"), col("description", "rule", "notes", "note", "meaning", "constraint")
+            cf, cr, ct, ca, cfm, cd = col("field", "key", "attribute", "column", "property", "name"), col("required", "mandatory", "req", "optional", "need"), col("type"), col("allowed", "values", "enum", "options"), col("format", "pattern"), col("description", "rule", "notes", "note", "meaning", "constraint")
             for row in rows:
                 cell = lambda j: _clean(row[j]) if j is not None and j < len(row) else ""
                 if cf is not None and cell(cf):
@@ -143,11 +165,21 @@ def _rules_in(section: dict) -> tuple[list[dict], list[dict]]:
                     else:
                         req_txt = cell(cr).lower()
                         optional_col = cr is not None and "optional" in head[cr] and "required" not in head[cr]
+                        need_col = cr is not None and "need" in head[cr]
                         req = (req_txt in TICK) if cr is not None and not optional_col else ((req_txt in UNTICK) and req_txt != "") if optional_col else None
+                        if need_col:
+                            req = req_txt == "required"
                         quote = " | ".join(_clean(c) for c in row)
-                        allowed = [v.strip() for v in re.split(r"\s*[,|/]\s*", cell(ca)) if v.strip()] if ca is not None and cell(ca) else _enum_from(cell(cd))
-                        fields.append({"name": name, "required": req, "type": cell(ct) or None, "allowed": allowed, "format": cell(cfm) or None, "rule": cell(cd) or None, "section": section["title"], "quote": quote})
-                        if req is True or allowed or cell(cfm):
+                        if ca is not None and cell(ca):
+                            allowed, fmt_txt = split_allowed(cell(ca))
+                        else:
+                            allowed, fmt_txt = _enum_from(cell(cd)), None
+                        fmt_txt = cell(cfm) or fmt_txt
+                        mnest = NESTED_RE.match(section["title"] or "")
+                        nm_full = f"{mnest.group(1)}[].{name}" if mnest else name
+                        fields.append({"name": nm_full, "field": name, "block": mnest.group(1) if mnest else None, "nested": bool(mnest), "need": req_txt if need_col else None,
+                                       "required": req, "type": cell(ct) or None, "allowed": allowed, "format": fmt_txt or None, "rule": cell(cd) or None, "section": section["title"], "quote": quote})
+                        if req is True or allowed or fmt_txt:
                             rules.append({"text": quote, "strength": "MUST" if req is True or MUST_RE.search(quote) else "INFO", "kind": "required" if req is True else ("allowed values" if allowed else "format"), "fields": [name], "quote": quote})
                 else:
                     quote = " | ".join(_clean(c) for c in row)
@@ -157,7 +189,7 @@ def _rules_in(section: dict) -> tuple[list[dict], list[dict]]:
         # bullet or paragraph line
         text = _clean(re.sub(r"^([-*+]|\d+[.)])\s+", "", s))
         m = re.match(r"^`?([A-Za-z_][A-Za-z0-9_\.]{1,60})`?\s*(?:\(([^)]*)\))?\s*[:\-–—]\s*(.+)$", re.sub(r"^([-*+]|\d+[.)])\s+", "", s).replace("**", ""))
-        if m and "_" in m.group(1) or (m and FIELD_TICK_RE.match(re.sub(r"^([-*+]|\d+[.)])\s+", "", s).replace("**", ""))):
+        if not NOT_FIELD_SECTIONS.search(section["title"] or "") and (m and "_" in m.group(1) or (m and FIELD_TICK_RE.match(re.sub(r"^([-*+]|\d+[.)])\s+", "", s).replace("**", "")))):
             nm, tag, rest = m.group(1), (m.group(2) or ""), m.group(3)
             req = True if re.search(r"\brequired\b|\bmandatory\b|\bmust\b", tag + " " + rest, re.I) else (False if re.search(r"\boptional\b", tag + " " + rest, re.I) else None)
             allowed = _enum_from(rest)
@@ -199,13 +231,20 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
     meta = saved.get("meta") if isinstance(saved.get("meta"), dict) else {}
     md = sop.get("markdown") or ""
     entity = sop.get("entity") or meta.get("target_entity") or sop.get("target_entity") or None
+    if not entity and md:
+        me = re.search(r"(?:target\s+)?entity\s*[:\-]\s*`?([A-Za-z][A-Za-z0-9_]+)", md, re.I) or re.search(r"SOP-KG-([A-Z0-9]+)-DS\d{3}", md)
+        entity = me.group(1) if me else None
+    spec_v = sop.get("spec_version") or meta.get("spec_version")
+    if not spec_v and md:
+        mv = re.search(r"spec(?:ification)?\s+version\s*[:\-]?\s*v?(\d+(?:\.\d+)+)", md, re.I)
+        spec_v = mv.group(1) if mv else None
     category = (getattr(source, "category", None) or "").strip() or None
     code = sop.get("sop_code") or meta.get("sop_code")
     required = [f for f in (sop.get("required_fields") or meta.get("required_fields") or []) if isinstance(f, str) and f.strip()]
     tmpl = parse_template(sop.get("deliverable_template"))
     derived = [f for f in (sop.get("derived_fields") or []) if isinstance(f, str)]
     md_keys = _template_keys(md)
-    out = {"source_id": source.id, "name": source.name, "category": category, "entity": entity, "sop_code": code, "title": sop.get("title"), "spec_version": sop.get("spec_version"),
+    out = {"source_id": source.id, "name": source.name, "category": category, "entity": entity, "sop_code": code, "title": sop.get("title"), "spec_version": spec_v,
            "has_sop": bool(sop or meta), "has_markdown": bool(md), "required_fields": required, "template_keys": list(dict.fromkeys((list(tmpl) if tmpl else []) + md_keys)), "derived_fields": derived,
            "fields": [], "sections": [], "warnings": [], "counts": {},
            "origin": origin or ("saved" if sop else "none"), "saved_at": saved.get("saved_at"), "live_error": live_error, "from_xtrium": bool(getattr(source, "external_ref_id", None))}
@@ -289,7 +328,9 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
     if code and md:
         found = {re.sub(r"[ _]", "-", c.upper()) for c in SOP_CODE_RE.findall(md)}
         want = re.sub(r"[ _]", "-", str(code).upper())
-        other = sorted(c for c in found if c != want)
+        ds = re.search(r"DS[-_ ]?(\d{3})", want)
+        domain = f"SOP-DS-{ds.group(1)}" if ds else None
+        other = sorted(c for c in found if c != want and c != domain and not want.startswith(c))
         if other and want not in found:
             w.append(f"The saved code is {code} but the SOP text names {', '.join(other)}. The wrong SOP may be attached.")
         elif other:
@@ -306,12 +347,23 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
     for f in out["fields"]:
         if f["allowed"] and f["format"]:
             pass
+    om = re.search(r"omit these:\s*([A-Za-z0-9_,\s]+?)\.", md or "", re.I)
+    out["omit_fields"] = [x.strip() for x in om.group(1).split(",") if x.strip()] if om else []
     out["counts"] = {"sections": len(out["sections"]), "matching_sections": sum(1 for s in out["sections"] if s["matches"]), "rules": sum(len(s["rules"]) for s in out["sections"]), "must_rules": must_total,
-                     "fields": len(out["fields"]), "required_fields": sum(1 for f in out["fields"] if f["required"]), "fields_with_allowed_values": sum(1 for f in out["fields"] if f["allowed"]),
+                     "fields": len(out["fields"]), "required_fields": sum(1 for f in out["fields"] if f["required"] and not f.get("nested")), "fields_with_allowed_values": sum(1 for f in out["fields"] if f["allowed"]),
                      "warnings": len(w)}
     return out
 
 
 def field_specs(req: dict) -> dict:
     """name -> spec, for the audit's strict checks."""
-    return {f["name"]: f for f in req.get("fields", []) if f.get("enforce", True)}
+    return {f["name"]: f for f in req.get("fields", []) if f.get("enforce", True) and not f.get("nested")}
+
+
+def block_specs(req: dict) -> dict:
+    """block -> {field: spec} for nested arrays such as price_points. Only checked when the record has that block."""
+    out: dict = {}
+    for f in req.get("fields", []):
+        if f.get("nested") and f.get("enforce", True) and f.get("block"):
+            out.setdefault(f["block"], {})[f["field"]] = f
+    return out

@@ -282,7 +282,43 @@ def _lookup(fields: dict, name: str):
     return None, None
 
 
-def sop_check(fields: dict, required: list[str], allowed: set | None, specs: dict | None = None) -> dict:
+_DT = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
+_D = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_RANGE = re.compile(r"range:\s*(-?[\d.]+|-?inf)\s*to\s*\+?(-?[\d.]+|\+?inf)", re.I)
+
+
+def type_issue(spec: dict, val) -> str | None:
+    """The SOP's declared type and range, applied exactly: dates as YYYY-MM-DD, timestamps as ...Z, numbers without unit text."""
+    if not _present(val):
+        return None
+    t = str(spec.get("type") or "").lower()
+    sv = str(val).strip()
+    if t == "datetime" and not _DT.match(sv):
+        return f"not an ISO 8601 UTC timestamp like 2026-01-31T12:00:00Z"
+    if t == "date" and not _D.match(sv):
+        return "not a date like 2026-01-31"
+    if t in ("float", "number", "integer", "int"):
+        if isinstance(val, bool):
+            return "not a number"
+        try:
+            n = float(val) if not isinstance(val, (int, float)) else float(val)
+        except Exception:
+            return "not a plain number (no unit text inside the value)"
+        m = _RANGE.search(spec.get("format") or "")
+        if m:
+            def num(x):
+                return float("inf") if "inf" in x and not x.startswith("-") else (float("-inf") if "inf" in x else float(x))
+            lo, hi = num(m.group(1)), num(m.group(2))
+            if n < lo or n > hi:
+                return f"outside the range {m.group(1)} to {m.group(2)}"
+    if t in ("string", "") and not isinstance(val, (list, dict)) and re.search(r"alpha-?2|ISO ?3166-?1", " ".join(str(spec.get(k) or "") for k in ("format", "rule")), re.I) and not re.fullmatch(r"[A-Z]{2}", sv):
+        return "not an ISO 3166-1 alpha-2 country code (two capital letters, for example KE), and a country name is not accepted"
+    if t == "boolean" and not isinstance(val, bool) and sv.lower() not in ("true", "false"):
+        return "not an explicit true or false"
+    return None
+
+
+def sop_check(fields: dict, required: list[str], allowed: set | None, specs: dict | None = None, blocks: dict | None = None) -> dict:
     """Does one record follow the SOP? missing = required but empty or a placeholder like "N/A".
     bad = a value outside the SOP's allowed list. unmapped = SOP fields the record has no key for at all."""
     fields = fields or {}
@@ -300,26 +336,50 @@ def sop_check(fields: dict, required: list[str], allowed: set | None, specs: dic
         key, val = _lookup(fields, name)
         if key is not None:
             used.add(key)
+        ti = type_issue(sp, val) if key is not None and not (sp.get("allowed")) else None
+        if ti:
+            bad.append({"field": name, "value": str(val), "allowed": [], "reason": ti, "case_only": False})
         al = sp.get("allowed") or []
         if al and key is not None and _present(val) and str(val).strip().lower() not in PLACEHOLDERS:
             items = val if isinstance(val, list) else [val]
             off = [str(x).strip() for x in items if isinstance(x, (str, int, float)) and str(x).strip() not in al]
             if off:
                 bad.append({"field": name, "value": ", ".join(off), "allowed": al, "case_only": all(x.lower() in {a.lower() for a in al} for x in off)})
+    for block, bspecs in (blocks or {}).items():
+        key, items = _lookup(fields, block)
+        if key is not None:
+            used.add(key)
+        if not isinstance(items, list):
+            continue
+        for i, item in enumerate(items, start=1):
+            if not isinstance(item, dict):
+                continue
+            for fname, sp in bspecs.items():
+                k2, v2 = _lookup(item, fname)
+                label = f"{block}[{i}].{fname}"
+                if sp.get("required") and (not _present(v2) or str(v2).strip().lower() in PLACEHOLDERS):
+                    missing.append(label)
+                    continue
+                ti = type_issue(sp, v2) if not sp.get("allowed") else None
+                if ti:
+                    bad.append({"field": label, "value": str(v2), "allowed": [], "reason": ti, "case_only": False})
+                al = sp.get("allowed") or []
+                if al and _present(v2) and str(v2).strip() not in al:
+                    bad.append({"field": label, "value": str(v2), "allowed": al, "case_only": str(v2).strip().lower() in {a.lower() for a in al}})
     known = {_nk(k) for k in (allowed or set())} | {_nk(k) for k in specs}
     extra = sorted(k for k in fields if allowed is not None and _nk(k) not in known and k not in SKIP_FIELDS and not str(k).startswith("_") and _present(fields[k]))
     return {"missing": missing, "extra": extra, "bad": bad, "unmapped": unmapped}
 
 
-def sop_report(records: list[tuple[str, str, dict]], required: list[str], allowed: set | None, specs: dict | None = None) -> dict:
+def sop_report(records: list[tuple[str, str, dict]], required: list[str], allowed: set | None, specs: dict | None = None, blocks: dict | None = None) -> dict:
     """records = (record_id, label, fields). Field-by-field and record-by-record view of SOP compliance."""
     specs = specs or {}
-    names = list(dict.fromkeys(list(required) + [n for n, sp in specs.items() if sp.get("allowed")]))
+    names = list(dict.fromkeys(list(required) + [n for n, sp in specs.items() if sp.get("allowed") or sp.get("type") in ("datetime", "date", "float", "number", "integer")]))
     by_field = {f: {"field": f, "required": f in required, "filled": 0, "missing": 0, "bad": 0, "absent": 0, "allowed": (specs.get(f) or {}).get("allowed") or [], "section": (specs.get(f) or {}).get("section")} for f in names}
     extra_count: Counter = Counter()
     failing, ok = [], 0
     for rid, label, fields in records:
-        r = sop_check(fields, required, allowed, specs)
+        r = sop_check(fields, required, allowed, specs, blocks)
         badf = {x["field"] for x in r["bad"]}
         for f in names:
             row = by_field[f]

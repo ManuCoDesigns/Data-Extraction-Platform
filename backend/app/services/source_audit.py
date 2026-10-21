@@ -158,6 +158,9 @@ def check_evidence(val, url, pages, other_pages) -> dict:
               comment="This sentence is not on the cited page, and it was not found on the other pages that were read.", proof={"url": url, "quote": near or "(no close sentence on the page)"})
 
 
+KIND_COMPLAINT = re.compile(r"platform|market segment|trading category|real segment|not a (real )?segment|pre-?filled|trade[- ]intelligence", re.I)
+
+
 def check_segment(val, rec_fields, source_name, website, pages, url, dup_count) -> dict:
     name = flat(_s(val))
     rule = "a MarketSegment is a commodity or industrial market trading category, not a platform, service or finished product"
@@ -184,7 +187,7 @@ def check_segment(val, rec_fields, source_name, website, pages, url, dup_count) 
         return _unavailable("segment_name", val, (pg or {}).get("error") or "the cited page was not fetched.")
     hit = q.find_in_text(name, pg["clean"])
     if hit["state"] in ("found", "close"):
-        return _v("segment_name", val, CORRECT, comment="The segment is named on the cited page.", proof={"url": url, "quote": hit["snippet"] or name})
+        return _v("segment_name", val, CORRECT, comment="The name is on the cited page, and it passed the kind checks (not a platform, service, product, duplicate or broad sector). Being on the page only proves the text is there.", proof={"url": url, "quote": hit["snippet"] or name}, pattern="segment_on_page")
     allt = " ".join(p["clean"] for p in pages.values() if p["ok"])
     if q.find_in_text(name, allt)["state"] in ("found", "close"):
         return _v("segment_name", val, HOLD, comment="It is named on another page of the site but not on the cited page. Fix the cited page or the evidence.", pattern="segment_other_page")
@@ -346,7 +349,7 @@ def _blank(v) -> bool:
     return v is None or (isinstance(v, str) and not v.strip()) or (isinstance(v, (list, dict)) and not v)
 
 
-def apply_sop(vs: list[dict], rf: dict, specs: dict, template_keys: list[str]) -> list[dict]:
+def apply_sop(vs: list[dict], rf: dict, specs: dict, template_keys: list[str], other_sections: set | frozenset = frozenset()) -> list[dict]:
     """Strict SOP rules on top of the page checks: a required field that is empty, a value outside the SOP's allowed
     list, and keys the SOP does not list. A rule from the SOP always names its section and quote."""
     by = {v["field"]: v for v in vs}
@@ -382,15 +385,29 @@ def apply_sop(vs: list[dict], rf: dict, specs: dict, template_keys: list[str]) -
             bad = [x for x in items if isinstance(x, (str, int, float)) and str(x).strip() not in allowed]
             if bad:
                 case_only = all(str(x).strip().lower() in {a.lower() for a in allowed} for x in bad)
+                if case_only:
+                    put(name, _v(name, val, HOLD, comment=f"Only the letter case differs from the SOP's list. The SOP accepts case differences, but the canonical value is one of: {', '.join(allowed)}.", pattern="sop_case_only",
+                                 sop_rule=sp.get("quote"), proof=quote))
+                    continue
                 put(name, _v(name, val, WRONG, "sop_rule", source_says=f"Allowed by {where}: {', '.join(allowed)}.", pattern="sop_allowed_values", sop_rule=sp.get("quote"),
                              comment=f"{', '.join(map(str, bad))} is not one of the SOP's allowed values" + (" (only the letter case differs)." if case_only else "."), proof=quote))
+        if not allowed and not _blank(val) and by.get(name, {}).get("verdict") != WRONG:
+            from app.services.quality import type_issue
+            ti = type_issue(sp, val)
+            if ti:
+                put(name, _v(name, val, WRONG, "sop_rule", source_says=f"The SOP declares {name} as {sp.get('type')}" + (f" ({sp.get('format')})" if sp.get("format") else "") + ".", pattern="sop_type", sop_rule=sp.get("quote"),
+                             comment=f"{val} is {ti}.", proof=quote))
     known = set(template_keys) | set(specs)
     if len(known) >= 3:
         for k, val in rf.items():
             if k in known or k in SKIP or k.startswith("_") or _blank(val):
                 continue
-            if k not in by:
-                out.append(_v(k, val, HOLD, comment=f"{k} is not listed in the SOP's deliverable template or fields. It may belong to a different SOP version. Check before removing it.", pattern="sop_unlisted_field"))
+            if k in other_sections:
+                put(k, _v(k, val, HOLD, comment=f"{k} is only named under another category's section of the SOP, not this source's. Check which section applies before calling it wrong.", pattern="sop_other_section"))
+            else:
+                put(k, _v(k, val, WRONG, "schema", source_says=f"{k} is not a field of the SOP saved on this source.", pattern="sop_unlisted_field", sop_rule="Only the fields the SOP lists may be sent",
+                              comment=f"{k} is outside the SOP saved on this source, so it should not be delivered. If the SOP was edited on Xtrium, use Refresh from Xtrium first and run the audit again.",
+                              proof={"url": None, "quote": f"Fields the SOP lists: {', '.join(sorted(known))[:300]}"}))
     return out
 
 
@@ -428,14 +445,27 @@ def audit_source(desk: dict, pages: dict, source_name: str, website: str | None,
         if "regions" in rf:
             vs.append(check_regions(rf["regions"], pages, url))
         for k, val in rf.items():
-            if k in HANDLED or k in SKIP or val in (None, "", [], {}) or not isinstance(val, (str, list)):
+            if k in HANDLED or k in SKIP or k in ("data_origin", "retrieved_at", "method") or val in (None, "", [], {}) or not isinstance(val, (str, list)):
                 continue
             c = check_text(k, val, pages, url)
             if c:
                 vs.append(c)
         if sop:
             from app.services import sop_requirements as sr
-            vs = apply_sop(vs, rf, sr.field_specs(sop), sop.get("template_keys") or [])
+            vs = apply_sop(vs, rf, sr.field_specs(sop), sop.get("template_keys") or [], {f["name"] for f in sop.get("fields", []) if not f.get("enforce", True) and not f.get("nested")})
+        specs_all = {}
+        if sop:
+            from app.services import sop_requirements as _sr
+            specs_all = _sr.field_specs(sop)
+        for v in vs:
+            # A verdict that contradicts its own quoted list is a tool defect, not an error to blame on the extractor.
+            if v.get("pattern") == "sop_allowed_values":
+                al = (specs_all.get(v["field"]) or {}).get("allowed") or []
+                if al and str(v["delivered"]).strip() in al:
+                    v.update(verdict=CORRECT, error_kind=None, source_says=None, pattern="tool_defect_fixed", comment="The delivered value is in the SOP's allowed list.")
+            # "On the page" proves the text is there, not that it is the right kind of value.
+            if v.get("pattern") == "segment_on_page" and any(x.get("kind") in ("comment", "mention", "finding") and KIND_COMPLAINT.search(x.get("text") or "") for x in (sigs.get(v["field"]) or [])):
+                v.update(verdict=HOLD, comment="The name appears on the page, but a peer or check has questioned this field. Appearing on the page does not show it is a real market segment (one commodity or trading category). Judge the kind of value against the SOP.")
         for v in vs:
             st, caught, flagged = _flag_status(v["verdict"], sigs.get(v["field"]), peers)
             v.update({"record_id": r["record_id"], "record": r["record"], "source": source_name, "flag_status": st, "flagged": flagged,
