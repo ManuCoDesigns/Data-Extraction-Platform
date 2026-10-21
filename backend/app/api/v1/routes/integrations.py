@@ -1472,6 +1472,8 @@ async def source_sop(
     if not source.external_ref_id:
         raise HTTPException(status_code=422, detail="This source wasn't pulled from Xtrium Catalog IQ.")
     got = await _load_sop(source, db, force=True)
+    from app.services import sop_requirements as _sr
+    _sr.follow_category(source)
     return {
         "source_id": source.id,
         "source_name": source.name,

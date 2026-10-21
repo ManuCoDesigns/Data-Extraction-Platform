@@ -213,6 +213,7 @@ def _sop_for(s: Source) -> dict:
     with Xtrium's structured list. Rules under another category's heading are not held against this source."""
     from app.api.v1.routes.integrations import _sop_requirements
     from app.services import sop_requirements as sr
+    sr.follow_category(s)
     base = _sop_requirements(s)
     try:
         b = sr.build(s)
@@ -1136,9 +1137,11 @@ async def _ensure_sops(db: Session, srcs: list, force: bool = False, max_fetch: 
     from app.api.v1.routes.integrations import _load_sop
     info = {"fetched": 0, "already": 0, "changed": 0, "failed": [], "stopped": False, "origin": {}}
     done = 0
+    from app.services import sop_requirements as _sr
     for s in srcs:
         if not s.external_ref_id:
             continue
+        _sr.follow_category(s)  # the category follows the SOP Xtrium attached, no network call
         has = isinstance(s.xtrium_sop, dict) and bool((s.xtrium_sop.get("sop") or {}).get("markdown"))
         if has and not force:
             info["already"] += 1
@@ -1153,6 +1156,7 @@ async def _ensure_sops(db: Session, srcs: list, force: bool = False, max_fetch: 
             break
         got = await _load_sop(s, db, force=True, deep=force)
         done += 1
+        _sr.follow_category(s)
         info["origin"][s.id] = {"origin": got["origin"], "live_error": got["live_error"]}
         if got["sop"]:
             info["fetched"] += 1

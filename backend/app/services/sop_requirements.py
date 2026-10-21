@@ -367,3 +367,43 @@ def block_specs(req: dict) -> dict:
         if f.get("nested") and f.get("enforce", True) and f.get("block"):
             out.setdefault(f["block"], {})[f["field"]] = f
     return out
+
+
+_ENTITY = re.compile(r"[A-Z][A-Za-z0-9]+")
+
+
+def follow_category(source, commit: bool = True) -> str | None:
+    """The SOP Xtrium attached is the authority on what a source is. When the saved SOP is for a real entity and the
+    source's category is empty, Unclassified or another entity name, the category follows the SOP, so nobody has to
+    re-classify sources by hand after Xtrium does. Free-text categories (for example "Critical minerals") are left alone.
+    Returns the old category when it changed, else None. No network call is made."""
+    saved = getattr(source, "xtrium_sop", None)
+    sop = saved.get("sop") if isinstance(saved, dict) else None
+    if not isinstance(sop, dict):
+        return None
+    meta = saved.get("meta") if isinstance(saved.get("meta"), dict) else {}
+    entity = str(sop.get("entity") or meta.get("target_entity") or "").strip()
+    if not entity or not _ENTITY.fullmatch(entity) or _norm(entity) == "unclassified":
+        return None
+    cur = (getattr(source, "category", None) or "").strip()
+    if cur and _norm(cur) == _norm(entity):
+        return None
+    if cur and _norm(cur) != "unclassified" and not _ENTITY.fullmatch(cur):
+        return None
+    old = cur or None
+    source.category = entity
+    if commit:
+        try:
+            from sqlalchemy.orm import object_session
+            db = object_session(source)
+            if db is not None:
+                db.commit()
+        except Exception:
+            try:
+                db.rollback()
+            except Exception:
+                pass
+            source.category = old
+            return None
+    return old or ""
+
