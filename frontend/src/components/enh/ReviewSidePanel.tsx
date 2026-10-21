@@ -59,10 +59,10 @@ export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpFie
                     <li key={c.name}>
                       <button type="button" disabled={!c.onRecord || !onJumpField} onClick={() => onJumpField?.(c.name)}
                         title={c.onRecord ? 'Go to this field in the review' : 'This record has no such field'}
-                        className={'w-full text-left text-sm flex items-center gap-2 rounded-lg px-2 py-1 border ' + (c.ok ? 'border-gray-100 hover:bg-gray-50' : 'border-red-200 bg-red-50/60 hover:bg-red-50') + (c.name === activeField ? ' ring-2 ring-brand-500' : '')}>
+                        className={'w-full text-left text-sm flex items-center gap-2 rounded-lg px-2 py-1 border ' + (c.ok ? 'border-gray-100 hover:bg-gray-50' : 'border-red-400 bg-transparent hover:bg-red-500/10') + (c.name === activeField ? ' ring-2 ring-brand-500' : '')}>
                         <span className={c.ok ? 'text-emerald-600' : 'text-red-600'} aria-hidden>{c.ok ? '✓' : '✗'}</span>
-                        <span className={'font-mono text-[12.5px] ' + (c.ok ? 'text-gray-700' : 'text-red-700 font-semibold')}>{c.name}</span>
-                        <span className="ml-auto text-[11px] text-gray-400">{c.ok ? (auto.includes(c.name) ? 'auto-filled' : 'filled') : c.onRecord ? 'empty' : 'not on record'}</span>
+                        <span className={'font-mono text-[12.5px] ' + (c.ok ? 'text-gray-700' : 'text-red-500 font-semibold')}>{c.name}</span>
+                        <span className={'ml-auto text-[11px] ' + (c.ok ? 'text-gray-400' : 'text-red-500')}>{c.ok ? (auto.includes(c.name) ? 'auto-filled' : 'filled') : c.onRecord ? 'empty' : 'not on record'}</span>
                       </button>
                     </li>
                   ))}
