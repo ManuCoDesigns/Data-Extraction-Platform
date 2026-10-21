@@ -1376,6 +1376,29 @@ def _usable_sop(value) -> bool:
     return isinstance(value, dict) and bool(value.get("markdown"))
 
 
+def _mirror_item(source, item: dict, db) -> list[str]:
+    """Xtrium is the authority on what its item is. On a real refresh, the source's category, website, country and type
+    are taken from the item as Xtrium has them now (only values Xtrium actually gives; nothing is blanked)."""
+    want = {
+        "category": item.get("category") or item.get("kg_node"),
+        "website_url": item.get("resolved_link") or item.get("url"),
+        "country": item.get("country_of_origin"),
+        "type": item.get("type"),
+    }
+    changed = []
+    for k, v in want.items():
+        if isinstance(v, str) and v.strip() and (getattr(source, k, None) or "") != v.strip():
+            setattr(source, k, v.strip())
+            changed.append(k)
+    if changed:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+            return []
+    return changed
+
+
 async def _load_sop(source, db, force: bool = True, deep: bool = False) -> dict:
     """
     Get the SOP Xtrium provides for this source's item, and save it on the source.
@@ -1409,6 +1432,8 @@ async def _load_sop(source, db, force: bool = True, deep: bool = False) -> dict:
 
     sop = item.get("sop") if item else None
     meta = _sop_meta(item) if item else None
+    if item:
+        _mirror_item(source, item, db)
 
     # The list view may omit the SOP body; fall back to the item's own SOP URL
     # once, only when we have nothing saved (keeps calls to Xtrium low).
