@@ -220,6 +220,20 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
         return out
     if live_error and out["origin"] == "saved":
         w.append(f"Xtrium could not be reached ({live_error}). This is the copy saved on {str(out['saved_at'] or 'an earlier date')[:16].replace('T', ' ')}. It may be out of date.")
+    out["stale"] = False
+    out["no_contract"] = False
+    # A source that was reclassified (for example MarketSegment to Organization) but still carries the old SOP, or a SOP whose code
+    # and text disagree on the version, was probably saved before a sync changed it. Checks against it would be wrong.
+    if category and entity and re.fullmatch(r"[A-Z][A-Za-z0-9]+", category.strip()) and _norm(category) != _norm(entity):
+        out["stale"] = True
+        w.append(f"The source is classified {category}, but the saved SOP is for {entity}. It was probably saved before the source was reclassified. Use Refresh from Xtrium, then run the checks again.")
+    cv = re.search(r"-v(\d+(?:\.\d+)+)\s*$", str(code or ""))
+    if cv and spec_v and cv.group(1).strip() != str(spec_v).strip().lstrip("v"):
+        out["stale"] = True
+        w.append(f"The SOP code says v{cv.group(1)} but its text says version {spec_v}. The saved copy and its code are from different versions. Use Refresh from Xtrium.")
+    if (entity and _norm(entity) == "unclassified") or (category and _norm(category) == "unclassified") or re.search(r"no\s+(deliverable\s+)?(schema\s+)?contract", md or "", re.I):
+        out["no_contract"] = True
+        w.append("This source is Unclassified: no deliverable contract applies, so there are no required fields and no schema checks. Do not mark fields Wrong on schema grounds. Ask the lead which entity type the records should follow.")
     if not md:
         w.append("The saved SOP has no text (markdown), only the summary. The rules below come from the required-field list alone.")
     if not required:

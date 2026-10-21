@@ -307,6 +307,8 @@ function SopCheck({ sourceId, projectId, onPick }: { sourceId: string; projectId
               {x.sop_code && <Chip tone="indigo">{x.sop_code}</Chip>}
               {x.known && <span className="text-xs text-gray-500">{x.required_count} required{x.category ? ` · ${x.category}` : ''}</span>}
               {x.known && x.warnings > 0 && <Chip tone="amber">{x.warnings} to settle</Chip>}
+              {x.stale && <Chip tone="amber">SOP may be outdated</Chip>}
+              {x.no_contract && <Chip tone="gray">No contract</Chip>}
               {x.known ? <><span className="text-sm text-gray-500 tabular-nums">{x.compliant} of {x.records} records</span><Chip tone={scoreTone(x.rate)}>{pc(x.rate)}</Chip></> : <Chip tone="gray">No SOP saved</Chip>}
             </li>
           ))}

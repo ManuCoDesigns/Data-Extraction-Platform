@@ -306,3 +306,9 @@ Click an extractor to see each source. **Download Excel** gives the extractor sh
 8. Settle the open findings.
 9. Read the scores.
 10. Approve or send back.
+
+## When the SOP may be outdated, or there is no contract
+- An amber "SOP may be outdated" chip means the source category and the saved SOP disagree (for example classified MarketSegment, SOP says Organization), or the SOP code version differs from its text. Use Refresh from Xtrium once, then review.
+- A "No contract" chip means the source is Unclassified. No required fields apply, so nothing is marked Wrong on schema grounds. Post a comment and ask the lead which entity type the records should follow.
+- Country fields that the SOP defines as ISO alpha-2 must be two capital letters (KE, not Kenya).
+- Required true/false fields must be an explicit true or false. An empty one is Wrong (Missing value).

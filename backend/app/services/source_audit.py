@@ -234,8 +234,7 @@ def check_retrieved(val, all_vals, now) -> dict:
         return _v("retrieved_at", val, WRONG, "format", source_says="A retrieval time cannot be in the future.", pattern="ts_future", comment="This time is in the future.", proof={"url": None, "quote": v})
     same = sum(1 for x in all_vals if x == v)
     if _is_midnight(v) and (len(all_vals) >= 2 and all(_is_midnight(x) for x in all_vals if x)):
-        return _v("retrieved_at", val, WRONG, "format", source_says="Midnight on every record looks like a placeholder. Use the real retrieval time, or delete the key.", pattern="ts_placeholder",
-                  comment="Every record of this source has T00:00:00Z. That is a placeholder, not a retrieval time.", proof={"url": None, "quote": v})
+        return _v("retrieved_at", val, HOLD, comment="Every record of this source has T00:00:00Z. It is a valid timestamp, so this is not an SOP error, but it may be a placeholder. Worth a comment: ask for the real retrieval time.", pattern="ts_placeholder")
     if len(all_vals) >= 3 and same == len(all_vals):
         return _v("retrieved_at", val, HOLD, comment="Every record has the identical time. It may be a placeholder. Compare with the work log.", pattern="ts_identical")
     return _v("retrieved_at", val, CORRECT, comment="Right shape and not in the future. Compare with the work log if you need more.")
@@ -356,6 +355,12 @@ def apply_sop(vs: list[dict], rf: dict, specs: dict, template_keys: list[str]) -
     def put(field, new):
         if field in by:
             old = by[field]
+            if old["verdict"] == WRONG and new.get("error_kind") == "schema":
+                # A field outside the SOP is a schema error first; the page finding is kept as a second note.
+                keep = old["comment"]
+                old.update({k: v for k, v in new.items() if k not in ("comment",)})
+                old["comment"] = (new["comment"] + " Also: " + keep).strip()
+                return
             if old["verdict"] == WRONG:
                 old["comment"] = (old["comment"] + " Also: " + new["comment"]).strip()
                 return

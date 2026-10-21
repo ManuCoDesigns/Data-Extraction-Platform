@@ -401,6 +401,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
       <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-white flex-wrap">
         <b className="text-sm text-gray-900 truncate max-w-[40ch]">{d.source}</b>
         {(d.sop_code || sopInfo?.sop_code) && <Chip tone="indigo">{d.sop_code || sopInfo?.sop_code}</Chip>}
+        {sopInfo && !sopInfo.error && sopInfo.stale && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings?.[0]}><Chip tone="amber">SOP may be outdated</Chip></button>}
         {sopInfo && !sopInfo.error && !sopInfo.has_sop && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings?.[0]}><Chip tone="amber">No SOP saved</Chip></button>}
         {sopInfo?.has_sop && sopInfo.warnings.length > 0 && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings.join(' ')}><Chip tone="amber">{sopInfo.warnings.length} SOP thing{sopInfo.warnings.length === 1 ? '' : 's'} to settle</Chip></button>}
         <span className="text-xs text-gray-500 tabular-nums">{pctDone}% of doubted fields settled</span>

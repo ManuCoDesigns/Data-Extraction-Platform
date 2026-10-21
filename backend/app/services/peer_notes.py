@@ -14,30 +14,33 @@ CREDIT_AT = 0.7
 # field -> (name patterns, topic cues). Topic cues let a note point at a field without naming it.
 FIELDS = {
     "segment_name": ([r"segment_name", r"segment name"],
-                     [r"market segment", r"trading category", r"platform", r"pre-?filled", r"not a (real )?segment", r"real segment", r"commodit"]),
+                     [r"market segment", r"trading category", r"platform", r"pre-?filled", r"not a (real )?segment", r"real segment", r"commodit", r"\bsegments?\b"]),
     "company_name": ([r"company_name", r"company name"], [r"legal (entity )?name", r"entity name"]),
     "evidence": ([r"(?<![Nn]o )(?<!any )(?<!without )(?<!little )\bevidence\b(?!\s+(?:of|that|for|to)\b)"], [r"verbatim", r"word for word", r"snippet", r"quote[ds]? ", r"joined|dash|hyphen"]),
     "source_url": ([r"source_url", r"source url"], [r"wrong (page|link|url)", r"link (is )?(broken|wrong|dead)", r"does not open", r"redirect", r"\b(url|link)\b[^.]{0,60}\b(wrong|broken|dead|404|tracking|param\w*|login|home ?page|cookie|going to|goes to|lands?|not (the )?(article|page))", r"\b(fix|change|update|replace)\s+(the\s+)?(url|link)\b"]),
-    "regions": ([r"regions?\b"], [r"country code", r"ISO"]),
+    "regions": ([r"regions?\b"], [r"country code", r"ISO", r"\bcountr(?:y|ies)\b"]),
+    "headquarters_country": ([r"headquarters_country", r"headquarters country", r"\bhq country"], [r"\bcountry\b"]),
     "retrieved_at": ([r"retrieved_at", r"retrieved at"], [r"timestamp"]),
-    "data_origin": ([r"data_origin", r"data origin"], []),
-    "method": ([r"\bmethod\b"], []),
+    "data_origin": ([r"data_origin", r"data origin"], [r"provenance (mismatch|pair|conflict|does not match|doesn't match)"]),
+    "method": ([r"\bmethod\b"], [r"provenance (mismatch|pair|conflict|does not match|doesn't match)"]),
 }
 VALUE_CUE_FIELDS = ("segment_name", "company_name", "regions")
 # Enum values that name their field. Underscore forms are unambiguous; plain words only count when the record carries that value.
 ENUM_TOKENS = {"data_origin": ["ai_generated", "source_derived"], "method": ["llm_extraction", "rule_extraction", "er_deterministic", "er_llm_reviewed"]}
 INSTR_START = re.compile(r"^\s*(\d+[\).:]\s*)?(please\s+)?(remove|delete|open|create|use|using|skip|replace|add|change|set|fill|what to do|for each|then|make sure|ensure|go to|click)\b", re.I)
 INSTR_INLINE = re.compile(r"\b(using|use)\b[^.]{0,60}\b(as|for)\b\s+(source_url|evidence|company_name|segment_name)", re.I)
-POSITIVE = re.compile(r"\b(look(s|ed)?|is|are|seems?|appears?|was|were|works?|working|matche?s?|checked out)(?:\s+(?:all|also|probably|still|mostly|quite|really|totally|definitely))*\s+(fine|correct|good|ok|okay|right|valid|accurate|verified|supported|matching|ok to go)\b|\b(ok|okay|fine|correct|good)\s*[.!]*\s*(,|;|$)|\bno (problems?|issues?|errors?|concerns?)\b|\bnothing (is )?wrong\b|\b(they|it|all|everything) (all )?match(es)?\b|\bworks\b", re.I)
-STRONG_POSITIVE = re.compile(r"\bno (problems?|issues?|errors?|concerns?)\b|\bnothing (is )?wrong\b", re.I)
+POSITIVE = re.compile(r"\b(?:passed|valid|ok|okay)\b[^.]{0,60}\b(?:ok|okay|valid|passed)\b|\b(look(s|ed)?|is|are|seems?|appears?|was|were|works?|working|matche?s?|checked out)(?:\s+(?:all|also|probably|still|mostly|quite|really|totally|definitely))*\s+(fine|correct|good|ok|okay|right|valid|accurate|verified|supported|matching|ok to go)\b|\b(ok|okay|fine|correct|good)\s*[.!]*\s*(,|;|$)|\bno (problems?|issues?|errors?|concerns?)\b|\bnothing (is )?wrong\b|\b(they|it|all|everything) (all )?match(es)?\b|\bworks\b", re.I)
+STRONG_POSITIVE = re.compile(r"\bno (problems?|issues?|errors?|concerns?|duplicates?|missing( \w+)?|empty( \w+)?|mismatch\w*)\b|\bnothing (is )?wrong\b", re.I)
 NEGATIVE = re.compile(r"\b(not|n't|wrong|incorrect|missing|broken|fails?|invalid|mismatch\w*|empty|bad|dead|duplicate[ds]?|should|must|needs?)\b|\bno\b", re.I)
-SPLIT_CONTRAST = re.compile(r"\s*[,;]?\s*\b(?:but|however|although|though|yet)\b[,:]?\s*", re.I)
-UNVERIFIED = re.compile(r"\b(could not|couldn't|cannot|can't|unable to|wasn't able to|was not able to)\s+(verify|check|open|access|load|reach|confirm)\b|\bbehind a (login|paywall|sign-?in)\b|\bpaywall(ed)?\b", re.I)
+SPLIT_CONTRAST = re.compile(r"\s*[,;]?\s*\b(?:but|however|although|though|yet|except|maybe|perhaps|apart from)\b[,:]?\s*", re.I)
+UNVERIFIED = re.compile(r"\bnot (yet |been )?verified\b|\bunverified\b|\b(did not|didn't|haven't|have not|hasn't|has not) (verify|verified|check|checked|open|opened)\b|\b(could not|couldn't|cannot|can't|unable to|wasn't able to|was not able to)\s+(verify|check|open|access|load|reach|confirm)\b|\bbehind a (login|paywall|sign-?in)\b|\bpaywall(ed)?\b", re.I)
 ACK = re.compile(r"^\s*(ok(ay)?|noted|done|thanks?|will do|sure)\W*$", re.I)
 
 
 def clauses(text: str) -> list[str]:
     t = re.sub(r"https?://\S+", "<URL>", text or "")      # links are never evidence of a complaint
+    # a dash inside a quoted snippet is part of the quote, not a list bullet
+    t = re.sub(r'["\u201c][^"\u201d]*["\u201d]', lambda m: m.group(0).replace(" - ", " \u2013 ").replace(" * ", " \u00b7 "), t)
     t = re.sub(r"\s[-*]\s", "\n", t)                       # list bullets -> new clause
     parts = re.split(r"(?<=[.!?])\s+|\n+|(?=\b\d\.\s)", t)
     out: list[str] = []
@@ -79,6 +82,8 @@ def _scan(note: str, record: dict | None, names: list[str] | None):
         for f, (pats, cues) in FIELDS.items():
             if names is not None and f not in names:
                 continue
+            if f == "headquarters_country" and names is not None and "regions" in names:
+                cues = []          # "country" is ambiguous when the record also has regions; only the full name counts
             if any(re.search(p, c, re.I) for p in pats):
                 yield f, 0.9, c, "names the field"
             elif any(re.search(q, c, re.I) for q in cues):
@@ -91,7 +96,9 @@ def _scan(note: str, record: dict | None, names: list[str] | None):
         for f, v in (record or {}).items():
             if names is not None and f not in names:
                 continue
-            if isinstance(v, str) and 4 <= len(v) <= 40 and f in VALUE_CUE_FIELDS and re.search(re.escape(v), c, re.I):
+            # A value inside a longer quoted sentence (an evidence snippet being criticised) is not a complaint about the value itself.
+            cq = re.sub(r"[\"\u201c\u2018][^\"\u201d\u2019]{%d,}[\"\u201d\u2019]" % (len(v) + 12), " ", c) if isinstance(v, str) else c
+            if isinstance(v, str) and 4 <= len(v) <= 40 and f in VALUE_CUE_FIELDS and re.search(re.escape(v), cq, re.I):
                 yield f, 0.75, c, f"quotes the delivered value '{v}'"
             elif isinstance(v, str) and f in ENUM_TOKENS and len(v) >= 4 and re.search(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(v), c, re.I):
                 yield f, 0.75, c, f"quotes the delivered value '{v}'"
