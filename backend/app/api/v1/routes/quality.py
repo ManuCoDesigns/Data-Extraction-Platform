@@ -814,7 +814,8 @@ def _review_data(db: Session, s: Source, full: bool, uid: str) -> dict:
                        "why": _peer_why(p["comment"], all_names, recs),
                        "unknown": sorted({m for m in re.findall(r"`([A-Za-z][A-Za-z0-9_]{2,40})`", p["comment"] or "") if m not in all_names and "_" in m})} for p in peers], "peer_done": total > 0 and done == total,
             "totals": tot, "records": out,
-            "status": getattr(s.status, "value", s.status), "approved_records": sum(1 for r in out if r["review_status"] == "approved"), "total_records": len(out)}
+            "status": getattr(s.status, "value", s.status), "approved_records": sum(1 for r in out if r["review_status"] == "approved"), "total_records": len(out),
+            "edit_lock": __import__("app.services.record_locks", fromlist=["x"]).source_lock_reason(s)}  # edit_lock
 
 
 def _peer_why(comment: str, names: list, recs: list) -> dict:

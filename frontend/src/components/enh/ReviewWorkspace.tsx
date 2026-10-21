@@ -402,6 +402,9 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         </span>
       </div>
       <p className={cn(inOverlay ? "hidden" : "hidden md:block", "text-[11px] text-gray-500 px-1")}>Keys: ↑ ↓ field · c correct · w wrong · m comment · y confirm the audit's suggestion · n next doubted · j k record · s side by side · Esc close</p>
+      {d.edit_lock && (
+        <div className="rounded-xl border border-indigo-200 bg-indigo-50 text-indigo-900 px-3 py-2 text-sm"><b>Locked for editing.</b> {d.edit_lock}</div>
+      )}
       {stage === 'sent' && rec && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 text-sm">
           <b>Sent back{rec.returned_at ? ` on ${new Date(rec.returned_at).toLocaleDateString()}` : ''}. Waiting for the extractor.</b> Nothing to do here until it comes back. The fields you marked stay as they are, so you can re-check only what changed.

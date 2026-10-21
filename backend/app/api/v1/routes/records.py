@@ -117,6 +117,14 @@ def review_record(
     if payload.action not in action_map:
         raise HTTPException(status_code=422, detail=f"Unknown action: {payload.action}")
 
+    if payload.field_overrides:  # records.field_override.lock
+        from app.models.all_models import ExtractionJob as _EJ, Source as _Src
+        from app.services import record_locks as _rl
+        _job = db.query(_EJ).filter(_EJ.id == r.job_id).first()
+        _src = db.query(_Src).filter(_Src.id == _job.source_id).first() if _job and _job.source_id else None
+        if _src is not None:
+            _rl.assert_record_editable(_src, r)
+
     # Apply field overrides before setting review status
     if payload.field_overrides:
         for field_name, new_value in payload.field_overrides.items():
