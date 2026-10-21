@@ -16,16 +16,23 @@ FIELDS = {
     "segment_name": ([r"segment_name", r"segment name"],
                      [r"market segment", r"trading category", r"platform", r"pre-?filled", r"not a (real )?segment", r"real segment", r"commodit"]),
     "company_name": ([r"company_name", r"company name"], [r"legal (entity )?name", r"entity name"]),
-    "evidence": ([r"evidence"], [r"verbatim", r"word for word", r"snippet", r"quote[ds]? ", r"joined|dash|hyphen"]),
-    "source_url": ([r"source_url", r"source url"], [r"wrong (page|link|url)", r"link (is )?(broken|wrong|dead)", r"does not open", r"redirect"]),
+    "evidence": ([r"(?<![Nn]o )(?<!any )(?<!without )(?<!little )\bevidence\b(?!\s+(?:of|that|for|to)\b)"], [r"verbatim", r"word for word", r"snippet", r"quote[ds]? ", r"joined|dash|hyphen"]),
+    "source_url": ([r"source_url", r"source url"], [r"wrong (page|link|url)", r"link (is )?(broken|wrong|dead)", r"does not open", r"redirect", r"\b(url|link)\b[^.]{0,60}\b(wrong|broken|dead|404|tracking|param\w*|login|home ?page|cookie|going to|goes to|lands?|not (the )?(article|page))", r"\b(fix|change|update|replace)\s+(the\s+)?(url|link)\b"]),
     "regions": ([r"regions?\b"], [r"country code", r"ISO"]),
-    "retrieved_at": ([r"retrieved_at"], [r"timestamp"]),
-    "data_origin": ([r"data_origin"], []),
+    "retrieved_at": ([r"retrieved_at", r"retrieved at"], [r"timestamp"]),
+    "data_origin": ([r"data_origin", r"data origin"], []),
     "method": ([r"\bmethod\b"], []),
 }
 VALUE_CUE_FIELDS = ("segment_name", "company_name", "regions")
-INSTR_START = re.compile(r"^\s*(\d+[\).:]\s*)?(please\s+)?(remove|delete|open|create|use|using|skip|replace|add|change|set|fill|what to do|for each|then)\b", re.I)
+# Enum values that name their field. Underscore forms are unambiguous; plain words only count when the record carries that value.
+ENUM_TOKENS = {"data_origin": ["ai_generated", "source_derived"], "method": ["llm_extraction", "rule_extraction", "er_deterministic", "er_llm_reviewed"]}
+INSTR_START = re.compile(r"^\s*(\d+[\).:]\s*)?(please\s+)?(remove|delete|open|create|use|using|skip|replace|add|change|set|fill|what to do|for each|then|make sure|ensure|go to|click)\b", re.I)
 INSTR_INLINE = re.compile(r"\b(using|use)\b[^.]{0,60}\b(as|for)\b\s+(source_url|evidence|company_name|segment_name)", re.I)
+POSITIVE = re.compile(r"\b(look(s|ed)?|is|are|seems?|appears?|was|were|works?|working|matche?s?|checked out)(?:\s+(?:all|also|probably|still|mostly|quite|really|totally|definitely))*\s+(fine|correct|good|ok|okay|right|valid|accurate|verified|supported|matching|ok to go)\b|\b(ok|okay|fine|correct|good)\s*[.!]*\s*(,|;|$)|\bno (problems?|issues?|errors?|concerns?)\b|\bnothing (is )?wrong\b|\b(they|it|all|everything) (all )?match(es)?\b|\bworks\b", re.I)
+STRONG_POSITIVE = re.compile(r"\bno (problems?|issues?|errors?|concerns?)\b|\bnothing (is )?wrong\b", re.I)
+NEGATIVE = re.compile(r"\b(not|n't|wrong|incorrect|missing|broken|fails?|invalid|mismatch\w*|empty|bad|dead|duplicate[ds]?|should|must|needs?)\b|\bno\b", re.I)
+SPLIT_CONTRAST = re.compile(r"\s*[,;]?\s*\b(?:but|however|although|though|yet)\b[,:]?\s*", re.I)
+UNVERIFIED = re.compile(r"\b(could not|couldn't|cannot|can't|unable to|wasn't able to|was not able to)\s+(verify|check|open|access|load|reach|confirm)\b|\bbehind a (login|paywall|sign-?in)\b|\bpaywall(ed)?\b", re.I)
 ACK = re.compile(r"^\s*(ok(ay)?|noted|done|thanks?|will do|sure)\W*$", re.I)
 
 
@@ -33,7 +40,10 @@ def clauses(text: str) -> list[str]:
     t = re.sub(r"https?://\S+", "<URL>", text or "")      # links are never evidence of a complaint
     t = re.sub(r"\s[-*]\s", "\n", t)                       # list bullets -> new clause
     parts = re.split(r"(?<=[.!?])\s+|\n+|(?=\b\d\.\s)", t)
-    return [p.strip() for p in parts if p and p.strip()]
+    out: list[str] = []
+    for p in parts:
+        out.extend(x.strip() for x in SPLIT_CONTRAST.split(p) if x and x.strip(" .,;"))
+    return [p.strip() for p in out if p and p.strip()]
 
 
 def kind(clause: str) -> str:
@@ -41,6 +51,10 @@ def kind(clause: str) -> str:
         return "ack"
     if INSTR_START.match(clause) or INSTR_INLINE.search(clause):
         return "instruction"
+    if UNVERIFIED.search(clause):
+        return "unverified"
+    if POSITIVE.search(clause) and not NEGATIVE.search(STRONG_POSITIVE.sub("", clause)):
+        return "positive"
     return "complaint"
 
 
@@ -51,13 +65,14 @@ def _generic_name(clause: str, name: str) -> bool:
     if "_" in name or " " in name:
         return bool(re.search(edge % re.escape(name), clause, re.I) or re.search(edge % re.escape(spaced), clause, re.I))
     w = re.escape(name)
-    return bool(re.search(r"[`'\"*]%s[`'\"*]" % w, clause, re.I) or re.search(r"(?<![A-Za-z0-9_])%s\s*:" % w, clause, re.I)
-                or re.search(r"(?<![A-Za-z0-9_])%s\s+(field|column)" % w, clause, re.I) or re.search(r"(field|column)\s+%s(?![A-Za-z0-9_])" % w, clause, re.I))
+    if (re.search(r"[`'\"*]%s[`'\"*]" % w, clause, re.I) or re.search(r"(?<![A-Za-z0-9_])%s\s*:" % w, clause, re.I)
+            or re.search(r"(?<![A-Za-z0-9_])%s\s+(field|column|value)" % w, clause, re.I) or re.search(r"(field|column)\s+%s(?![A-Za-z0-9_])" % w, clause, re.I)):
+        return True
+    # as the subject of the clause: "Industry should be ...", "The confidence is too high", "name is empty"
+    return bool(re.search(r"^\W*(?:the\s+|this\s+|its\s+)?%s\s+(?:(?:[\d.,%%]+|'[^']*'|\"[^\"]*\")\s+)?(?:is|are|was|should|must|needs?|has|have|shows?|says?|looks?|seems?|too|not|does|doesn't|isn't)\b" % w, clause, re.I))
 
 
-def match(note: str, record: dict | None = None, names: list[str] | None = None) -> dict[str, float]:
-    """field -> confidence. `names` limits the answer to fields that exist on the record or source."""
-    out: dict[str, float] = {}
+def _scan(note: str, record: dict | None, names: list[str] | None):
     for c in clauses(note):
         if kind(c) != "complaint":
             continue
@@ -65,20 +80,44 @@ def match(note: str, record: dict | None = None, names: list[str] | None = None)
             if names is not None and f not in names:
                 continue
             if any(re.search(p, c, re.I) for p in pats):
-                out[f] = max(out.get(f, 0), 0.9)
+                yield f, 0.9, c, "names the field"
             elif any(re.search(q, c, re.I) for q in cues):
-                out[f] = max(out.get(f, 0), 0.7)
+                yield f, 0.7, c, "topic cue: " + next(q for q in cues if re.search(q, c, re.I)).replace("\\b", "").replace("\\", "")[:30]
         for f in (names or []):
             if f in FIELDS or not f or f.startswith("_"):
                 continue
             if _generic_name(c, f):
-                out[f] = max(out.get(f, 0), 0.9)
+                yield f, 0.9, c, "names the field"
         for f, v in (record or {}).items():
             if names is not None and f not in names:
                 continue
             if isinstance(v, str) and 4 <= len(v) <= 40 and f in VALUE_CUE_FIELDS and re.search(re.escape(v), c, re.I):
-                out[f] = max(out.get(f, 0), 0.75)
+                yield f, 0.75, c, f"quotes the delivered value '{v}'"
+            elif isinstance(v, str) and f in ENUM_TOKENS and len(v) >= 4 and re.search(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % re.escape(v), c, re.I):
+                yield f, 0.75, c, f"quotes the delivered value '{v}'"
+        for f, toks in ENUM_TOKENS.items():
+            if (names is None or f in names) and any(re.search(r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])" % t, c, re.I) for t in toks):
+                yield f, 0.7, c, "names one of its allowed values"
+
+
+def match(note: str, record: dict | None = None, names: list[str] | None = None) -> dict[str, float]:
+    """field -> confidence. `names` limits the answer to fields that exist on the record or source."""
+    out: dict[str, float] = {}
+    for f, sc, _c, _w in _scan(note, record, names):
+        out[f] = max(out.get(f, 0), sc)
     return out
+
+
+def explain(note: str, record: dict | None = None, names: list[str] | None = None) -> dict[str, dict]:
+    """field -> {score, clause, why} for every credited field: the sentence that pointed at it and the reason."""
+    best: dict[str, dict] = {}
+    for f, sc, c, w in _scan(note, record, names):
+        if sc >= CREDIT_AT and sc > best.get(f, {}).get("score", 0):
+            best[f] = {"score": sc, "clause": c, "why": w}
+    return best
+
+
+DEFAULT_NAMES = list(FIELDS) + ["industry", "confidence", "commodity_id", "name"]
 
 
 def fields_for(note: str, record: dict | None = None, names: list[str] | None = None) -> list[str]:
@@ -99,7 +138,7 @@ def score(cases: list[dict]) -> dict:
     fp: dict = {}
     fn: dict = {}
     for c in cases:
-        got = set(fields_for(c["note"], c.get("record")))
+        got = set(fields_for(c["note"], c.get("record"), c.get("names") or DEFAULT_NAMES))
         want = set(c["fields"])
         for f in got & want:
             tp[f] = tp.get(f, 0) + 1

@@ -388,7 +388,8 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
     <div className="space-y-1.5">
       {d.peers.filter((p: any) => p.comment).map((p: any) => (
         <div key={p.id} className="rounded-xl bg-gray-50 px-3 py-2 text-sm"><span className="font-semibold text-gray-900">{p.name}</span><span className="text-gray-400"> wrote </span><span className="text-gray-700">{p.comment}</span>
-          {p.fields?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1"><span className="text-[11px] text-gray-500">Fields it points at:</span>{p.fields.map((n: string) => <Chip key={n} tone="red">{n}</Chip>)}</span>}
+          {p.fields?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1"><span className="text-[11px] text-gray-500">Fields it points at:</span>{p.fields.map((n: string) => <Chip key={n} tone="red" title={p.why?.[n] ? `${p.why[n].why}: "${p.why[n].clause}"` : undefined}>{n}</Chip>)}</span>}
+          {!(p.fields?.length > 0) && p.comment && <span className="block text-[11px] text-gray-400 mt-1">Not tied to a field: it reads as an acknowledgement, a how-to step, or names no field. Comment on the field itself to credit it.</span>}
           {p.unknown?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1"><span className="text-[11px] text-gray-500">Named but not a field on this source:</span>{p.unknown.map((n: string) => <Chip key={n} tone="amber" title="Not in the record, the schema or the SOP. Check it by hand.">{n}</Chip>)}</span>}
         </div>
       ))}

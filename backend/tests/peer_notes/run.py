@@ -8,7 +8,7 @@ from app.services import peer_notes as pn
 cases = [json.loads(l) for l in open(os.path.join(HERE, "training_examples.jsonl"), encoding="utf-8") if l.strip()]
 bad = 0
 for c in cases:
-    got = pn.fields_for(c["note"], c.get("record"))
+    got = pn.fields_for(c["note"], c.get("record"), c.get("names") or pn.DEFAULT_NAMES)
     ok = got == sorted(c["fields"])
     bad += (not ok)
     print(("PASS" if ok else "FAIL"), c["id"], "expected", c["fields"], "got", got)
