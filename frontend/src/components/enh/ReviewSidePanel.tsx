@@ -10,8 +10,8 @@ type Tab = 'sop' | 'text' | 'web' | 'page'
 const present = (v: unknown) => !(v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0))
 
 /** Everything needed to check a record, beside the record: the SOP, the text it came from, the website, and the page as Nimble reads it. */
-export function ReviewSidePanel({ sourceId, website, rec, sopRequired, activeValue, activeField, pageText, pageBusy, nimbleReady, onFetchPage }: {
-  sourceId: string; website?: string | null; rec: any; sopRequired: string[]; activeValue: unknown; activeField: string
+export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpField, activeValue, activeField, pageText, pageBusy, nimbleReady, onFetchPage }: {
+  sourceId: string; website?: string | null; rec: any; sopRequired: string[]; onJumpField?: (name: string) => void; activeValue: unknown; activeField: string
   pageText?: string; pageBusy: boolean; nimbleReady: boolean; onFetchPage: () => void
 }) {
   const [tab, setTabRaw] = useState<Tab>(() => { try { const v = localStorage.getItem('dx.reviewTab'); return (v === 'text' || v === 'web' || v === 'page' ? v : 'sop') as Tab } catch { return 'sop' } })
@@ -37,7 +37,7 @@ export function ReviewSidePanel({ sourceId, website, rec, sopRequired, activeVal
   // The SOP's required fields against this record, so gaps are visible without reading the guide.
   const checklist = sopRequired.map(n => {
     const f = rec?.fields?.find((x: any) => x.name === n)
-    return { name: n, ok: !!f && present(f.value) && !/^(n\/a|na|tbd|unknown|none|null|-|--|\?)$/i.test(String(f.value).trim()) }
+    return { name: n, onRecord: !!f, ok: !!f && present(f.value) && !/^(n\/a|na|tbd|unknown|none|null|-|--|\?)$/i.test(String(f.value).trim()) }
   })
   const missing = checklist.filter(c => !c.ok).length
 
@@ -54,11 +54,21 @@ export function ReviewSidePanel({ sourceId, website, rec, sopRequired, activeVal
               <div>
                 <div className="flex items-center gap-2 mb-2"><h3 className="text-sm font-bold text-gray-900 m-0">Required by the SOP</h3><Chip tone={missing ? 'red' : 'green'}>{missing ? `${missing} missing on this record` : 'All filled in'}</Chip></div>
                 <ul className="m-0 p-0 list-none grid gap-1.5 sm:grid-cols-2">
-                  {checklist.map(c => <li key={c.name} className="text-sm flex items-center gap-2"><span className={c.ok ? 'text-emerald-600' : 'text-red-600'} aria-hidden>{c.ok ? '✓' : '✗'}</span><span className={c.ok ? 'text-gray-700' : 'text-red-700 font-semibold'}>{c.name}</span></li>)}
+                  {checklist.map(c => (
+                    <li key={c.name}>
+                      <button type="button" disabled={!c.onRecord || !onJumpField} onClick={() => onJumpField?.(c.name)}
+                        title={c.onRecord ? 'Go to this field in the review' : 'This record has no such field'}
+                        className={'w-full text-left text-sm flex items-center gap-2 rounded-lg px-2 py-1 border ' + (c.ok ? 'border-gray-100 hover:bg-gray-50' : 'border-red-200 bg-red-50/60 hover:bg-red-50') + (c.name === activeField ? ' ring-2 ring-brand-500' : '')}>
+                        <span className={c.ok ? 'text-emerald-600' : 'text-red-600'} aria-hidden>{c.ok ? '✓' : '✗'}</span>
+                        <span className={'font-mono text-[12.5px] ' + (c.ok ? 'text-gray-700' : 'text-red-700 font-semibold')}>{c.name}</span>
+                        <span className="ml-auto text-[11px] text-gray-400">{c.ok ? 'filled' : c.onRecord ? 'empty' : 'not on record'}</span>
+                      </button>
+                    </li>
+                  ))}
                 </ul>
               </div>
             )}
-            {sopErr ? <Blank title={sopErr} /> : !sop ? <Skeletons rows={4} /> : <SopViewer data={sop} />}
+            {sopErr ? <Blank title={sopErr} /> : !sop ? <Skeletons rows={4} /> : <SopViewer data={sop} compact />}
           </div>
         )}
         {tab === 'text' && (rec?.raw ? <Highlighted text={prettyJson(rec.raw)} needle={activeValue} /> : <Blank title="No source text was saved with this record" />)}

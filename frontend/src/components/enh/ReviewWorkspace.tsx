@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { qualityApi, sourcesApi } from '@/api/client'
 import { Blank, Chip, Panel, SelectBox, Skeletons, Tabs, type Tone } from '@/components/enh/kit'
 import { CATEGORY_OPTIONS } from '@/components/enh/FlagErrorModal'
 import { Button, cn, toast } from '@/components/ui'
+import { PeerNote } from '@/components/enh/PeerNote'
 import { ReviewSidePanel } from '@/components/enh/ReviewSidePanel'
 import { SourceChat } from '@/components/enh/SourceChat'
 import { SourceActivity } from '@/components/enh/SourceActivity'
@@ -184,6 +185,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const [onlyFlagged, setOnlyFlagged] = useState(true)
   const [hideDone, setHideDone] = useState(false)
   const [active, setActive] = useState('')
+  const [helpOpen, setHelpOpen] = useState(false)
   const [focus, setFocus] = useState(false)
   useEffect(() => {
     if (!focus) return
@@ -386,16 +388,10 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const activeValue = rec?.fields?.find((f: any) => f.name === active)?.value
   const peerNotes = d.peers.some((p: any) => p.comment) && (
     <div className="space-y-1.5">
-      {d.peers.filter((p: any) => p.comment).map((p: any) => (
-        <div key={p.id} className="rounded-xl bg-gray-50 px-3 py-2 text-sm"><span className="font-semibold text-gray-900">{p.name}</span><span className="text-gray-400"> wrote </span><span className="text-gray-700">{p.comment}</span>
-          {p.fields?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1"><span className="text-[11px] text-gray-500">Fields it points at:</span>{p.fields.map((n: string) => <Chip key={n} tone="red" title={p.why?.[n] ? `${p.why[n].why}: "${p.why[n].clause}"` : undefined}>{n}</Chip>)}</span>}
-          {!(p.fields?.length > 0) && p.comment && <span className="block text-[11px] text-gray-400 mt-1">Not tied to a field: it reads as an acknowledgement, a how-to step, or names no field. Comment on the field itself to credit it.</span>}
-          {p.unknown?.length > 0 && <span className="flex items-center gap-1.5 flex-wrap mt-1"><span className="text-[11px] text-gray-500">Named but not a field on this source:</span>{p.unknown.map((n: string) => <Chip key={n} tone="amber" title="Not in the record, the schema or the SOP. Check it by hand.">{n}</Chip>)}</span>}
-        </div>
-      ))}
+      {d.peers.filter((p: any) => p.comment).map((p: any) => <PeerNote key={p.id} p={p} />)}
     </div>
   )
-
+  const jumpToField = (n: string) => { setOnlyFlagged(false); setHideDone(false); setActive(n) }
   if (inOverlay) return createPortal(
     <div className="fixed inset-0 z-[60] bg-gray-50 flex flex-col" role="dialog" aria-modal="true" aria-label="Side by side review">
       <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-200 bg-white flex-wrap">
@@ -405,7 +401,17 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         {sopInfo && !sopInfo.error && !sopInfo.has_sop && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings?.[0]}><Chip tone="amber">No SOP saved</Chip></button>}
         {sopInfo?.has_sop && sopInfo.warnings.length > 0 && <button type="button" onClick={() => setPanel('sop')} title={sopInfo.warnings.join(' ')}><Chip tone="amber">{sopInfo.warnings.length} SOP thing{sopInfo.warnings.length === 1 ? '' : 's'} to settle</Chip></button>}
         <span className="text-xs text-gray-500 tabular-nums">{pctDone}% of doubted fields settled</span>
-        <span className="text-xs text-gray-400 hidden xl:inline">↑ ↓ field · c correct · w wrong · m comment · n next doubted · j k record · Esc close</span>
+        <span className="relative">
+          <button type="button" onClick={() => setHelpOpen(o => !o)} aria-expanded={helpOpen} aria-label="Keyboard shortcuts" className="h-6 w-6 rounded-full border border-gray-200 text-xs font-bold text-gray-500 hover:bg-gray-50">?</button>
+          {helpOpen && (
+            <div role="dialog" aria-label="Keyboard shortcuts" className="absolute left-0 top-8 z-20 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-lg text-xs text-gray-700">
+              <div className="flex items-center justify-between mb-1.5"><b>Keyboard shortcuts</b><button type="button" onClick={() => setHelpOpen(false)} className="text-gray-400 hover:text-gray-700" aria-label="Close">✕</button></div>
+              <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                {[['↑ ↓', 'Previous or next field'], ['c', 'Correct'], ['w', 'Wrong'], ['m', 'Comment'], ['y', 'Confirm the suggestion'], ['n', 'Next doubted field'], ['j  k', 'Next or previous record'], ['Esc', 'Close side by side']].map(([k, v]) => <Fragment key={k}><dt className="font-mono font-semibold text-gray-900">{k}</dt><dd className="m-0">{v}</dd></Fragment>)}
+              </dl>
+            </div>
+          )}
+        </span>
         <span className="ml-auto"><Button size="sm" variant="secondary" onClick={() => setFocus(false)}>Close side by side</Button></span>
       </div>
       <div className="flex-1 min-h-0 grid gap-3 p-3 lg:grid-cols-[180px_minmax(0,1fr)_minmax(380px,46%)] overflow-y-auto lg:overflow-hidden">
@@ -415,7 +421,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
           {fieldsSection}
         </div>
         <div className="min-h-[70vh] lg:min-h-0 lg:h-full">
-          <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} activeValue={activeValue} activeField={active}
+          <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} activeValue={activeValue} activeField={active}
             pageText={site[rid]?.ok ? site[rid].text : undefined} pageBusy={siteBusy} nimbleReady={nimble === true} onFetchPage={runSite} />
         </div>
       </div>
@@ -463,7 +469,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         {fieldsSection}
         {docked && (
           <div className="sticky top-3 self-start h-[calc(100vh-1.5rem)]">
-            <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} activeValue={activeValue} activeField={active}
+            <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} activeValue={activeValue} activeField={active}
               pageText={site[rid]?.ok ? site[rid].text : undefined} pageBusy={siteBusy} nimbleReady={nimble === true} onFetchPage={runSite} />
           </div>
         )}

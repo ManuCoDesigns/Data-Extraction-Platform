@@ -247,7 +247,7 @@ const chipCls = 'inline-flex items-center text-[11px] font-semibold px-2 py-1 ro
 type Tab = 'guide' | 'template' | 'schema'
 
 // ── The SOP, laid out for people who have to work from it ────────────────────
-export function SopViewer({ data }: { data: any }) {
+export function SopViewer({ data, compact = false }: { data: any; compact?: boolean }) {
   const sop = data.sop
   const meta = data.meta ?? {}
   const [tab, setTab] = useState<Tab>('guide')
@@ -294,6 +294,35 @@ export function SopViewer({ data }: { data: any }) {
         </p>
         <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9ca3af' }}>Saved {new Date().toLocaleString()}</p>
       </div>
+      {compact && (
+        <div className="sop-noprint sticky top-0 z-10 -mx-1 px-1 py-2 bg-white/95 backdrop-blur border-b border-gray-100 flex items-center gap-2 flex-wrap">
+          {code && <span className={cn(chipCls, 'bg-gray-900 text-white font-mono')}>{code}</span>}
+          {(sop?.entity ?? meta.target_entity) && <span className={cn(chipCls, 'bg-violet-50 text-violet-700')}>{sop?.entity ?? meta.target_entity}</span>}
+          {sop?.spec_version && <span className={cn(chipCls, 'bg-blue-50 text-blue-700')}>v{sop.spec_version}</span>}
+          <div className="ml-auto flex items-center gap-1.5">
+            {tabs.filter(t => t.show).map(t => (
+              <button key={t.id} onClick={() => setTab(t.id)} aria-pressed={tab === t.id}
+                className={cn('inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border transition', tab === t.id ? 'border-brand-600 text-brand-700 bg-brand-50' : 'border-gray-200 text-gray-600 hover:bg-gray-50')}>
+                <t.icon className="w-3.5 h-3.5" /> {t.label}
+              </button>
+            ))}
+            <button onClick={() => setPrinting(true)} disabled={printing} title="Opens the print dialog - choose Save as PDF"
+              className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-700 px-2.5 py-1 rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50">
+              <FileDown className="w-3.5 h-3.5" /> PDF
+            </button>
+          </div>
+        </div>
+      )}
+      {compact && toc.length > 1 && shows('guide') && (
+        <label className="sop-noprint flex items-center gap-2 text-xs text-gray-500">Jump to
+          <select defaultValue="" onChange={e => { const el = document.getElementById(e.target.value); el?.scrollIntoView({ block: 'start', behavior: 'smooth' }); e.target.value = '' }}
+            className="flex-1 min-w-0 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700">
+            <option value="" disabled>Section…</option>
+            {toc.map(h => <option key={h.id} value={h.id}>{(h.level === 2 ? '   ' : '') + h.text.replace(/`/g, '')}</option>)}
+          </select>
+        </label>
+      )}
+      {!compact && (
       <div className="relative bg-white rounded-2xl border border-gray-100 shadow-card overflow-hidden">
         <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-brand-500 to-brand-700" />
         <button onClick={() => setPrinting(true)} disabled={printing}
@@ -337,10 +366,11 @@ export function SopViewer({ data }: { data: any }) {
           ))}
         </div>
       </div>
+      )}
 
       {shows('guide') && (
-        <div className="grid lg:grid-cols-[220px_1fr] gap-6 items-start">
-          {toc.length > 1 && (
+        <div className={compact ? "grid gap-3" : "grid lg:grid-cols-[220px_1fr] gap-6 items-start"}>
+          {!compact && toc.length > 1 && (
             <nav aria-label="Contents" className="sop-noprint hidden lg:block lg:sticky lg:top-4 bg-white rounded-2xl border border-gray-100 shadow-card px-4 py-4">
               <p className="text-[11px] font-bold text-gray-400 uppercase tracking-wider m-0 mb-2">Contents</p>
               <ul className="list-none m-0 p-0 space-y-1.5">
@@ -354,7 +384,7 @@ export function SopViewer({ data }: { data: any }) {
               </ul>
             </nav>
           )}
-          <div className="bg-white rounded-2xl border border-gray-100 shadow-card px-6 py-5 min-w-0">
+          <div className={cn("bg-white rounded-2xl border border-gray-100 shadow-card min-w-0", compact ? "px-4 py-4" : "px-6 py-5")}>
             <MarkdownView blocks={blocks} />
           </div>
         </div>
