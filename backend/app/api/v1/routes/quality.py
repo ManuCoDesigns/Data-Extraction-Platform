@@ -220,7 +220,9 @@ def _sop_for(s: Source) -> dict:
     except Exception:
         return {**base, "specs": {}, "entity": None, "category": getattr(s, "category", None), "warnings": []}
     specs = sr.field_specs(b)
-    required = list(dict.fromkeys(list(base["required"]) + [n for n, sp in specs.items() if sp.get("required")]))
+    # base["required"] is Xtrium's flat list; the reader drops names that only exist inside a list such as facilities[] or products[]
+    kept = set(b.get("required_fields") or [])
+    required = list(dict.fromkeys([f for f in base["required"] if f in kept or not b.get("has_sop")] + [n for n, sp in specs.items() if sp.get("required")]))
     keys = set(b.get("template_keys") or []) | set(specs) | set(required)
     return {"known": base["known"], "sop_code": base["sop_code"] or b.get("sop_code"), "required": required, "specs": specs, "blocks": sr.block_specs(b),
             "allowed": keys if (b.get("template_keys") or len(specs) >= 3) else base["allowed"], "entity": b.get("entity"), "category": getattr(s, "category", None),
@@ -268,6 +270,7 @@ def scan_source(source_id: str, db: Session = Depends(get_db), user: User = Depe
     have = {(f.record_id, f.field, f.rule) for f in db.query(QualityFinding).filter(QualityFinding.source_id == s.id, QualityFinding.origin == "system").all()}
     created = 0
     seen_names: dict = {}
+    produced: set = set()
     req = _sop_for(s)
     sop_on = bool(req["known"] and req["required"])
     for r in recs:
@@ -281,6 +284,7 @@ def scan_source(source_id: str, db: Session = Depends(get_db), user: User = Depe
             hits += [{"field": x["field"], "category": "sop_rule", "rule": "sop_allowed_values", "severity": "major", "message": (f"{code} allows only: {', '.join(x['allowed'])}. This record has: {x['value']}." if x["allowed"] else f"{code}: {x['value']} is {x.get('reason')}.")} for x in sc["bad"] if not x.get("case_only")]
         for h in hits:
             key = (r.id, h["field"], h["rule"])
+            produced.add(key)
             if key in have:
                 continue
             have.add(key)
@@ -296,8 +300,20 @@ def scan_source(source_id: str, db: Session = Depends(get_db), user: User = Depe
                                       note="Another record in this source has the same name.", auto_verdict="confirmed", auto_note="Found by the system's own checks."))
                 created += 1
             seen_names.setdefault(nm, r.id)
+    # A SOP check that the current SOP no longer makes (for example a field that turned out to be required only inside a list) is
+    # withdrawn, so it stops counting against the extractor. Findings a person decided on are left alone.
+    withdrawn = 0
+    if sop_on:
+        live = {r.id for r in recs}
+        for f in db.query(QualityFinding).filter(QualityFinding.source_id == s.id, QualityFinding.origin == "system", QualityFinding.status == "open",
+                                                 QualityFinding.rule.in_(["sop_required", "sop_extra", "sop_allowed_values"])).all():
+            if f.record_id in live and (f.record_id, f.field, f.rule) not in produced:
+                f.status = "dismissed"
+                f.auto_verdict = "not_reproduced"
+                f.auto_note = "The current SOP no longer asks for this, so the check was withdrawn."
+                withdrawn += 1
     db.commit()
-    return {"created": created, "records": len(recs), "sop_checked": sop_on}
+    return {"created": created, "withdrawn": withdrawn, "records": len(recs), "sop_checked": sop_on}
 
 
 @router.get("/sources/{source_id}/sample")

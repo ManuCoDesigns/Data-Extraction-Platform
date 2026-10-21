@@ -203,25 +203,34 @@ def _rules_in(section: dict) -> tuple[list[dict], list[dict]]:
     return rules, fields
 
 
-def _template_keys(md: str) -> list[str]:
-    """JSON code blocks in the SOP: the keys of a deliverable skeleton."""
-    out = []
+def _template_shape(md: str, extra=None) -> tuple[list[str], dict]:
+    """JSON skeletons in the SOP: (top-level keys, {list-of-objects key: its inner keys}). Keys that only exist inside a
+    list such as facilities[] or products[] are not top-level fields of the record."""
+    top: list[str] = []
+    blocks: dict = {}
+    docs = []
     for blk in re.findall(r"```(?:json)?\s*\n(.*?)```", md or "", flags=re.S):
         try:
-            j = json.loads(blk)
+            docs.append(json.loads(blk))
         except Exception:
             continue
-        stack = [j]
-        while stack:
-            x = stack.pop()
-            if isinstance(x, dict):
-                for k, v in x.items():
-                    if k not in out:
-                        out.append(k)
-                    stack.append(v)
-            elif isinstance(x, list):
-                stack.extend(x[:3])
-    return out
+    if isinstance(extra, dict):
+        docs.append(extra)
+    for j in docs:
+        if not isinstance(j, dict):
+            continue
+        for k, v in j.items():
+            if k not in top:
+                top.append(k)
+            inner = v[0] if isinstance(v, list) and v and isinstance(v[0], dict) else (v if isinstance(v, dict) and v else None)
+            if inner is not None:
+                blocks.setdefault(k, set()).update(inner.keys())
+    return top, blocks
+
+
+def _template_keys(md: str) -> list[str]:
+    """The keys of a deliverable skeleton: the top level, plus the names of its lists (not the keys inside them)."""
+    return _template_shape(md)[0]
 
 
 def build(source, origin: str | None = None, live_error: str | None = None) -> dict:
@@ -244,6 +253,16 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
     tmpl = parse_template(sop.get("deliverable_template"))
     derived = [f for f in (sop.get("derived_fields") or []) if isinstance(f, str)]
     md_keys = _template_keys(md)
+    # Keys that exist only inside a list (facilities[].name, products[].product_name) are not required on the record itself,
+    # even when a sub-heading or Xtrium's flat list names them.
+    top_keys, tblocks = _template_shape(md, tmpl if isinstance(tmpl, dict) else None)
+    inner_of: dict = {}
+    for bk, ks in tblocks.items():
+        for k in ks:
+            if k not in top_keys:
+                inner_of.setdefault(k, bk)
+    if inner_of:
+        required = [f for f in required if f not in inner_of]
     out = {"source_id": source.id, "name": source.name, "category": category, "entity": entity, "sop_code": code, "title": sop.get("title"), "spec_version": spec_v,
            "has_sop": bool(sop or meta), "has_markdown": bool(md), "required_fields": required, "template_keys": list(dict.fromkeys((list(tmpl) if tmpl else []) + md_keys)), "derived_fields": derived,
            "fields": [], "sections": [], "warnings": [], "counts": {},
@@ -322,6 +341,11 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
         f["required"] = True
     for n in (tmpl or {}):
         all_fields.setdefault(n, {"name": n, "required": n in required, "type": None, "allowed": [], "format": None, "rule": None, "section": None, "quote": "Listed in the SOP's deliverable template", "matches": True, "enforce": True})
+    for nm in [n for n in list(all_fields) if n in inner_of and not all_fields[n].get("nested")]:
+        f = all_fields.pop(nm)
+        bk = inner_of[nm]
+        f.update({"name": f"{bk}[].{nm}", "field": nm, "block": bk, "nested": True})
+        all_fields.setdefault(f["name"], f)
     out["fields"] = sorted(all_fields.values(), key=lambda f: (not f["required"], f["name"]))
     if md and keys and not any(s["matches"] for s in out["sections"]):
         w.append(f"No section of this SOP names '{category or entity}'. Only the general rules are listed. Confirm with Xtrium which section applies before judging this source strictly.")
