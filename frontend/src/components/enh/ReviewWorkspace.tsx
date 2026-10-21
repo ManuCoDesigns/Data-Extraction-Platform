@@ -90,6 +90,18 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '', onBen
   )
 }
 
+export type Stage = 'review' | 'back' | 'sent' | 'approved'
+/** Where a record is in the loop: waiting for you, back from the extractor, sent back and waiting for them, or done. */
+export function stageOf(r: any): Stage {
+  if (r.review_status === 'approved') return 'approved'
+  if ((r.changed_since_return?.length ?? 0) > 0) return 'back'
+  if (r.review_status === 'pending_admin_review') return r.corrections > 0 ? 'back' : 'review'
+  if (r.corrections > 0 || r.review_status === 'rejected') return 'sent'
+  return 'review'
+}
+const STAGE_LABEL: Record<Stage, string> = { review: 'To review', back: 'Back from the extractor', sent: 'Sent back, waiting for the extractor', approved: 'Approved' }
+const STAGE_DOT: Record<Stage, string> = { review: 'bg-red-500', back: 'bg-sky-500', sent: 'bg-amber-500', approved: 'bg-emerald-500' }
+
 function SourceCard({ s, active, onPick }: { s: any; active: boolean; onPick: () => void }) {
   return (
     <button type="button" onClick={onPick} className={cn('w-full h-full text-left rounded-xl border px-3 py-2.5 transition bg-white', active ? 'border-transparent ring-2 ring-brand-400' : 'border-gray-100 hover:border-gray-300')}>
@@ -186,6 +198,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const [hideDone, setHideDone] = useState(false)
   const [active, setActive] = useState('')
   const [helpOpen, setHelpOpen] = useState(false)
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
   const [focus, setFocus] = useState(false)
   useEffect(() => {
     if (!focus) return
@@ -324,25 +337,44 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const steps = flowSteps(d, pctDone)
   const nextStep = steps.find(x => x.state === 'todo')
 
+  const nextInQueue = () => {
+    const q = d.records.filter((r: any) => r.record_id !== rid && (stageOf(r) === 'review' || stageOf(r) === 'back'))
+    return q.find((r: any) => d.records.indexOf(r) > idx) ?? q[0]
+  }
+  const advance = () => { const n = nextInQueue(); if (n) setRid(n.record_id) }
+  const stage = rec ? stageOf(rec) : 'review'
+  const groups = (['review', 'back', 'sent', 'approved'] as Stage[]).map(k => ({ k, rows: d.records.filter((r: any) => stageOf(r) === k) })).filter(g => g.rows.length > 0)
   const recNav = (
     <>
       <nav aria-label="Records" className="hidden lg:block rounded-2xl border border-gray-100 bg-white p-1.5 max-h-[calc(100vh-7rem)] overflow-y-auto">
-        <p className="text-[11px] text-gray-400 px-2 py-1 m-0">Records, riskiest first</p>
-        <ul className="m-0 p-0 list-none">
-          {d.records.map((r: any) => (
-            <li key={r.record_id}>
-              <button type="button" onClick={() => setRid(r.record_id)} aria-current={rid === r.record_id} className={cn('w-full text-left rounded-lg px-2.5 py-1.5 text-sm flex items-center gap-2', rid === r.record_id ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-gray-700 hover:bg-gray-50')}>
-                <span className={cn('w-2 h-2 rounded-full shrink-0', r.review_status === 'approved' ? 'bg-emerald-500' : r.todo > 0 ? 'bg-red-500' : r.audited > 0 ? 'bg-sky-500' : 'bg-gray-300')} aria-hidden />
-                <span className="truncate flex-1">{r.record}</span>
-                {r.review_status === 'approved' ? <span className="text-[11px] text-emerald-600" title="Approved">✓</span> : r.todo > 0 ? <span className="text-[11px] tabular-nums text-red-600 font-semibold" title="Doubted fields left">{r.todo}</span> : null}
+        {groups.map(g => {
+          const collapsed = g.k === 'approved' || g.k === 'sent' ? !openGroups[g.k] && g.rows.every((r: any) => r.record_id !== rid) : false
+          return (
+            <div key={g.k} className="mb-1">
+              <button type="button" onClick={() => setOpenGroups(o => ({ ...o, [g.k]: !(o[g.k] ?? !collapsed) }))} aria-expanded={!collapsed}
+                className="w-full flex items-center gap-1.5 px-2 py-1 text-left text-[11px] font-semibold text-gray-500 hover:text-gray-800">
+                <span className={cn('w-1.5 h-1.5 rounded-full', STAGE_DOT[g.k])} aria-hidden /><span className="flex-1 truncate">{STAGE_LABEL[g.k]}</span><span className="tabular-nums">{g.rows.length}</span><span aria-hidden>{collapsed ? '▸' : '▾'}</span>
               </button>
-            </li>
-          ))}
-        </ul>
+              {!collapsed && (
+                <ul className="m-0 p-0 list-none">
+                  {g.rows.map((r: any) => (
+                    <li key={r.record_id}>
+                      <button type="button" onClick={() => setRid(r.record_id)} aria-current={rid === r.record_id} className={cn('w-full text-left rounded-lg px-2.5 py-1.5 text-sm flex items-center gap-2', rid === r.record_id ? 'bg-brand-50 text-brand-700 font-semibold' : 'text-gray-700 hover:bg-gray-50', (g.k === 'sent' || g.k === 'approved') && rid !== r.record_id && 'opacity-70')}>
+                        <span className={cn('w-2 h-2 rounded-full shrink-0', g.k === 'review' && r.todo === 0 ? (r.audited > 0 ? 'bg-sky-500' : 'bg-gray-300') : STAGE_DOT[g.k])} aria-hidden />
+                        <span className="truncate flex-1">{r.record}</span>
+                        {g.k === 'approved' ? <span className="text-[11px] text-emerald-600" title="Approved">✓</span> : g.k === 'sent' ? <span className="text-[11px] text-amber-600" title="Waiting for the extractor">↩</span> : r.todo > 0 ? <span className="text-[11px] tabular-nums text-red-600 font-semibold" title="Doubted fields left">{r.todo}</span> : null}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )
+        })}
       </nav>
       <div className="lg:hidden">
         <SelectBox label="Record" value={rid} onChange={setRid} className="w-full">
-          {d.records.map((r: any, i: number) => <option key={r.record_id} value={r.record_id}>{i + 1}. {r.record}{r.todo > 0 ? ` (${r.todo} to check)` : ''}</option>)}
+          {groups.map(g => <optgroup key={g.k} label={`${STAGE_LABEL[g.k]} (${g.rows.length})`}>{g.rows.map((r: any) => <option key={r.record_id} value={r.record_id}>{r.record}{r.todo > 0 ? ` (${r.todo} to check)` : ''}</option>)}</optgroup>)}
         </SelectBox>
       </div>
     </>
@@ -370,6 +402,18 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         </span>
       </div>
       <p className={cn(inOverlay ? "hidden" : "hidden md:block", "text-[11px] text-gray-500 px-1")}>Keys: ↑ ↓ field · c correct · w wrong · m comment · y confirm the audit's suggestion · n next doubted · j k record · s side by side · Esc close</p>
+      {stage === 'sent' && rec && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2 text-sm">
+          <b>Sent back{rec.returned_at ? ` on ${new Date(rec.returned_at).toLocaleDateString()}` : ''}. Waiting for the extractor.</b> Nothing to do here until it comes back. The fields you marked stay as they are, so you can re-check only what changed.
+          {nextInQueue() && <> <button type="button" onClick={advance} className="font-semibold underline">Go to the next record to review</button></>}
+        </div>
+      )}
+      {stage === 'back' && rec && (
+        <div className="rounded-xl border border-sky-200 bg-sky-50 text-sky-900 px-3 py-2 text-sm"><b>Back from the extractor.</b> {(rec.changed_since_return?.length ?? 0) > 0 ? <>Re-check the fields that changed: {rec.changed_since_return.slice(0, 6).join(', ')}{rec.changed_since_return.length > 6 ? '…' : ''}.</> : 'It was resubmitted with no field changes. Check that your corrections were not ignored.'}</div>
+      )}
+      {d.records.length > 0 && !d.records.some((r: any) => stageOf(r) === 'review' || stageOf(r) === 'back') && (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-2 text-sm"><b>Queue clear.</b> Every record is approved or waiting for the extractor.</div>
+      )}
       {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-2.5">Every doubted field in this source is settled. Check a few random fields too: turn off Doubted only.</div>}
       {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
         <div className="space-y-2">
@@ -382,7 +426,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
             shown.map((f: any) => <FieldRow key={rec.record_id + f.name} suggestion={suggestions.get(rec.record_id + '|' + f.name)} onConfirmSuggestion={confirmSuggestion} rec={rec} f={f} peers={d.peers} sopRules={d.sop_required ?? []} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
         </div>
       )}
-      {rec && <RecordBar key={rec.record_id} sourceId={sourceId} rec={rec} todoLeft={todoLeft} onDone={load} onPick={n => { setOnlyFlagged(false); setHideDone(false); setActive(n) }} />}
+      {rec && <RecordBar key={rec.record_id} sourceId={sourceId} rec={rec} todoLeft={todoLeft} onDone={load} onAdvance={advance} onPick={n => { setOnlyFlagged(false); setHideDone(false); setActive(n) }} />}
     </section>
   )
   const activeValue = rec?.fields?.find((f: any) => f.name === active)?.value
@@ -503,16 +547,18 @@ function FilterChip({ on, onClick, hint, children }: { on: boolean; onClick: () 
 }
 
 /** Always-reachable sign-off for the record you are on: a note, send it back, or approve it. */
-function RecordBar({ sourceId, rec, todoLeft, onDone, onPick }: { sourceId: string; rec: any; todoLeft: number; onDone: () => void; onPick: (name: string) => void }) {
+function RecordBar({ sourceId, rec, todoLeft, onDone, onAdvance, onPick }: { sourceId: string; rec: any; todoLeft: number; onDone: () => void; onAdvance?: () => void; onPick: (name: string) => void }) {
   const [mode, setMode] = useState<'' | 'return' | 'comment'>('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
   const status: string = rec.review_status
   const label: Record<string, [string, Tone]> = { approved: ['Approved', 'green'], rejected: ['Sent back', 'red'], pending_admin_review: ['Waiting for your sign-off', 'amber'], pending: ['In progress', 'gray'] }
   const [text, tone] = label[status] ?? [status?.replace(/_/g, ' ') || 'In progress', 'gray']
-  const run = async (fn: () => Promise<unknown>, ok: string) => {
+  const st = stageOf(rec)
+  const [text2, tone2]: [string, Tone] = st === 'sent' ? ['Sent back, waiting for the extractor', 'amber'] : st === 'back' && status !== 'approved' ? ['Back from the extractor, re-check it', 'blue'] : [text, tone]
+  const run = async (fn: () => Promise<unknown>, ok: string, leave = false) => {
     setBusy(true)
-    try { await fn(); toast.success(ok); setMode(''); setNote(''); onDone() }
+    try { await fn(); toast.success(ok); setMode(''); setNote(''); if (leave) onAdvance?.(); onDone() }
     catch (e) { toast.error(err(e, 'That did not save')) } finally { setBusy(false) }
   }
   const changed: string[] = rec.changed_since_return ?? []
@@ -526,7 +572,7 @@ function RecordBar({ sourceId, rec, todoLeft, onDone, onPick }: { sourceId: stri
         </div>
       )}
       <div className="flex items-center gap-2 flex-wrap [&_button]:whitespace-nowrap">
-        <Chip tone={tone}>{text}</Chip>
+        <Chip tone={tone2}>{text2}</Chip>
         {rec.corrections > 0 && <span className="text-xs text-gray-500">sent back {rec.corrections}×</span>}
         {todoLeft > 0 && status !== 'approved' && <span className="text-xs text-amber-700">{todoLeft} doubted field{todoLeft === 1 ? '' : 's'} not settled</span>}
         {changed.length > 0 && (
@@ -539,13 +585,13 @@ function RecordBar({ sourceId, rec, todoLeft, onDone, onPick }: { sourceId: stri
         <span className="ml-auto flex gap-1.5 flex-wrap justify-end">
           {mode !== '' && <Button size="sm" variant="ghost" onClick={() => { setMode(''); setNote('') }}>Cancel</Button>}
           {mode === 'return'
-            ? <Button size="sm" variant="danger" disabled={busy || !note.trim()} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'return', note: note.trim() }), 'Sent back to the extractor')}>Send back</Button>
+            ? <Button size="sm" variant="danger" disabled={busy || !note.trim()} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'return', note: note.trim() }), 'Sent back to the extractor', true)}>Send back</Button>
             : mode === 'comment'
               ? <Button size="sm" disabled={busy || !note.trim()} onClick={() => run(() => qualityApi.comment({ record_id: rec.record_id, comment: note.trim() }), 'Comment saved')}>Save comment</Button>
               : <>
                 <Button size="sm" variant="secondary" onClick={() => setMode('comment')}>Comment</Button>
                 <Button size="sm" variant="secondary" disabled={busy} onClick={() => setMode('return')}><span className="hidden sm:inline">Return for correction</span><span className="sm:hidden">Return</span></Button>
-                <Button size="sm" variant="success" disabled={busy || status === 'approved'} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'approve', note: '' }), 'Record approved')}>{status === 'approved' ? 'Approved' : <><span className="hidden sm:inline">Approve record</span><span className="sm:hidden">Approve</span></>}</Button>
+                <Button size="sm" variant="success" disabled={busy || status === 'approved'} onClick={() => run(() => sourcesApi.adminReview(sourceId, rec.record_id, { action: 'approve', note: '' }), 'Record approved', true)}>{status === 'approved' ? 'Approved' : <><span className="hidden sm:inline">Approve record</span><span className="sm:hidden">Approve</span></>}</Button>
               </>}
         </span>
       </div>
