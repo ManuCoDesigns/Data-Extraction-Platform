@@ -178,7 +178,7 @@ def _finish(d: dict) -> dict:
     return d
 
 
-def scorecard(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict, source_names: dict | None = None, peers_of: dict | None = None) -> dict:
+def scorecard(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict, source_names: dict | None = None, peers_of: dict | None = None, batch_of: dict | None = None) -> dict:
     """Every score the reports use, from one pass over the same data: per source (a batch), per extractor, per reviewer, and cumulative.
 
     Errors stay in the numbers after the extractor fixes them. Fixing lowers the delivered error rate (final accuracy) and
@@ -236,25 +236,90 @@ def scorecard(findings: list, audits: list, records_by_source: dict, extractor_o
         ext.append(x)
     ext.sort(key=lambda z: -(z["errors_per_100"] or 0))
     # Reviewers. Catch rate needs the denominator: every known error on the sources they were assigned to.
-    errs_on = defaultdict(set)
-    for (rid, fld) in errs:
-        errs_on[rec_by_id[rid][0]].add((rid, fld))
     open_by = Counter(f.raised_by for f in findings if f.origin == "reviewer" and f.status == "open" and f.raised_by)
-    people = set(false_alarms) | {u for e in errs.values() for u in e["reviewers"] if u != "?"} | {u for us in peers_of.values() for u in us}
-    rev = []
-    for u in people:
-        caught = {k for k, e in errs.items() if u in e["reviewers"]}
-        fa = false_alarms.get(u, set()) - caught
-        mine = [sid for sid, us in peers_of.items() if u in us]
-        known = set().union(*[errs_on.get(sid, set()) for sid in mine]) if mine else set()
-        missed = known - caught
-        solo = sum(1 for k in caught if e_only(errs[k], u))
-        rev.append({"user_id": u, "name": names.get(u, "Unknown"), "sources": len(mine), "raised": len(caught) + len(fa), "confirmed": len(caught), "dismissed": len(fa),
-                    "open": open_by.get(u, 0), "caught": len(caught), "false_alarms": len(fa), "missed": len(missed), "known_errors": len(known), "only_one_to_catch": solo,
-                    "precision": pct(len(caught), len(caught) + len(fa)), "catch_rate": pct(len(caught & known), len(known)) if known else None,
-                    "confidence": "low" if len(known) < 10 else "ok"})
-    rev.sort(key=lambda z: (-(z["caught"]), z["name"]))
-    return {"batches": sorted(rows, key=lambda z: -(z["errors_per_100"] or 0)), "cumulative": cumulative, "extractors": ext, "reviewers": rev, "errors": errs, "false_alarms": false_alarms}
+
+    def reviewer_rows(sids=None):
+        inside = (lambda sid: True) if sids is None else (lambda sid: sid in sids)
+        errs_on = defaultdict(set)
+        for (rid, fld) in errs:
+            if inside(rec_by_id[rid][0]):
+                errs_on[rec_by_id[rid][0]].add((rid, fld))
+        pe = {sid: us for sid, us in peers_of.items() if inside(sid)}
+        people = {u for us in pe.values() for u in us}
+        if sids is None:
+            people |= set(false_alarms) | {u for e in errs.values() for u in e["reviewers"] if u != "?"}
+        else:
+            people |= {u for (rid, fld), e in errs.items() if inside(rec_by_id[rid][0]) for u in e["reviewers"] if u != "?"}
+        out = []
+        for u in people:
+            caught = {k for k, e in errs.items() if u in e["reviewers"] and inside(rec_by_id[k[0]][0])}
+            fa = {k for k in false_alarms.get(u, set()) if k[0] in rec_by_id and inside(rec_by_id[k[0]][0])} - caught
+            mine = [sid for sid, us in pe.items() if u in us]
+            known = set().union(*[errs_on.get(sid, set()) for sid in mine]) if mine else set()
+            missed = known - caught
+            solo = sum(1 for k in caught if e_only(errs[k], u))
+            out.append({"user_id": u, "name": names.get(u, "Unknown"), "sources": len(mine), "raised": len(caught) + len(fa), "confirmed": len(caught), "dismissed": len(fa),
+                        "open": open_by.get(u, 0) if sids is None else 0, "caught": len(caught), "false_alarms": len(fa), "missed": len(missed), "known_errors": len(known), "only_one_to_catch": solo,
+                        "precision": pct(len(caught), len(caught) + len(fa)), "catch_rate": pct(len(caught & known), len(known)) if known else None,
+                        "confidence": "low" if len(known) < 10 else "ok"})
+        out.sort(key=lambda z: (-(z["caught"]), z["name"]))
+        return out
+    rev = reviewer_rows()
+    # Pulls: the sources Xtrium gave on one day are one batch. Each batch has its own totals, the running total up to it,
+    # and its own extractor and reviewer figures.
+    pulls = []
+    if batch_of:
+        groups: dict = {}
+        for d in rows:
+            b = batch_of.get(d["source_id"]) or {"key": "other", "label": "Other sources", "date": ""}
+            g = groups.setdefault(b["key"], {"key": b["key"], "label": b["label"], "date": b["date"], "rows": []})
+            g["rows"].append(d)
+        ordered = sorted(groups.values(), key=lambda g: (g["key"] == "other", g["date"]))
+        running = {k: 0 for k in _ZERO}
+        n_run = 0
+        for g in ordered:
+            tot = {k: sum(r[k] for r in g["rows"]) for k in _ZERO}
+            tot["sources"] = len(g["rows"])
+            for k in _ZERO:
+                running[k] += tot[k]
+            n_run += len(g["rows"])
+            cum = _finish({**running, "sources": n_run})
+            exts: dict = {}
+            for r in g["rows"]:
+                u = r["extractor_id"] or "?"
+                x = exts.setdefault(u, {"user_id": u, "name": names.get(u, "Unassigned") if u != "?" else "Unassigned", **{k: 0 for k in _ZERO}, "sources": 0})
+                for k in _ZERO:
+                    x[k] += r[k]
+                x["sources"] += 1
+            sids = {r["source_id"] for r in g["rows"]}
+            pulls.append({**_finish(tot), "key": g["key"], "label": g["label"], "date": g["date"],
+                          "cumulative": {k: cum[k] for k in ("sources", "fields", "errors", "errors_per_100", "first_pass_accuracy", "final_accuracy", "caught_rate", "rework_rate", "audited")},
+                          "sources_rows": sorted(g["rows"], key=lambda z: -(z["errors_per_100"] or 0)),
+                          "extractors": sorted((_finish(x) for x in exts.values()), key=lambda z: -(z["errors_per_100"] or 0)),
+                          "reviewers": reviewer_rows(sids)})
+    return {"batches": sorted(rows, key=lambda z: -(z["errors_per_100"] or 0)), "pulls": pulls, "cumulative": cumulative, "extractors": ext, "reviewers": rev, "errors": errs, "false_alarms": false_alarms}
+
+
+def pull_batches(sources: list) -> dict:
+    """Sources Xtrium gave on the same day (Nairobi time) are one batch, numbered in the order they were pulled.
+    Returns {source_id: {key, label, date}}. Sources that were not pulled from Xtrium go to 'Other sources'."""
+    from datetime import timedelta, timezone as _tz
+    nairobi = _tz(timedelta(hours=3))
+    pulled, other = [], []
+    for x in sources:
+        (pulled if (getattr(x, "external_ref_id", None) or getattr(x, "external_system", None)) and getattr(x, "created_at", None) else other).append(x)
+    days: dict = {}
+    for x in pulled:
+        t = x.created_at if x.created_at.tzinfo else x.created_at.replace(tzinfo=_tz.utc)
+        days.setdefault(t.astimezone(nairobi).date().isoformat(), []).append(x)
+    out = {}
+    for n, day in enumerate(sorted(days), 1):
+        label = f"Batch {n} ({day})"
+        for x in days[day]:
+            out[x.id] = {"key": day, "label": label, "date": day}
+    for x in other:
+        out[x.id] = {"key": "other", "label": "Other sources", "date": ""}
+    return out
 
 
 def e_only(e: dict, uid: str) -> bool:

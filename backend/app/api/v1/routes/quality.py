@@ -485,7 +485,7 @@ def _scorecard_data(db: Session, user: User, project_id, source_id, date_from, d
         srcs = [x for x in srcs if x.id == source_id]
     ids = [x.id for x in srcs]
     if not ids:
-        return {"batches": [], "cumulative": q._finish({**{k: 0 for k in q._ZERO}, "sources": 0}), "extractors": [], "reviewers": []}, srcs
+        return {"batches": [], "pulls": [], "cumulative": q._finish({**{k: 0 for k in q._ZERO}, "sources": 0}), "extractors": [], "reviewers": []}, srcs
     findings = db.query(QualityFinding).filter(QualityFinding.source_id.in_(ids)).all()
     audits = db.query(FieldAudit).filter(FieldAudit.source_id.in_(ids)).all()
     lo, hi = _day_start(date_from), _day_start(date_to, plus=1)
@@ -505,7 +505,7 @@ def _scorecard_data(db: Session, user: User, project_id, source_id, date_from, d
     ext_of = {x.id: x.assigned_extractor_id for x in srcs}
     peers_of = {x.id: [p.user_id for p in x.peer_reviews] for x in srcs}
     names = _names(db, {f.raised_by for f in findings if f.raised_by} | {v for v in ext_of.values() if v} | {u for us in peers_of.values() for u in us})
-    sc = q.scorecard(findings, audits, recs, ext_of, names, {x.id: x.name for x in srcs}, peers_of)
+    sc = q.scorecard(findings, audits, recs, ext_of, names, {x.id: x.name for x in srcs}, peers_of, q.pull_batches(srcs))
     status = {x.id: getattr(x.status, "value", x.status) for x in srcs}
     for b in sc["batches"]:
         b["status"] = status.get(b["source_id"])
@@ -519,7 +519,7 @@ def process_report(project_id: str | None = None, source_id: str | None = None, 
     then each extractor and each peer reviewer. No dates means everything ever recorded."""
     _need_lead(user)
     sc, _ = _scorecard_data(db, user, project_id, source_id, date_from, date_to)
-    return {"cumulative": sc["cumulative"], "batches": sc["batches"], "extractors": [{k: v for k, v in x.items() if k != "sources"} for x in sc["extractors"]],
+    return {"cumulative": sc["cumulative"], "pulls": sc.get("pulls", []), "batches": sc["batches"], "extractors": [{k: v for k, v in x.items() if k != "sources"} for x in sc["extractors"]],
             "reviewers": sc["reviewers"], "date_from": date_from, "date_to": date_to}
 
 

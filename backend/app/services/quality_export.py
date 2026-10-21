@@ -233,9 +233,12 @@ def process_workbook(sc: dict, meta: dict) -> bytes:
         "",
         "Sheets",
         "Cumulative: the total across all sources in this report.",
-        "Batches: one row per source (each source is one Xtrium batch), highest error rate first.",
-        "Extractors: the same figures grouped by the extractor assigned to each source.",
-        "Reviewers: each peer reviewer's catches, false alarms and catch rate.",
+        "Pulls: one row per batch, which is the set of sources pulled from Xtrium on the same day (Nairobi time), oldest first. The last columns show the running total up to and including that batch.",
+        "Batch extractors: each extractor's figures inside each batch.",
+        "Batch reviewers: each peer reviewer's catch rate inside each batch, on the sources they were assigned in it.",
+        "Sources: one row per source, highest error rate first.",
+        "Extractors: the same figures across all batches, grouped by the extractor assigned to each source.",
+        "Reviewers: each peer reviewer's catches, false alarms and catch rate across all batches.",
         "",
         "How each number is worked out",
         "Error: one record and field that an admin confirmed as wrong, or that an admin's check against the real source found wrong. Counted once, however many people pointed at it. Errors stay counted after the extractor fixes them.",
@@ -251,7 +254,7 @@ def process_workbook(sc: dict, meta: dict) -> bytes:
     ]
     for i, line in enumerate(lines, 1):
         ws.cell(i, 1, line)
-        if i in (1, 4, 10):
+        if i in (1, 4, 13):
             ws.cell(i, 1).font = Font(bold=True)
     ws.column_dimensions["A"].width = 150
     head = PatternFill("solid", fgColor="1F2937")
@@ -277,17 +280,26 @@ def process_workbook(sc: dict, meta: dict) -> bytes:
                 d["fixed"], d["still_wrong"], d["returned_records"], pc(d["rework_rate"]), d["confidence"]]
     c = sc["cumulative"]
     sheet("Cumulative", ["Sources"] + num_cols, [[c.get("sources", 0)] + nums(c)])
-    sheet("Batches", ["Source", "Status", "Extractor", "Peer reviewers"] + num_cols,
+    run_cols = ["Sources so far", "Fields so far", "Errors so far", "Errors per 100 so far", "First-pass accuracy so far", "Final accuracy so far", "Catch rate so far", "Rework rate so far"]
+    pulls = sc.get("pulls") or []
+    if pulls:
+        sheet("Pulls", ["Batch", "Pulled on", "Sources"] + num_cols + run_cols,
+              [[b["label"], b["date"], b["sources"]] + nums(b) + [b["cumulative"]["sources"], b["cumulative"]["fields"], b["cumulative"]["errors"], b["cumulative"]["errors_per_100"], pc(b["cumulative"]["first_pass_accuracy"]),
+                pc(b["cumulative"]["final_accuracy"]), pc(b["cumulative"]["caught_rate"]), pc(b["cumulative"]["rework_rate"])] for b in pulls])
+        sheet("Batch extractors", ["Batch", "Extractor", "Sources"] + num_cols, [[b["label"], x["name"], x["sources"]] + nums(x) for b in pulls for x in b["extractors"]])
+        sheet("Batch reviewers", ["Batch", "Reviewer", "Sources assigned", "Known errors on them", "Caught", "Missed", "Catch rate", "False alarms", "Precision", "Only one to catch"],
+              [[b["label"], r["name"], r["sources"], r["known_errors"], r["caught"], r["missed"], pc(r["catch_rate"]), r["false_alarms"], pc(r["precision"]), r["only_one_to_catch"]] for b in pulls for r in b["reviewers"]])
+    sheet("Sources", ["Source", "Status", "Extractor", "Peer reviewers"] + num_cols,
           [[b["source"], b.get("status", ""), b["extractor"], ", ".join(b["peers"])] + nums(b) for b in sc["batches"]])
     sheet("Extractors", ["Extractor", "Sources"] + num_cols, [[x["name"], len(x["sources"])] + nums(x) for x in sc["extractors"]])
     sheet("Reviewers", ["Reviewer", "Sources assigned", "Known errors on them", "Caught", "Missed", "Catch rate", "False alarms", "Precision", "Still open", "Only one to catch", "Confidence"],
           [[r["name"], r["sources"], r["known_errors"], r["caught"], r["missed"], pc(r["catch_rate"]), r["false_alarms"], pc(r["precision"]), r["open"], r["only_one_to_catch"], r["confidence"]] for r in sc["reviewers"]])
-    for name in ("Cumulative", "Batches", "Extractors", "Reviewers"):
+    for name in [n for n in wb.sheetnames if n != "README"]:
         w = wb[name]
         for row in w.iter_rows(min_row=2):
             for cell in row:
                 h = w.cell(1, cell.column).value
-                if h in ("First-pass accuracy", "Final accuracy", "Catch rate", "Rework rate", "Precision") and isinstance(cell.value, float):
+                if h and (str(h).endswith("accuracy") or str(h).endswith("rate") or h in ("Precision",) or "accuracy so far" in str(h) or "rate so far" in str(h)) and isinstance(cell.value, float):
                     cell.number_format = "0.0%"
     bio = io.BytesIO()
     wb.save(bio)
