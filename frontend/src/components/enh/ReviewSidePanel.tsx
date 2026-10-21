@@ -10,8 +10,8 @@ type Tab = 'sop' | 'text' | 'web' | 'page'
 const present = (v: unknown) => !(v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0))
 
 /** Everything needed to check a record, beside the record: the SOP, the text it came from, the website, and the page as Nimble reads it. */
-export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpField, activeValue, activeField, pageText, pageBusy, nimbleReady, onFetchPage }: {
-  sourceId: string; website?: string | null; rec: any; sopRequired: string[]; onJumpField?: (name: string) => void; activeValue: unknown; activeField: string
+export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpField, warnings, activeValue, activeField, pageText, pageBusy, nimbleReady, onFetchPage }: {
+  sourceId: string; website?: string | null; rec: any; sopRequired: string[]; onJumpField?: (name: string) => void; warnings?: string[]; activeValue: unknown; activeField: string
   pageText?: string; pageBusy: boolean; nimbleReady: boolean; onFetchPage: () => void
 }) {
   const [tab, setTabRaw] = useState<Tab>(() => { try { const v = localStorage.getItem('dx.reviewTab'); return (v === 'text' || v === 'web' || v === 'page' ? v : 'sop') as Tab } catch { return 'sop' } })
@@ -35,7 +35,8 @@ export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpFie
   const cur = urls[ui]
 
   // The SOP's required fields against this record, so gaps are visible without reading the guide.
-  const checklist = sopRequired.map(n => {
+  const auto = ['data_origin', 'retrieved_at', 'method']
+  const checklist = [...sopRequired, ...auto.filter(a => !sopRequired.includes(a))].map(n => {
     const f = rec?.fields?.find((x: any) => x.name === n)
     return { name: n, onRecord: !!f, ok: !!f && present(f.value) && !/^(n\/a|na|tbd|unknown|none|null|-|--|\?)$/i.test(String(f.value).trim()) }
   })
@@ -61,11 +62,17 @@ export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpFie
                         className={'w-full text-left text-sm flex items-center gap-2 rounded-lg px-2 py-1 border ' + (c.ok ? 'border-gray-100 hover:bg-gray-50' : 'border-red-200 bg-red-50/60 hover:bg-red-50') + (c.name === activeField ? ' ring-2 ring-brand-500' : '')}>
                         <span className={c.ok ? 'text-emerald-600' : 'text-red-600'} aria-hidden>{c.ok ? '✓' : '✗'}</span>
                         <span className={'font-mono text-[12.5px] ' + (c.ok ? 'text-gray-700' : 'text-red-700 font-semibold')}>{c.name}</span>
-                        <span className="ml-auto text-[11px] text-gray-400">{c.ok ? 'filled' : c.onRecord ? 'empty' : 'not on record'}</span>
+                        <span className="ml-auto text-[11px] text-gray-400">{c.ok ? (auto.includes(c.name) ? 'auto-filled' : 'filled') : c.onRecord ? 'empty' : 'not on record'}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
+              </div>
+            )}
+            {warnings && warnings.length > 0 && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                <b className="block mb-1">{warnings.length} thing{warnings.length === 1 ? '' : 's'} to settle with this SOP</b>
+                <ul className="m-0 pl-4 space-y-0.5">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
               </div>
             )}
             {sopErr ? <Blank title={sopErr} /> : !sop ? <Skeletons rows={4} /> : <SopViewer data={sop} compact />}

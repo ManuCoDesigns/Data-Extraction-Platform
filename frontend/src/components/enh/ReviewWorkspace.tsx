@@ -350,7 +350,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
 
   const fieldsSection = (
     <section className="min-w-0 space-y-3">
-      <div className="md:sticky md:top-0 z-20 rounded-xl border border-gray-200 bg-white px-3 py-2 flex items-center gap-2 flex-wrap shadow-sm [&_button]:whitespace-nowrap">
+      <div className={cn(inOverlay ? "" : "md:sticky md:top-0", "z-20 rounded-xl border border-gray-200 bg-white px-3 py-2 flex items-center gap-x-2 gap-y-1.5 flex-wrap shadow-sm [&_button]:whitespace-nowrap", inOverlay && "[&_button]:!px-2.5 [&_button]:!py-1 [&_button]:!text-xs")}>
         <div className="min-w-0 flex items-center gap-1.5">
           <IconButton label="Previous record" onClick={() => move(-1)}>‹</IconButton>
           <span className="text-sm font-bold text-gray-900 truncate max-w-[14ch]" title={rec?.record}>{rec?.record ?? 'No record'}</span>
@@ -365,11 +365,11 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
           {!inOverlay && <Button size="sm" variant={docked ? 'primary' : 'secondary'} onClick={openSide} title="SOP, source text and website beside the record (s)">Side by side</Button>}
           <Button size="sm" variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading…' : 'Check site'}</Button>
           <FilterChip on={render} onClick={() => setRender(v => !v)} hint="Slower. Use it for sites that build their pages with JavaScript, then run Check site.">Render page</FilterChip>
-          <Button size="sm" variant="secondary" disabled={scanBusy} onClick={runScan} title="Logs missing fields, bad formats and SOP gaps for the whole source">{scanBusy ? 'Running checks…' : 'Run system checks'}</Button>
-          {d.website && <a href={d.website} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">Open source site</a>}
+          <Button size="sm" variant="secondary" disabled={scanBusy} onClick={runScan} title="Logs missing fields, bad formats and SOP gaps for the whole source">{scanBusy ? 'Running…' : inOverlay ? 'System checks' : 'Run system checks'}</Button>
+          {d.website && <a href={d.website} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">{inOverlay ? 'Open site' : 'Open source site'}</a>}
         </span>
       </div>
-      <p className="hidden md:block text-[11px] text-gray-500 px-1">Keys: ↑ ↓ field · c correct · w wrong · m comment · y confirm the audit's suggestion · n next doubted · j k record · s side by side · Esc close</p>
+      <p className={cn(inOverlay ? "hidden" : "hidden md:block", "text-[11px] text-gray-500 px-1")}>Keys: ↑ ↓ field · c correct · w wrong · m comment · y confirm the audit's suggestion · n next doubted · j k record · s side by side · Esc close</p>
       {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-2.5">Every doubted field in this source is settled. Check a few random fields too: turn off Doubted only.</div>}
       {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
         <div className="space-y-2">
@@ -421,7 +421,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
           {fieldsSection}
         </div>
         <div className="min-h-[70vh] lg:min-h-0 lg:h-full">
-          <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} activeValue={activeValue} activeField={active}
+          <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} warnings={sopInfo?.warnings} activeValue={activeValue} activeField={active}
             pageText={site[rid]?.ok ? site[rid].text : undefined} pageBusy={siteBusy} nimbleReady={nimble === true} onFetchPage={runSite} />
         </div>
       </div>
@@ -469,7 +469,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         {fieldsSection}
         {docked && (
           <div className="sticky top-3 self-start h-[calc(100vh-1.5rem)]">
-            <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} activeValue={activeValue} activeField={active}
+            <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} warnings={sopInfo?.warnings} activeValue={activeValue} activeField={active}
               pageText={site[rid]?.ok ? site[rid].text : undefined} pageBusy={siteBusy} nimbleReady={nimble === true} onFetchPage={runSite} />
           </div>
         )}

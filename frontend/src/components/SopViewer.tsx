@@ -295,7 +295,7 @@ export function SopViewer({ data, compact = false }: { data: any; compact?: bool
         <p style={{ margin: '2px 0 0', fontSize: 11, color: '#9ca3af' }}>Saved {new Date().toLocaleString()}</p>
       </div>
       {compact && (
-        <div className="sop-noprint sticky top-0 z-10 -mx-1 px-1 py-2 bg-white/95 backdrop-blur border-b border-gray-100 flex items-center gap-2 flex-wrap">
+        <div className="sop-noprint sticky top-0 z-10 px-2 py-2 rounded-xl bg-white border border-gray-100 flex items-center gap-2 flex-wrap">
           {code && <span className={cn(chipCls, 'bg-gray-900 text-white font-mono')}>{code}</span>}
           {(sop?.entity ?? meta.target_entity) && <span className={cn(chipCls, 'bg-violet-50 text-violet-700')}>{sop?.entity ?? meta.target_entity}</span>}
           {sop?.spec_version && <span className={cn(chipCls, 'bg-blue-50 text-blue-700')}>v{sop.spec_version}</span>}
