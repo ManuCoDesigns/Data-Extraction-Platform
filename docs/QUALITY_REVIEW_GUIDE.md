@@ -6,6 +6,17 @@ Who uses it: admins and QA leads (org_admin, project_admin, qa_lead). Reviewers 
 
 ---
 
+## 0. The fast path (the order to follow today)
+
+1. **Quality, SOP check.** Read the table: each source's SOP code, category, required-field count and "N to settle". Open any source with a warning and read the amber box. Download the Excel if you want everything on paper.
+2. **Quality, Errors logged, Run system checks** for the source. It logs missing and not-allowed values against the SOP.
+3. **Quality, Review.** Pick the source. Check the header: SOP code, "Waiting for peers" or ready, and "N SOP things to settle". Open **SOP rules** to see what this source must follow.
+4. **Audit against site.** The audit reads the cited pages and the source's website and gives a suggestion for every field. It rates nothing.
+5. **Confirm each suggestion.** Go field by field. Press `y` to accept the audit's suggestion as your rating, or `c` / `w` to decide yourself. Only your confirmation rates the extractor. Holds are never counted as errors. Use **Check myself** when you disagree, and **Save as note** to pass a point to the extractor without rating.
+6. **Use Page text beside the record** (`s`, Side by side) to prove a field: the value is highlighted, Find searches the page.
+7. **Return or approve.** Return a record with a note when something is wrong, **Approve record** when clean, then **Approve source**. After a return, re-check only fields marked **Changed since flagged**.
+8. **Scores tab** shows the result for any date range, taken from the database.
+
 ## 1. The idea in one minute
 
 Three things judge the quality of a delivery:
@@ -22,7 +33,7 @@ The system and the peers point at doubtful fields. Only your check at the real s
 
 ### Step 0. Before you start
 
-- The source came from Xtrium. Its SOP is fetched from Xtrium automatically the first time you open the source in the desk or load the SOP check tab, and is saved. If Xtrium gives none, the desk header says "No SOP from Xtrium" and the reason is listed. Use **Try Xtrium again** or **Refresh from Xtrium** a minute later.
+- The source came from Xtrium and its SOP was saved on it when it was pulled. Screens only read that saved copy and never call Xtrium. If a source has none, the desk header says "No SOP saved": open **SOP rules** and press **Refresh from Xtrium** once. Press it again only when you know the SOP was edited on Xtrium.
 - Every peer reviewer has submitted. The Review tab lists "Peer reviewed" sources by default, which means all assigned peers are done.
 - `NIMBLE_API_KEY` is set on the backend if you want "Check on the site".
 
@@ -31,6 +42,10 @@ The system and the peers point at doubtful fields. Only your check at the real s
 Each peer reviews the source on their own and submits a comment. Peers cannot see each other's comments until they have submitted their own. This keeps their opinions independent, so do not share one peer's notes with another before they submit.
 
 Reviewers can also log a specific error with **Flag error** on a record (field, kind, severity, note). The system tells them whether it agrees.
+
+**How a peer note points at a field.** The desk reads each note clause by clause. Only a complaint can point at a field: acknowledgements ("Okay") and how-to steps ("Remove the record. Open each article and use the link as source_url") never credit anyone, and links are ignored. A complaint points at a field by naming it, by a topic cue (for example "platform" or "trading category" for segment_name), or by quoting its short delivered value. Several peers can credit the same field. The rules and the labelled examples are in `docs/TRAINING_SPEC_peer_note_to_field.md` and `backend/tests/peer_notes/`. Run `python backend/tests/peer_notes/run.py` to see precision and recall, and add one line to `training_examples.jsonl` for every peer note you review.
+
+**Field badges.** data_origin, retrieved_at and method are filled in by the system, so they show "Filled in by the system" and never "Not on the page". A segment name that is on the page shows "Text is on the page", because that proves the text is there, not that it is a real market segment. A field outside the SOP saved on the source is suggested as Wrong, kind Schema. A case-only difference from an allowed value is accepted by the SOP and is not an error.
 
 ### Step 2. Run the system checks
 
@@ -59,7 +74,7 @@ Quality, **SOP check**.
 - With all sources selected: one line per source, with how many records follow the SOP.
 - With one source selected: each required field with how often it is filled, the fields the SOP does not list, and the records falling short.
 
-A record follows the SOP when every required field is filled in. Fix gaps first by sending the records back to the extractor. There is no point checking the facts of a record that is missing required fields.
+A record follows the SOP when every required field is filled in and every value is allowed: values inside the SOP's "one of" lists, dates as YYYY-MM-DD, timestamps like 2026-01-31T12:00:00Z, numbers without unit text and inside any stated range. Field names are matched ignoring case and underscores, and "never delivered" is shown separately from "left empty". Nested blocks such as price_points are checked per item, only on records that have them. Read the amber box ("Settle these before trusting the percentage") first. Fix gaps first by sending the records back to the extractor. There is no point checking the facts of a record that is missing required fields.
 
 ### Step 4. Open the review desk
 
@@ -91,7 +106,7 @@ Records are sorted riskiest first. Work from the top.
 
 For one record:
 
-0. **Side by side** (press `s`). Opens the record full screen with the SOP, the source text, the website and the page text beside it. The SOP tab lists the SOP's required fields with a tick or cross for this record. In the Page text tab, the value of the field you are on is highlighted. Press `Esc` to close.
+0. **Side by side** (press `s`). Opens the record full screen with the SOP, the source text, the website and the page text beside it. The SOP tab lists the SOP's required fields with a tick or cross for this record. In the Page text tab the page is laid out as a readable page: headings, lists, tables and links, with long menus folded away. The value of the field you are on is highlighted in amber. Use **Find in page** (Enter for the next match), **Jump to** for a section, and **Raw text** for the untouched text. Press `Esc` to close.
 1. **Check on the site** (optional but quick). Nimble fetches the source website and marks each value "Found on the site", "Close match" or "Not on the page", with the surrounding text. This only tells you where to look first. "Not on the page" can also mean a different spelling or a sub-page.
 2. Go field by field. The doubted fields have chips that say why:
    - **Peer comment**: a reviewer commented on this exact field.
@@ -120,7 +135,7 @@ Keys: `y` confirm the audit's suggestion on the field, `s` side by side, `↑` `
 
 ### What each source must follow (SOP rules)
 
-Every source pulled from Xtrium gets its SOP from Xtrium, fetched gently (sources that already have one are skipped, and a rate limit stops the run instead of retrying). **Refresh from Xtrium** re-checks for edits made on the Xtrium side. **SOP rules** at the top of the desk shows exactly what that source's SOP requires, read from the SOP text and never guessed:
+Every source pulled from Xtrium carries the SOP saved at pull time. **Refresh from Xtrium** is the only thing that calls Xtrium again, for a source with none saved or one edited there. **SOP rules** at the top of the desk shows exactly what that source's SOP requires, read from the SOP text and never guessed:
 
 - The SOP code, version, the entity it describes and the category set on the source.
 - **Fields**: each field the SOP names, whether it is required or optional, its allowed values and format, the rule, the section it came from and the exact line (hover a row).

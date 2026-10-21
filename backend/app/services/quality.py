@@ -327,13 +327,14 @@ def sop_report(records: list[tuple[str, str, dict]], required: list[str], allowe
                 row["missing"] += 1
                 if f in r["unmapped"]:
                     row["absent"] += 1
-            elif f in badf:
+            elif f in {x["field"] for x in r["bad"] if not x.get("case_only")}:
                 row["bad"] += 1
             else:
                 row["filled"] += 1
         extra_count.update(r["extra"])
-        if r["missing"] or r["bad"]:
-            failing.append({"record_id": rid, "record": label, "missing": r["missing"], "bad": r["bad"], "extra": r["extra"]})
+        real_bad = [x for x in r["bad"] if not x.get("case_only")]
+        if r["missing"] or real_bad:
+            failing.append({"record_id": rid, "record": label, "missing": r["missing"], "bad": real_bad, "extra": r["extra"]})
         else:
             ok += 1
     n = len(records)
@@ -342,28 +343,23 @@ def sop_report(records: list[tuple[str, str, dict]], required: list[str], allowe
             "extra_fields": [{"field": f, "count": c} for f, c in extra_count.most_common()], "failing": failing[:200], "failing_total": len(failing)}
 
 
-def mentioned_fields(text: str, names: list[str]) -> list[str]:
-    """Which field names does a free-text comment talk about?
+def site_state(field: str, h: dict) -> dict:
+    """What 'found on the site' means for this field. Filled-in provenance fields are not expected on the page, so missing is neutral.
+    A segment name on the page only proves the text is there, not that it is a real market segment."""
+    from app.services import peer_notes
+    if peer_notes.neutral_provenance(field, h["state"]):
+        return {**h, "state": "neutral", "note": "Filled in by the system, so it is not expected on the page."}
+    if field == "segment_name" and h["state"] in ("found", "close"):
+        return {**h, "state": "appears", "note": "The text is on the page. That does not show it is a real market segment (one commodity or trading category)."}
+    return h
 
-    Names with an underscore or several words match anywhere ("hq_city", "hq city"). Single plain words such as
-    "website" or "name" are common English, so they only count when quoted, bold, written like "website:" or
-    followed by the word "field" / "column".
-    """
-    out = []
-    t = text or ""
-    for n in names:
-        if not n or n.startswith("_"):
-            continue
-        spaced = n.replace("_", " ")
-        edge = r"(?<![A-Za-z0-9_])%s(?![A-Za-z0-9_])"
-        if "_" in n or " " in n:
-            if re.search(edge % re.escape(n), t, re.I) or re.search(edge % re.escape(spaced), t, re.I):
-                out.append(n)
-            continue
-        w = re.escape(n)
-        if re.search(r"[`'\"*]%s[`'\"*]" % w, t, re.I) or re.search(r"(?<![A-Za-z0-9_])%s\s*:" % w, t, re.I) or re.search(r"(?<![A-Za-z0-9_])%s\s+(field|column)" % w, t, re.I) or re.search(r"(field|column)\s+%s(?![A-Za-z0-9_])" % w, t, re.I):
-            out.append(n)
-    return out
+
+def mentioned_fields(text: str, names: list[str], record: dict | None = None) -> list[str]:
+    """Which fields does a peer's note complain about? Clause by clause: links, acknowledgements and how-to instructions never count
+    (docs/TRAINING_SPEC_peer_note_to_field.md). A field is credited by its name, by a topic cue ("platform", "trading category"),
+    or by quoting its short delivered value."""
+    from app.services import peer_notes
+    return peer_notes.fields_for(text, record, list(names))
 
 
 SIGNAL_WEIGHT = {"comment": 5, "finding": 4, "mention": 3, "sop": 3, "system": 2, "ai": 2, "web": 2, "note": 1, "recheck": 6}

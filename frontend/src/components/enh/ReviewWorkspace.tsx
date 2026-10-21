@@ -581,7 +581,7 @@ function Stat({ label, value, sub }: { label: string; value: number; sub: string
   return <div><div className="text-2xl font-extrabold tabular-nums text-gray-900 leading-none">{value}</div><div className="text-xs font-semibold text-gray-700 mt-1">{label}</div><div className="text-[11px] text-gray-400">{sub}</div></div>
 }
 
-function FieldRow({ suggestion, onConfirmSuggestion, rec, f, peers, sopRules, website, site, active, onActive, onLocal, onReload }: { suggestion?: AuditRow; onConfirmSuggestion?: (r: AuditRow) => void; rec: any; f: any; peers: any[]; sopRules: string[]; website?: string; site?: { state: string; snippet?: string | null }; active: boolean; onActive: () => void; onLocal: (rid: string, name: string, verdict: string, truth?: string) => void; onReload: () => void }) {
+function FieldRow({ suggestion, onConfirmSuggestion, rec, f, peers, sopRules, website, site, active, onActive, onLocal, onReload }: { suggestion?: AuditRow; onConfirmSuggestion?: (r: AuditRow) => void; rec: any; f: any; peers: any[]; sopRules: string[]; website?: string; site?: { state: string; snippet?: string | null; note?: string }; active: boolean; onActive: () => void; onLocal: (rid: string, name: string, verdict: string, truth?: string) => void; onReload: () => void }) {
   const [same, setSame] = useState(() => { try { return localStorage.getItem('dx.reviewSame') === '1' } catch { return false } })
   const [wrong, setWrong] = useState(false)
   const [truth, setTruth] = useState('')
@@ -646,7 +646,7 @@ function FieldRow({ suggestion, onConfirmSuggestion, rec, f, peers, sopRules, we
         <div className="min-w-0 flex-1 basis-64">
           <div className="flex items-center gap-1.5 flex-wrap"><span className="text-xs font-semibold text-gray-500">{f.name}</span>
             {sigs.map((s: any, i: number) => <Chip key={i} tone={KIND[s.kind]?.tone ?? 'gray'} title={s.text}>{KIND[s.kind]?.label ?? s.kind}{s.by && s.kind !== 'finding' ? `: ${s.by}` : ''}</Chip>)}
-            {site && site.state !== 'skip' && <Chip tone={site.state === 'found' ? 'green' : site.state === 'close' ? 'amber' : 'red'} title={site.snippet ?? ''}>{site.state === 'found' ? 'Found on the site' : site.state === 'close' ? 'Close match on the site' : 'Not on the page'}</Chip>}
+            {site && site.state !== 'skip' && <Chip tone={site.state === 'found' ? 'green' : site.state === 'close' ? 'amber' : site.state === 'neutral' || site.state === 'appears' ? 'gray' : 'red'} title={site.note ?? site.snippet ?? ''}>{site.state === 'found' ? 'Found on the site' : site.state === 'close' ? 'Close match on the site' : site.state === 'neutral' ? 'Filled in by the system' : site.state === 'appears' ? 'Text is on the page' : 'Not on the page'}</Chip>}
             {verdict && <Chip tone={verdict === 'correct' ? 'green' : 'red'}>{verdict === 'correct' ? 'Checked: correct' : 'Checked: wrong'}</Chip>}</div>
           <div className={cn('text-sm mt-1 break-words whitespace-pre-wrap', empty ? 'text-gray-400 italic' : 'text-gray-900 font-medium')}>
             {empty ? 'Empty' : isUrl(f.value) ? <a href={f.value} target="_blank" rel="noreferrer" className="text-brand-600 hover:underline break-all">{f.value}</a> : show(f.value)}
@@ -678,6 +678,7 @@ function FieldRow({ suggestion, onConfirmSuggestion, rec, f, peers, sopRules, we
             </p>
           ))}
           {site?.snippet && site.state !== 'missing' && <p className="text-xs text-gray-500 mt-1 mb-0 italic break-words">On the site: …{site.snippet}…</p>}
+          {site?.note && (site.state === 'appears' || site.state === 'neutral') && <p className="text-xs text-gray-500 mt-1 mb-0">{site.note}</p>}
           {f.audit?.truth_value && <p className="text-xs text-gray-600 mt-1 mb-0">Source says: <b>{f.audit.truth_value}</b></p>}
           <div className="flex items-center gap-3 flex-wrap mt-1.5 text-xs">
             <button type="button" onClick={e => { e.stopPropagation(); setCmt(v => !v) }} className="text-brand-600 hover:underline" title="Leave a note on this field (press m)">Comment</button>
