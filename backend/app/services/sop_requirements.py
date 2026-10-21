@@ -270,7 +270,7 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
     if cv and spec_v and cv.group(1).strip() != str(spec_v).strip().lstrip("v"):
         out["stale"] = True
         w.append(f"The SOP code says v{cv.group(1)} but its text says version {spec_v}. The saved copy and its code are from different versions. Use Refresh from Xtrium.")
-    if (entity and _norm(entity) == "unclassified") or (category and _norm(category) == "unclassified") or re.search(r"no\s+(deliverable\s+)?(schema\s+)?contract", md or "", re.I):
+    if (entity and _norm(entity) == "unclassified") or (not entity and category and _norm(category) == "unclassified") or re.search(r"no\s+(deliverable\s+)?(schema\s+)?contract", md or "", re.I):
         out["no_contract"] = True
         w.append("This source is Unclassified: no deliverable contract applies, so there are no required fields and no schema checks. Do not mark fields Wrong on schema grounds. Ask the lead which entity type the records should follow.")
     if not md:
