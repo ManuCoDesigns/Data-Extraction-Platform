@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { qualityApi } from '@/api/client'
 import { Blank, Chip, PAGE, PageHeader, Panel, SelectBox, Skeletons, Tabs, Tile, shortAgo, type Tone } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
+import { ProcessReport } from '@/components/enh/ProcessReport'
 import { ReviewWorkspace } from '@/components/enh/ReviewWorkspace'
 import { SopRequirementsOverview, SopRulesBody } from '@/components/enh/SopRules'
 
@@ -93,8 +94,8 @@ function Scores({ sourceId, projectId, period }: { sourceId: string; projectId: 
       )}
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
         <Tile label="Process score" value={pc(s.process)} tone={scoreTone(s.process)} hint="Accuracy, review catch rate and reviewer precision combined" />
-        <Tile label="Final accuracy" value={pc(s.final_accuracy)} tone={scoreTone(s.final_accuracy)} hint={`${c.audited - c.audited_wrong} of ${c.audited} checked fields were right`} />
-        <Tile label="Review catch rate" value={pc(s.review_catch_rate)} tone={scoreTone(s.review_catch_rate)} hint={`${c.reviewer_confirmed} caught, ${c.escaped} got through`} />
+        <Tile label="Final accuracy" value={pc(s.final_accuracy)} tone={scoreTone(s.final_accuracy)} hint={`${pc(s.first_pass_accuracy)} were right the first time. ${c.audited} fields checked`} />
+        <Tile label="Review catch rate" value={pc(s.review_catch_rate)} tone={scoreTone(s.review_catch_rate)} hint={`${c.caught} of ${c.errors} known errors were caught by peers`} />
         <Tile label="Reviewer precision" value={pc(s.reviewer_precision)} tone={scoreTone(s.reviewer_precision)} hint={`${c.reviewer_confirmed} confirmed, ${c.reviewer_dismissed} dismissed`} />
       </div>
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
@@ -120,13 +121,16 @@ function Scores({ sourceId, projectId, period }: { sourceId: string; projectId: 
           )}
         </Panel>
       </div>
+      <ProcessReport sourceId={sourceId} projectId={projectId} from={period.from} to={period.to} />
       <ExtractorReport sourceId={sourceId} projectId={projectId} period={period} />
-      <Panel title="Reviewers" subtitle="How many of each reviewer's logged errors turned out to be real">
-        {d.reviewers.length === 0 ? <Blank title="No errors logged yet" text="Reviewers flag errors from a record in the source page." /> : (
-          <table className="w-full text-sm"><thead><tr className="text-left text-xs text-gray-500"><th className="py-1 font-semibold">Name</th><th className="font-semibold">Logged</th><th className="font-semibold">Confirmed</th><th className="font-semibold">Dismissed</th><th className="font-semibold">Open</th><th className="font-semibold">Precision</th></tr></thead>
+      <Panel title="Reviewers" subtitle="What each peer reviewer caught, out of every known error on the sources they were assigned to">
+        {d.reviewers.length === 0 ? <Blank title="No reviewers yet" text="Peer reviewers show here once they are assigned to a source or flag an error." /> : (
+          <div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left text-xs text-gray-500"><th className="py-1 pr-3 font-semibold">Name</th><th className="pr-3 font-semibold">Sources</th><th className="pr-3 font-semibold">Known errors</th><th className="pr-3 font-semibold">Caught</th><th className="pr-3 font-semibold">Catch rate</th><th className="pr-3 font-semibold">False alarms</th><th className="pr-3 font-semibold">Precision</th><th className="font-semibold">Open</th></tr></thead>
             <tbody>{d.reviewers.map((r: any) => (
-              <tr key={r.user_id} className="border-t border-gray-50"><td className="py-1.5 text-gray-900">{r.name}</td><td className="tabular-nums">{r.raised}</td><td className="tabular-nums">{r.confirmed}</td><td className="tabular-nums">{r.dismissed}</td><td className="tabular-nums">{r.open}</td><td><Chip tone={scoreTone(r.precision)}>{pc(r.precision)}</Chip></td></tr>
-            ))}</tbody></table>
+              <tr key={r.user_id} className="border-t border-gray-50"><td className="py-1.5 pr-3 text-gray-900">{r.name}</td><td className="pr-3 tabular-nums">{r.sources}</td><td className="pr-3 tabular-nums">{r.known_errors}</td><td className="pr-3 tabular-nums">{r.caught}</td>
+                <td className="pr-3"><Chip tone={scoreTone(r.catch_rate)}>{pc(r.catch_rate)}</Chip>{r.confidence === 'low' && <span className="ml-1 text-[11px] text-gray-400">early</span>}</td>
+                <td className="pr-3 tabular-nums">{r.false_alarms}</td><td className="pr-3"><Chip tone={scoreTone(r.precision)}>{pc(r.precision)}</Chip></td><td className="tabular-nums">{r.open}</td></tr>
+            ))}</tbody></table></div>
         )}
       </Panel>
     </div>

@@ -123,7 +123,7 @@ def review_record(
         _job = db.query(_EJ).filter(_EJ.id == r.job_id).first()
         _src = db.query(_Src).filter(_Src.id == _job.source_id).first() if _job and _job.source_id else None
         if _src is not None:
-            _rl.assert_record_editable(_src, r)
+            _rl.assert_record_editable(_src, r, current_user)
 
     # Apply field overrides before setting review status
     if payload.field_overrides:

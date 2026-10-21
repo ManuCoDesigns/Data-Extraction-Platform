@@ -505,6 +505,12 @@ export const qualityApi = {
   },
   feedback: (sourceId: string) => api.get(`/quality/sources/${sourceId}/feedback`).then(r => r.data),
   extractorReport: (params: { project_id?: string; source_id?: string; user_id?: string; days?: number; date_from?: string; date_to?: string }) => api.get('/quality/extractor-report', { params }).then(r => r.data),
+  processReport: (params: { project_id?: string; source_id?: string; date_from?: string; date_to?: string }) => api.get('/quality/process-report', { params }).then(r => r.data),
+  exportProcessReport: async (params: { project_id?: string; source_id?: string; date_from?: string; date_to?: string }) => {
+    const r = await api.get('/quality/process-report/export', { params, responseType: 'blob' })
+    const url = URL.createObjectURL(new Blob([r.data]))
+    const a = document.createElement('a'); a.href = url; a.download = `process_report_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
+  },
   exportExtractorReport: async (params: { project_id?: string; source_id?: string; user_id?: string; days?: number; date_from?: string; date_to?: string }) => {
     const r = await api.get('/quality/extractor-report/export', { params, responseType: 'blob' })
     const url = URL.createObjectURL(new Blob([r.data]))

@@ -424,8 +424,9 @@ def quality_summary(project_id: str | None = None, source_id: str | None = None,
                    .filter(ExtractionJob.source_id.in_(ids)).all()):
         recs.setdefault(sid, []).append(r)
     ext_of = {s.id: s.assigned_extractor_id for s in srcs}
-    uids = {f.raised_by for f in findings} | set(v for v in ext_of.values() if v)
-    out = q.compute_summary(findings, audits, recs, ext_of, _names(db, uids), {s.id: s.name for s in srcs})
+    peers_of = {s.id: [p.user_id for p in s.peer_reviews] for s in srcs}
+    uids = {f.raised_by for f in findings} | set(v for v in ext_of.values() if v) | {u for us in peers_of.values() for u in us}
+    out = q.compute_summary(findings, audits, recs, ext_of, _names(db, uids), {s.id: s.name for s in srcs}, peers_of)
     out["days"] = days
     out["date_from"] = date_from
     out["date_to"] = date_to
@@ -474,6 +475,66 @@ def _extractor_data(db: Session, user: User, project_id, source_id, user_id, day
     names = _names(db, {f.raised_by for f in findings if f.raised_by} | {v for v in ext_of.values() if v})
     report = q.extractor_report(findings, audits, recs, ext_of, names, {x.id: x.name for x in srcs})
     return report, (findings, audits, recs, ext_of, names), srcs, {x.id: x for x in srcs}
+
+
+def _scorecard_data(db: Session, user: User, project_id, source_id, date_from, date_to, days: int = 0):
+    """The same data every score uses: findings, ground-truth checks and records for the sources the person can see.
+    No dates means everything ever recorded (the cumulative view)."""
+    srcs = _visible_sources(db, user, project_id).filter(Source.status != SourceStatus.NOT_STARTED).all()
+    if source_id:
+        srcs = [x for x in srcs if x.id == source_id]
+    ids = [x.id for x in srcs]
+    if not ids:
+        return {"batches": [], "cumulative": q._finish({**{k: 0 for k in q._ZERO}, "sources": 0}), "extractors": [], "reviewers": []}, srcs
+    findings = db.query(QualityFinding).filter(QualityFinding.source_id.in_(ids)).all()
+    audits = db.query(FieldAudit).filter(FieldAudit.source_id.in_(ids)).all()
+    lo, hi = _day_start(date_from), _day_start(date_to, plus=1)
+    if days and not lo:
+        lo = enh.now_utc() - timedelta(days=days)
+    if lo or hi:
+        def _ok(dt):
+            if dt is None:
+                return False
+            t = enh_aware(dt)
+            return (not lo or t >= lo) and (not hi or t < hi)
+        findings = [f for f in findings if _ok(f.created_at)]
+        audits = [a for a in audits if _ok(a.first_at or a.audited_at)]
+    recs: dict = {}
+    for r, sid in (db.query(ExtractedRecord, ExtractionJob.source_id).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id).filter(ExtractionJob.source_id.in_(ids)).all()):
+        recs.setdefault(sid, []).append(r)
+    ext_of = {x.id: x.assigned_extractor_id for x in srcs}
+    peers_of = {x.id: [p.user_id for p in x.peer_reviews] for x in srcs}
+    names = _names(db, {f.raised_by for f in findings if f.raised_by} | {v for v in ext_of.values() if v} | {u for us in peers_of.values() for u in us})
+    sc = q.scorecard(findings, audits, recs, ext_of, names, {x.id: x.name for x in srcs}, peers_of)
+    status = {x.id: getattr(x.status, "value", x.status) for x in srcs}
+    for b in sc["batches"]:
+        b["status"] = status.get(b["source_id"])
+    return sc, srcs
+
+
+@router.get("/process-report")
+def process_report(project_id: str | None = None, source_id: str | None = None, date_from: str | None = None, date_to: str | None = None,
+                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The whole process, every score from the same numbers: one row per source (batch), then the cumulative total across all sources,
+    then each extractor and each peer reviewer. No dates means everything ever recorded."""
+    _need_lead(user)
+    sc, _ = _scorecard_data(db, user, project_id, source_id, date_from, date_to)
+    return {"cumulative": sc["cumulative"], "batches": sc["batches"], "extractors": [{k: v for k, v in x.items() if k != "sources"} for x in sc["extractors"]],
+            "reviewers": sc["reviewers"], "date_from": date_from, "date_to": date_to}
+
+
+@router.get("/process-report/export")
+def process_report_export(project_id: str | None = None, source_id: str | None = None, date_from: str | None = None, date_to: str | None = None,
+                          db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from fastapi.responses import Response
+    from app.services import quality_export as qx
+    _need_lead(user)
+    sc, _ = _scorecard_data(db, user, project_id, source_id, date_from, date_to)
+    if not sc["batches"]:
+        raise HTTPException(status_code=404, detail="Nothing to report yet.")
+    data = qx.process_workbook(sc, {"date_from": date_from, "date_to": date_to, "generated": enh.now_utc()})
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    headers={"Content-Disposition": 'attachment; filename="process-report.xlsx"'})
 
 
 @router.get("/extractor-report")

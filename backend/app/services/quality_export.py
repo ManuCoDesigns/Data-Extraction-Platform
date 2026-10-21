@@ -217,3 +217,78 @@ def sop_requirements_xlsx(items: list[dict], meta: dict) -> bytes:
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
+
+
+def process_workbook(sc: dict, meta: dict) -> bytes:
+    """The whole process in one workbook: the cumulative total, one row per source (batch), each extractor and each peer reviewer.
+    Every number comes from the same counts, and the README says exactly how each rate is worked out."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "README"
+    window = " to ".join(x for x in (meta.get("date_from"), meta.get("date_to")) if x) or "everything ever recorded"
+    gen = _fmt(meta.get("generated"))
+    lines = [
+        "Process report: accuracy, errors and review catch across the sources.",
+        f"Period: {window}.  Generated: {gen} (UTC).",
+        "",
+        "Sheets",
+        "Cumulative: the total across all sources in this report.",
+        "Batches: one row per source (each source is one Xtrium batch), highest error rate first.",
+        "Extractors: the same figures grouped by the extractor assigned to each source.",
+        "Reviewers: each peer reviewer's catches, false alarms and catch rate.",
+        "",
+        "How each number is worked out",
+        "Error: one record and field that an admin confirmed as wrong, or that an admin's check against the real source found wrong. Counted once, however many people pointed at it. Errors stay counted after the extractor fixes them.",
+        "Errors per 100 fields = errors / fields delivered x 100.",
+        "First-pass accuracy = checked fields that were right the first time / checked fields. It never changes after a fix.",
+        "Final accuracy = checked fields that are right now / checked fields whose current value was checked. A field changed since its check is 'waiting re-check' and left out until it is checked again.",
+        "Catch rate = errors a peer reviewer pointed at / all known errors. Only errors an admin has confirmed or found count, so it can rise as more fields are checked.",
+        "Reviewer catch rate = errors that reviewer pointed at / all known errors on the sources they were assigned to.",
+        "Reviewer precision = fields the reviewer flagged that were confirmed / (confirmed + dismissed).",
+        "Rework rate = records sent back at least once / records.",
+        "Confidence is 'low' when fewer than 30 fields were checked (fewer than 10 known errors for a reviewer). Treat low-confidence rates as early signals.",
+        "Edits made after peers began reviewing are locked. An admin override is logged, so scores can be re-run with it excluded.",
+    ]
+    for i, line in enumerate(lines, 1):
+        ws.cell(i, 1, line)
+        if i in (1, 4, 10):
+            ws.cell(i, 1).font = Font(bold=True)
+    ws.column_dimensions["A"].width = 150
+    head = PatternFill("solid", fgColor="1F2937")
+
+    def sheet(title, cols, rows):
+        w = wb.create_sheet(title)
+        w.append(cols)
+        for c in w[1]:
+            c.font, c.fill = Font(bold=True, color="FFFFFF"), head
+        for r in rows:
+            w.append([_cell(v) for v in r])
+        w.freeze_panes = "A2"
+        for i, c in enumerate(cols, 1):
+            w.column_dimensions[get_column_letter(i)].width = max(12, min(40, len(c) + 4))
+        return w
+
+    def pc(v):
+        return "" if v is None else v / 100.0
+    num_cols = ["Records", "Fields", "Checked", "Errors", "Errors per 100 fields", "First-pass accuracy", "Final accuracy", "Caught by peers", "Missed by peers", "Catch rate", "Fixed", "Still wrong", "Records sent back", "Rework rate", "Confidence"]
+
+    def nums(d):
+        return [d["records"], d["fields"], d["audited"], d["errors"], d["errors_per_100"], pc(d["first_pass_accuracy"]), pc(d["final_accuracy"]), d["caught"], d["escaped"], pc(d["caught_rate"]),
+                d["fixed"], d["still_wrong"], d["returned_records"], pc(d["rework_rate"]), d["confidence"]]
+    c = sc["cumulative"]
+    sheet("Cumulative", ["Sources"] + num_cols, [[c.get("sources", 0)] + nums(c)])
+    sheet("Batches", ["Source", "Status", "Extractor", "Peer reviewers"] + num_cols,
+          [[b["source"], b.get("status", ""), b["extractor"], ", ".join(b["peers"])] + nums(b) for b in sc["batches"]])
+    sheet("Extractors", ["Extractor", "Sources"] + num_cols, [[x["name"], len(x["sources"])] + nums(x) for x in sc["extractors"]])
+    sheet("Reviewers", ["Reviewer", "Sources assigned", "Known errors on them", "Caught", "Missed", "Catch rate", "False alarms", "Precision", "Still open", "Only one to catch", "Confidence"],
+          [[r["name"], r["sources"], r["known_errors"], r["caught"], r["missed"], pc(r["catch_rate"]), r["false_alarms"], pc(r["precision"]), r["open"], r["only_one_to_catch"], r["confidence"]] for r in sc["reviewers"]])
+    for name in ("Cumulative", "Batches", "Extractors", "Reviewers"):
+        w = wb[name]
+        for row in w.iter_rows(min_row=2):
+            for cell in row:
+                h = w.cell(1, cell.column).value
+                if h in ("First-pass accuracy", "Final accuracy", "Catch rate", "Rework rate", "Precision") and isinstance(cell.value, float):
+                    cell.number_format = "0.0%"
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()

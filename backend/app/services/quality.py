@@ -117,50 +117,88 @@ def _eq(a, b) -> bool:
     return n(a) == n(b)
 
 
-def extractor_report(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict, source_names: dict | None = None) -> dict:
-    """What each extractor delivered and how accurate it was, counting everything that was ever found.
+def _collect(findings: list, audits: list, records_by_source: dict):
+    """One place that decides what counts as an error, so every score uses the same numbers.
 
-    An error stays in the numbers after the extractor fixes it. Each error is one record and field, counted once,
-    from a confirmed finding or from a first check an admin marked wrong. Fixing it lowers the delivered error rate
-    (final accuracy) but not the first-pass numbers, so returns and rework are visible instead of hidden.
+    An error is one (record, field), counted once however many people pointed at it. It exists when an admin confirmed a
+    logged finding on it, or an admin's ground-truth check found it wrong the first time, or still wrong now.
     """
-    source_names = source_names or {}
     rec_by_id = {r.id: (sid, r) for sid, rs in records_by_source.items() for r in rs}
-    errs: dict = {}      # (record, field) -> info
+    errs: dict = {}
+
+    def err(key):
+        return errs.setdefault(key, {"reviewers": set(), "system": False, "fixed": False, "first": False, "audit_wrong": False})
+    false_alarms: dict = defaultdict(set)     # reviewer -> {(record, field)} an admin dismissed
     for f in findings:
-        if f.status == "confirmed" and f.field and f.record_id in rec_by_id:
-            e = errs.setdefault((f.record_id, f.field), {"reviewer": False, "fixed": False, "first": False})
-            e["reviewer"] = e["reviewer"] or f.origin == "reviewer"
+        if not f.field or f.record_id not in rec_by_id:
+            continue
+        key = (f.record_id, f.field)
+        if f.status == "confirmed":
+            e = err(key)
+            if f.origin == "reviewer" and f.raised_by:
+                e["reviewers"].add(f.raised_by)
+            elif f.origin == "reviewer":
+                e["reviewers"].add("?")
+            else:
+                e["system"] = True
             e["fixed"] = e["fixed"] or bool(getattr(f, "fixed_before_final", False))
+        elif f.status == "dismissed" and f.origin == "reviewer" and f.raised_by:
+            false_alarms[f.raised_by].add(key)
     aud_final: dict = {}
     for a in audits:
         pair = rec_by_id.get(a.record_id)
         if not pair:
             continue
-        sid, r = pair
+        r = pair[1]
         stale = not _eq(a.extracted_value, (r.extracted_fields or {}).get(a.field))
         first = getattr(a, "first_verdict", None) or a.verdict
         aud_final[(a.record_id, a.field)] = (a, stale, first)
         if first == "incorrect" or (a.verdict == "incorrect" and not stale):
-            e = errs.setdefault((a.record_id, a.field), {"reviewer": False, "fixed": False, "first": False})
+            e = err((a.record_id, a.field))
+            e["audit_wrong"] = True
             e["first"] = e["first"] or first == "incorrect"
-        if first == "incorrect" and (a.verdict == "correct" and not stale):
-            errs[(a.record_id, a.field)]["fixed"] = True
-    out: dict = {}
+        if first == "incorrect" and a.verdict == "correct" and not stale:
+            err((a.record_id, a.field))["fixed"] = True
+    return rec_by_id, errs, aud_final, false_alarms
 
-    def blank(sid):
-        return {"source_id": sid, "source": source_names.get(sid, ""), "records": 0, "fields": 0, "returned_records": 0, "returns": 0, "audited": 0, "first_wrong": 0,
-                "final_wrong": 0, "waiting_recheck": 0, "errors": 0, "caught": 0, "fixed": 0}
+
+_ZERO = ("records", "fields", "returned_records", "returns", "audited", "first_wrong", "final_wrong", "waiting_recheck", "errors", "caught", "fixed")
+
+
+def _finish(d: dict) -> dict:
+    """Rates from the counts of one scope (a source, an extractor, or everything)."""
+    d["errors_per_100"] = round(100 * d["errors"] / d["fields"], 1) if d["fields"] else None
+    d["first_pass_accuracy"] = pct(d["audited"] - d["first_wrong"], d["audited"])
+    d["final_accuracy"] = pct(d["audited"] - d["waiting_recheck"] - d["final_wrong"], d["audited"] - d["waiting_recheck"])
+    d["still_wrong"] = max(0, d["errors"] - d["fixed"])
+    d["escaped"] = max(0, d["errors"] - d["caught"])
+    d["caught_rate"] = pct(d["caught"], d["errors"])
+    d["rework_rate"] = pct(d["returned_records"], d["records"])
+    d["confidence"] = "low" if d["audited"] < 30 else "ok"
+    return d
+
+
+def scorecard(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict, source_names: dict | None = None, peers_of: dict | None = None) -> dict:
+    """Every score the reports use, from one pass over the same data: per source (a batch), per extractor, per reviewer, and cumulative.
+
+    Errors stay in the numbers after the extractor fixes them. Fixing lowers the delivered error rate (final accuracy) and
+    leaves first-pass accuracy alone, so returns and rework stay visible.
+    peers_of maps a source to the peer reviewers assigned to it. A reviewer's catch rate is the share of all known errors on
+    their sources that they pointed at.
+    """
+    source_names = source_names or {}
+    peers_of = peers_of or {}
+    rec_by_id, errs, aud_final, false_alarms = _collect(findings, audits, records_by_source)
     per: dict = {}
     for sid, rs in records_by_source.items():
-        d = per.setdefault(sid, blank(sid))
+        d = per.setdefault(sid, {"source_id": sid, "source": source_names.get(sid, ""), **{k: 0 for k in _ZERO}})
         for r in rs:
             d["records"] += 1
             d["fields"] += count_fields(r)
             c = getattr(r, "correction_count", 0) or 0
             d["returns"] += c
             d["returned_records"] += 1 if c else 0
-    for (rid, fld), (a, stale, first) in aud_final.items():
+    for (rid, _fld), (a, stale, first) in aud_final.items():
         d = per[rec_by_id[rid][0]]
         d["audited"] += 1
         d["first_wrong"] += 1 if first == "incorrect" else 0
@@ -168,102 +206,109 @@ def extractor_report(findings: list, audits: list, records_by_source: dict, extr
             d["waiting_recheck"] += 1
         elif a.verdict == "incorrect":
             d["final_wrong"] += 1
-    for (rid, fld), e in errs.items():
+    for (rid, _fld), e in errs.items():
         d = per[rec_by_id[rid][0]]
         d["errors"] += 1
-        d["caught"] += 1 if e["reviewer"] else 0
+        d["caught"] += 1 if e["reviewers"] else 0
         d["fixed"] += 1 if e["fixed"] else 0
     rows = []
     for sid, d in per.items():
-        d["errors_per_100"] = round(100 * d["errors"] / d["fields"], 1) if d["fields"] else None
-        d["first_pass_accuracy"] = pct(d["audited"] - d["first_wrong"], d["audited"])
-        d["final_accuracy"] = pct(d["audited"] - d["waiting_recheck"] - d["final_wrong"], d["audited"] - d["waiting_recheck"])
-        d["still_wrong"] = max(0, d["errors"] - d["fixed"])
         d["extractor_id"] = extractor_of.get(sid)
-        rows.append(d)
+        d["extractor"] = names.get(d["extractor_id"], "") if d["extractor_id"] else ""
+        d["peers"] = [names.get(u, "Unknown") for u in peers_of.get(sid, [])]
+        rows.append(_finish(d))
+    total = {k: sum(d[k] for d in rows) for k in _ZERO}
+    total["sources"] = len(rows)
+    cumulative = _finish(total)
     by_ext: dict = {}
     for d in rows:
         u = d["extractor_id"]
         if not u:
             continue
-        x = by_ext.setdefault(u, {"user_id": u, "name": names.get(u, "Unknown"), **{k: 0 for k in ("records", "fields", "returned_records", "returns", "audited", "first_wrong", "final_wrong", "waiting_recheck", "errors", "caught", "fixed")}, "sources": []})
-        for k in ("records", "fields", "returned_records", "returns", "audited", "first_wrong", "final_wrong", "waiting_recheck", "errors", "caught", "fixed"):
+        x = by_ext.setdefault(u, {"user_id": u, "name": names.get(u, "Unknown"), **{k: 0 for k in _ZERO}, "sources": []})
+        for k in _ZERO:
             x[k] += d[k]
         x["sources"].append(d)
     ext = []
     for x in by_ext.values():
-        x["errors_per_100"] = round(100 * x["errors"] / x["fields"], 1) if x["fields"] else None
-        x["first_pass_accuracy"] = pct(x["audited"] - x["first_wrong"], x["audited"])
-        x["final_accuracy"] = pct(x["audited"] - x["waiting_recheck"] - x["final_wrong"], x["audited"] - x["waiting_recheck"])
-        x["still_wrong"] = max(0, x["errors"] - x["fixed"])
-        x["caught_rate"] = pct(x["caught"], x["errors"])
-        x["rework_rate"] = pct(x["returned_records"], x["records"])
-        x["confidence"] = "low" if x["audited"] < 30 else "ok"
+        _finish(x)
         x["sources"].sort(key=lambda z: -(z["errors_per_100"] or 0))
         ext.append(x)
     ext.sort(key=lambda z: -(z["errors_per_100"] or 0))
-    return {"extractors": ext}
+    # Reviewers. Catch rate needs the denominator: every known error on the sources they were assigned to.
+    errs_on = defaultdict(set)
+    for (rid, fld) in errs:
+        errs_on[rec_by_id[rid][0]].add((rid, fld))
+    open_by = Counter(f.raised_by for f in findings if f.origin == "reviewer" and f.status == "open" and f.raised_by)
+    people = set(false_alarms) | {u for e in errs.values() for u in e["reviewers"] if u != "?"} | {u for us in peers_of.values() for u in us}
+    rev = []
+    for u in people:
+        caught = {k for k, e in errs.items() if u in e["reviewers"]}
+        fa = false_alarms.get(u, set()) - caught
+        mine = [sid for sid, us in peers_of.items() if u in us]
+        known = set().union(*[errs_on.get(sid, set()) for sid in mine]) if mine else set()
+        missed = known - caught
+        solo = sum(1 for k in caught if e_only(errs[k], u))
+        rev.append({"user_id": u, "name": names.get(u, "Unknown"), "sources": len(mine), "raised": len(caught) + len(fa), "confirmed": len(caught), "dismissed": len(fa),
+                    "open": open_by.get(u, 0), "caught": len(caught), "false_alarms": len(fa), "missed": len(missed), "known_errors": len(known), "only_one_to_catch": solo,
+                    "precision": pct(len(caught), len(caught) + len(fa)), "catch_rate": pct(len(caught & known), len(known)) if known else None,
+                    "confidence": "low" if len(known) < 10 else "ok"})
+    rev.sort(key=lambda z: (-(z["caught"]), z["name"]))
+    return {"batches": sorted(rows, key=lambda z: -(z["errors_per_100"] or 0)), "cumulative": cumulative, "extractors": ext, "reviewers": rev, "errors": errs, "false_alarms": false_alarms}
 
 
-def compute_summary(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict, source_names: dict | None = None) -> dict:
+def e_only(e: dict, uid: str) -> bool:
+    """True when this reviewer was the only person who pointed at the error."""
+    return e["reviewers"] == {uid}
+
+
+def extractor_report(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict, source_names: dict | None = None) -> dict:
+    """What each extractor delivered and how accurate it was, counting everything that was ever found."""
+    sc = scorecard(findings, audits, records_by_source, extractor_of, names, source_names)
+    return {"extractors": sc["extractors"]}
+
+
+def compute_summary(findings: list, audits: list, records_by_source: dict, extractor_of: dict, names: dict, source_names: dict | None = None, peers_of: dict | None = None) -> dict:
     """Process scores from logged findings and ground-truth audits.
 
-    final accuracy   = audited fields that were right / audited fields (what was actually delivered)
-    review catch     = errors reviewers found and an admin confirmed / (those + errors the audit found afterwards)
-    reviewer precision = confirmed / (confirmed + dismissed) among reviewer findings an admin has settled
+    final accuracy     = audited fields that were right now / audited fields that were checked on their current value
+    review catch rate  = known errors a peer pointed at / all known errors (each record and field counted once)
+    reviewer precision = fields a peer flagged that were confirmed / (confirmed + dismissed)
+    process score      = 50% final accuracy + 30% review catch rate + 20% reviewer precision (parts that cannot be measured yet are left out)
     """
-    fields_total = sum(count_fields(r) for rs in records_by_source.values() for r in rs)
+    sc = scorecard(findings, audits, records_by_source, extractor_of, names, source_names, peers_of)
+    cum = sc["cumulative"]
     reviewer = [f for f in findings if f.origin == "reviewer"]
     system = [f for f in findings if f.origin == "system"]
     r_conf = [f for f in reviewer if f.status == "confirmed"]
     r_dis = [f for f in reviewer if f.status == "dismissed"]
     s_conf = [f for f in system if f.status == "confirmed"]
     s_dis = [f for f in system if f.status == "dismissed"]
-    caught_keys = {(f.record_id, f.field) for f in r_conf}
-    rec_fields = {r.id: (r.extracted_fields or {}) for rs in records_by_source.values() for r in rs}
-    # A check made on a value the extractor has since changed is out of date. It stops counting towards final accuracy
-    # until the admin looks again, but an error it found stays in the error counts and in first-pass accuracy.
-    stale = {a.id for a in audits if a.record_id in rec_fields and not _eq(a.extracted_value, rec_fields[a.record_id].get(a.field))}
-    live = [a for a in audits if a.id not in stale]
-    a_bad = [a for a in audits if (getattr(a, "first_verdict", None) or a.verdict) == "incorrect" or (a.verdict == "incorrect" and a.id not in stale)]
-    live_bad = [a for a in live if a.verdict == "incorrect"]
-    escaped = [a for a in a_bad if (a.record_id, a.field) not in caught_keys]
     confirmed_all = [f for f in findings if f.status == "confirmed"]
-
-    final_acc = pct(len(live) - len(live_bad), len(live))
-    catch = pct(len(r_conf), len(r_conf) + len(escaped)) if (r_conf or escaped) else None
-    precision = pct(len(r_conf), len(r_conf) + len(r_dis))
+    fa = sum(len(v - {k for k, e in sc["errors"].items() if u in e["reviewers"]}) for u, v in sc["false_alarms"].items())
+    caught_n = sum(1 for e in sc["errors"].values() if e["reviewers"])
+    final_acc = cum["final_accuracy"]
+    catch = cum["caught_rate"] if cum["errors"] else None
+    precision = pct(caught_n, caught_n + fa) if (caught_n + fa) else None
     parts = [(final_acc, 0.5), (catch, 0.3), (precision, 0.2)]
     have = [(v, w) for v, w in parts if v is not None]
     score = round(sum(v * w for v, w in have) / sum(w for _, w in have), 1) if have else None
-
     by_cat = Counter(f.category for f in confirmed_all)
     by_sev = Counter(f.severity for f in confirmed_all)
-
-    rep = extractor_report(findings, audits, records_by_source, extractor_of, names, source_names)
-    extractors = [{**x, "errors_per_100": x["errors_per_100"], "audit_accuracy": x["final_accuracy"], "sources": len(x["sources"]), "source_rows": x["sources"]} for x in rep["extractors"]]
-    rev = defaultdict(lambda: {"raised": 0, "confirmed": 0, "dismissed": 0, "open": 0})
-    for f in reviewer:
-        if not f.raised_by:
-            continue
-        d = rev[f.raised_by]
-        d["raised"] += 1
-        d[{"confirmed": "confirmed", "dismissed": "dismissed"}.get(f.status, "open")] += 1
-    reviewers = sorted(({"user_id": u, "name": names.get(u, "Unknown"), **d,
-                         "precision": pct(d["confirmed"], d["confirmed"] + d["dismissed"])} for u, d in rev.items()), key=lambda x: -x["raised"])
-
+    extractors = [{**x, "audit_accuracy": x["final_accuracy"], "sources": len(x["sources"]), "source_rows": x["sources"]} for x in sc["extractors"]]
     return {
-        "scores": {"process": score, "final_accuracy": final_acc, "review_catch_rate": catch, "reviewer_precision": precision},
-        "counts": {"fields": fields_total, "audited": len(audits), "audited_wrong": len(a_bad), "escaped": len(escaped), "waiting_recheck": len(stale), "fixed_before_final": sum(1 for f in findings if getattr(f, "fixed_before_final", False)),
+        "scores": {"process": score, "final_accuracy": final_acc, "first_pass_accuracy": cum["first_pass_accuracy"], "review_catch_rate": catch, "reviewer_precision": precision},
+        "counts": {"fields": cum["fields"], "audited": cum["audited"], "audited_wrong": cum["first_wrong"], "escaped": cum["escaped"], "waiting_recheck": cum["waiting_recheck"],
+                   "errors": cum["errors"], "caught": cum["caught"], "fixed_before_final": sum(1 for f in findings if getattr(f, "fixed_before_final", False)),
                    "reviewer_findings": len(reviewer), "reviewer_confirmed": len(r_conf), "reviewer_dismissed": len(r_dis),
                    "reviewer_open": len(reviewer) - len(r_conf) - len(r_dis), "system_findings": len(system),
                    "system_confirmed": len(s_conf), "system_dismissed": len(s_dis), "open": sum(1 for f in findings if f.status == "open"),
-                   "errors_per_100_fields": round(100 * len(confirmed_all) / fields_total, 1) if fields_total else None},
+                   "errors_per_100_fields": cum["errors_per_100"]},
         "system_precision": pct(len(s_conf), len(s_conf) + len(s_dis)),
         "by_category": [{"category": c, "label": CATEGORIES.get(c, c), "count": n} for c, n in by_cat.most_common()],
         "by_severity": {s: by_sev.get(s, 0) for s in SEVERITIES},
-        "extractors": extractors, "reviewers": reviewers,
-        "confidence": "low" if len(audits) < 30 else "ok",
+        "extractors": extractors, "reviewers": sc["reviewers"], "batches": sc["batches"], "cumulative": cum,
+        "confidence": "low" if cum["audited"] < 30 else "ok",
     }
 
 

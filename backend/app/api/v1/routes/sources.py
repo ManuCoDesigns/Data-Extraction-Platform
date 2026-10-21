@@ -792,7 +792,7 @@ async def upload_to_source(
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
     from app.services import record_locks as _rl  # upload.lock
-    _rl.assert_bulk_editable(source)
+    _bulk_override = _rl.assert_bulk_editable(source, current_user)
 
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > MAX_UPLOAD_SIZE_BYTES:
@@ -1071,7 +1071,7 @@ async def upload_multi_to_source(
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
     from app.services import record_locks as _rl  # upload_multi.lock
-    _rl.assert_bulk_editable(source)
+    _bulk_override = _rl.assert_bulk_editable(source, current_user)
 
     if not files:
         raise HTTPException(status_code=422, detail="No files provided.")
@@ -1535,7 +1535,7 @@ def fix_record(
     schema_fields = schema_ver.definition.get("fields", []) if schema_ver else []
 
     from app.services import record_locks as _rl  # fix_record.lock
-    _rl.assert_record_editable(source, record)
+    lock_override = _rl.assert_record_editable(source, record, current_user)
     before = dict(record.extracted_fields or {})
     record.extracted_fields = {**(record.extracted_fields or {}), **payload.extracted_fields}
     is_valid, errors = validate_record(record.extracted_fields, schema_fields)
@@ -1556,7 +1556,7 @@ def fix_record(
     db.add(AuditLog(
         user_id=current_user.id, project_id=source.project_id, source_id=source.id, job_id=record.job_id, record_id=record.id,
         action=AuditAction.SOURCE_RECORD_FIXED,
-        before_value={"fields": before}, after_value={"fields": record.extracted_fields, "changed": changed_keys, "changed_by": current_user.id, "status_at_edit": source.status.value},
+        before_value={"fields": before}, after_value={"fields": record.extracted_fields, "changed": changed_keys, "changed_by": current_user.id, "lock_override": lock_override, "status_at_edit": source.status.value},
     ))
     db.commit()
     db.refresh(record)
@@ -2671,12 +2671,12 @@ def delete_source_record(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found in this source")
     from app.services import record_locks as _rl  # delete_record.lock
-    _rl.assert_record_editable(source, record)
+    lock_override = _rl.assert_record_editable(source, record, current_user)
     db.add(AuditLog(
         user_id=current_user.id, project_id=source.project_id, source_id=source.id, job_id=record.job_id, record_id=record.id,
         action=AuditAction.SOURCE_RECORD_FIXED,
         before_value={"fields": dict(record.extracted_fields or {}), "review_status": getattr(record.review_status, "value", record.review_status)},
-        after_value={"deleted": True, "deleted_by": current_user.id, "status_at_delete": source.status.value},
+        after_value={"deleted": True, "deleted_by": current_user.id, "lock_override": lock_override, "status_at_delete": source.status.value},
     ))
     db.delete(record)
     db.flush()
@@ -2704,7 +2704,7 @@ async def scrape_source_website(
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor or admin can scrape this source")
     from app.services import record_locks as _rl  # scrape.lock
-    _rl.assert_bulk_editable(source)
+    _bulk_override = _rl.assert_bulk_editable(source, current_user)
 
     if not source.website_url:
         raise HTTPException(status_code=422, detail="This source has no website URL set. Edit the source to add one first.")
@@ -3129,7 +3129,9 @@ def clear_source_records(
     if not _can_manage_source(current_user, source):
         raise HTTPException(status_code=403, detail="Only admins can clear records")
     from app.services import record_locks as _rl  # clear_records.lock
-    _rl.assert_bulk_editable(source)
+    _bulk_override = _rl.assert_bulk_editable(source, current_user)
+    db.add(AuditLog(user_id=current_user.id, project_id=source.project_id, source_id=source.id, action=AuditAction.SOURCE_RECORD_FIXED,
+                    after_value={"cleared_all_records": True, "cleared_by": current_user.id, "lock_override": _bulk_override, "status_at_clear": source.status.value}))
 
     job_ids = [j.id for j in db.query(ExtractionJob).filter(
         ExtractionJob.source_id == source_id

@@ -4,6 +4,7 @@ Peer reviewers are scored on what they caught. If the extractor can change a rec
 a field a peer approved can turn wrong, or a field a peer flagged can quietly disappear, and the peer's rating moves for
 something they did not do. So:
 
+- Admins are never blocked. Their edit is allowed and logged with the reason it overrode, so scores can be re-run without it.
 - With the peers (source ready for review or in review, and peers assigned): nothing on the source can be edited.
 - Reviewed records (approved, or waiting for the admin's sign-off): not editable. An admin has to return them first.
 - After an admin returns a record, the source goes to "changes requested". Only the records that were sent back can be
@@ -52,13 +53,29 @@ def bulk_lock_reason(source) -> str | None:
     return None
 
 
-def assert_record_editable(source, record):
+def is_admin(user) -> bool:
+    """Admins are never blocked. Their edit goes through and is logged as an override."""
+    try:
+        roles = {getattr(r.role, "value", r.role) for r in (user.roles or [])}
+    except Exception:
+        return False
+    return bool(roles & {"org_admin", "project_admin"})
+
+
+def assert_record_editable(source, record, user=None) -> str | None:
+    """Raises 423 for everyone except admins. For an admin it returns the reason that was overridden (to log), or None."""
     why = record_lock_reason(source, record)
+    if why and user is not None and is_admin(user):
+        return why
     if why:
         raise HTTPException(status_code=423, detail=why)
+    return None
 
 
-def assert_bulk_editable(source):
+def assert_bulk_editable(source, user=None) -> str | None:
     why = bulk_lock_reason(source)
+    if why and user is not None and is_admin(user):
+        return why
     if why:
         raise HTTPException(status_code=423, detail=why)
+    return None
