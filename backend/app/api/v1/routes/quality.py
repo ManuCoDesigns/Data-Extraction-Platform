@@ -1142,7 +1142,7 @@ async def sop_requirements_list(project_id: str | None = None, refresh: bool = F
     for s in srcs:
         o = sync["origin"].get(s.id, {})
         r = sr.build(s, origin=o.get("origin"), live_error=o.get("live_error"))
-        out.append({k: r[k] for k in ("source_id", "name", "category", "entity", "sop_code", "title", "spec_version", "has_sop", "has_markdown", "required_fields", "counts", "warnings", "origin", "saved_at", "from_xtrium")})
+        out.append({k: r[k] for k in ("source_id", "name", "category", "entity", "sop_code", "title", "spec_version", "has_sop", "has_markdown", "required_fields", "counts", "warnings", "origin", "saved_at", "from_xtrium", "stale", "no_contract")})
     out.sort(key=lambda x: (x["has_sop"], -len(x["warnings"]), x["name"].lower()))
     return {"items": out, "sync": {k: sync[k] for k in ("fetched", "already", "changed", "failed", "stopped")}}
 
