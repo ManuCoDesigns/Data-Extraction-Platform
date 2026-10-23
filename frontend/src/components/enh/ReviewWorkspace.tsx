@@ -199,6 +199,10 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const [active, setActive] = useState('')
   const [helpOpen, setHelpOpen] = useState(false)
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({})
+  // Records that are approved or sent back leave the queue by themselves. They stay one click away under "Finished".
+  const [showFinished, setShowFinished] = useState(false)
+  const inQueue = (r: any) => stageOf(r) === 'review' || stageOf(r) === 'back'
+  const vis = (rs: any[]) => (showFinished ? rs : rs.filter(inQueue))
   const [focus, setFocus] = useState(false)
   useEffect(() => {
     if (!focus) return
@@ -277,6 +281,13 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   useEffect(() => { setD(null); load() }, [load])
 
   const rec = d?.records?.find((r: any) => r.record_id === rid)
+  useEffect(() => {
+    if (!d?.records || showFinished || !rec || inQueue(rec)) return
+    const n = d.records.find(inQueue)
+    if (n) setRid(n.record_id)
+  }, [d, rid, showFinished])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setShowFinished(false) }, [sourceId])
+  const recVisible = !!rec && (showFinished || inQueue(rec))
   const shown = useMemo(() => (rec?.fields ?? []).filter((f: any) => (!onlyFlagged || f.signals.length > 0 || f.audit) && (!hideDone || !f.audit)), [rec, onlyFlagged, hideDone])
   const nextTodo = useCallback(() => {
     const todo = (rec?.fields ?? []).filter((f: any) => f.signals.length > 0 && !f.audit)
@@ -326,8 +337,9 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const openSide = () => { if (roomy) toggleDock(); else setFocus(v => !v) }
   const move = (delta: number) => {
     if (!d) return
-    const i = d.records.findIndex((r: any) => r.record_id === rid)
-    const n = d.records[Math.max(0, Math.min(d.records.length - 1, i + delta))]
+    const list = vis(d.records)
+    const i = list.findIndex((r: any) => r.record_id === rid)
+    const n = list[Math.max(0, Math.min(list.length - 1, i + delta))]
     if (n) setRid(n.record_id)
   }
   useEffect(() => {
@@ -356,7 +368,9 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const pctDone = t.flagged ? Math.round(100 * d.records.reduce((n: number, r: any) => n + r.fields.filter((f: any) => f.signals.length && f.audit).length, 0) / t.flagged) : 100
 
   const inOverlay = focus && !roomy
-  const idx = d.records.findIndex((r: any) => r.record_id === rid)
+  const visList = vis(d.records)
+  const finishedN = d.records.length - d.records.filter(inQueue).length
+  const idx = visList.findIndex((r: any) => r.record_id === rid)
   const todoLeft = rec ? rec.fields.filter((f: any) => f.signals.length > 0 && !f.audit).length : 0
   const steps = flowSteps(d, pctDone)
   const nextStep = steps.find(x => x.state === 'todo')
@@ -367,8 +381,8 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   }
   const advance = () => { const n = nextInQueue(); if (n) setRid(n.record_id) }
   const stage = rec ? stageOf(rec) : 'review'
-  const groups = (['review', 'back', 'sent', 'approved'] as Stage[]).map(k => ({ k, rows: d.records.filter((r: any) => stageOf(r) === k) })).filter(g => g.rows.length > 0)
-  const manyRecords = d.records.length > 1
+  const groups = (['review', 'back', 'sent', 'approved'] as Stage[]).map(k => ({ k, rows: visList.filter((r: any) => stageOf(r) === k) })).filter(g => g.rows.length > 0)
+  const manyRecords = visList.length > 1
   const showRail = manyRecords && !railHidden
   const recNav = (
     <>
@@ -413,7 +427,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         <div className="min-w-0 flex items-center gap-1.5">
           <IconButton label="Previous record" onClick={() => move(-1)}>‹</IconButton>
           <span className="text-sm font-bold text-gray-900 truncate max-w-[14ch]" title={rec?.record}>{rec?.record ?? 'No record'}</span>
-          <span className="text-xs text-gray-400 tabular-nums">{idx >= 0 ? `${idx + 1}/${d.records.length}` : ''}</span>
+          <span className="text-xs text-gray-400 tabular-nums">{idx >= 0 ? `${idx + 1}/${visList.length}` : ''}</span>
           <IconButton label="Next record" onClick={() => move(1)}>›</IconButton>
         </div>
         <FilterChip on={onlyFlagged} onClick={() => setOnlyFlagged(v => !v)} hint="Show only fields that something doubts. Turn it off to spot check any field.">Doubted only</FilterChip>
@@ -422,6 +436,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         <span className="ml-auto flex items-center gap-1.5 flex-wrap">
           <Button size="sm" onClick={jumpToWork} title="Jump to the next doubted field (n)">Next doubted{todoLeft ? ` (${todoLeft})` : ''}</Button>
           {!inOverlay && <Button size="sm" variant={docked ? 'primary' : 'secondary'} onClick={openSide} title="SOP, source text and website beside the record (s)">Side by side</Button>}
+          {finishedN > 0 && <Button size="sm" variant={showFinished ? 'primary' : 'secondary'} onClick={() => setShowFinished(v => !v)} title="Approved records and records sent back to the extractor leave the queue by themselves. Show them here.">{showFinished ? 'Hide finished' : `Finished (${finishedN})`}</Button>}
           {manyRecords && railHidden && !inOverlay && <Button size="sm" variant="secondary" onClick={toggleRail} title="Show the list of records">Records ({d.records.length})</Button>}
           <span className="relative">
             <Button size="sm" variant="secondary" onClick={() => setMoreOpen(v => !v)} aria-expanded={moreOpen} title="Check site, system checks, refresh from Xtrium, open the source site">More ▾</Button>
@@ -450,11 +465,17 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
       {stage === 'back' && rec && (
         <div className="rounded-xl border border-sky-200 bg-sky-50 text-sky-900 px-3 py-2 text-sm"><b>Back from the extractor.</b> {(rec.changed_since_return?.length ?? 0) > 0 ? <>Re-check the fields that changed: {rec.changed_since_return.slice(0, 6).join(', ')}{rec.changed_since_return.length > 6 ? '…' : ''}.</> : 'It was resubmitted with no field changes. Check that your corrections were not ignored.'}</div>
       )}
-      {d.records.length > 0 && !d.records.some((r: any) => stageOf(r) === 'review' || stageOf(r) === 'back') && (
+      {recVisible && d.records.length > 0 && !d.records.some((r: any) => stageOf(r) === 'review' || stageOf(r) === 'back') && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-2 text-sm"><b>Queue clear.</b> Every record is approved or waiting for the extractor.</div>
       )}
       {t.flagged > 0 && pctDone === 100 && <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-900 text-sm px-4 py-2.5">Every doubted field in this source is settled. Check a few random fields too: turn off Doubted only.</div>}
-      {!rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
+      {rec && !recVisible ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 text-emerald-900 px-5 py-6 text-center space-y-2">
+          <p className="m-0 text-base font-bold">Queue clear</p>
+          <p className="m-0 text-sm">Nothing here is waiting for you. {d.records.filter((r: any) => stageOf(r) === 'sent').length > 0 ? 'Records sent back are with the extractor and come back here when they change. ' : ''}{d.records.some((r: any) => stageOf(r) === 'approved') ? 'Approved records are done. ' : ''}</p>
+          <Button size="sm" variant="secondary" onClick={() => setShowFinished(true)}>Show finished records ({finishedN})</Button>
+        </div>
+      ) : !rec ? <Blank title="No records" /> : view === 'json' ? <JsonView rec={rec} onPick={n => { setView('fields'); setOnlyFlagged(false); setActive(n) }} /> : (
         <div className="space-y-2">
           {rec.general.length > 0 && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -465,7 +486,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
             shown.map((f: any) => <FieldRow key={rec.record_id + f.name} suggestion={suggestions.get(rec.record_id + '|' + f.name)} onConfirmSuggestion={confirmSuggestion} rec={rec} f={f} peers={d.peers} sopRules={d.sop_required ?? []} website={d.website} site={site[rec.record_id]?.ok ? site[rec.record_id].fields[f.name] : undefined} active={active === f.name} onActive={() => setActive(f.name)} onLocal={applyLocal} onReload={load} />)}
         </div>
       )}
-      {rec && <RecordBar key={rec.record_id} sourceId={sourceId} rec={rec} todoLeft={todoLeft} onDone={load} onAdvance={advance} onPick={n => { setOnlyFlagged(false); setHideDone(false); setActive(n) }} />}
+      {rec && recVisible && <RecordBar key={rec.record_id} sourceId={sourceId} rec={rec} todoLeft={todoLeft} onDone={load} onAdvance={advance} onPick={n => { setOnlyFlagged(false); setHideDone(false); setActive(n) }} />}
     </section>
   )
   const activeValue = rec?.fields?.find((f: any) => f.name === active)?.value
