@@ -250,6 +250,15 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
     catch (e) { toast.error(err(e, "Couldn't run the checks")) } finally { setScanBusy(false) }
   }
   const [refBusy, setRefBusy] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  useEffect(() => {
+    if (!moreOpen) return
+    const close = (e: Event) => { if (e instanceof KeyboardEvent ? e.key === 'Escape' : !(e.target as HTMLElement | null)?.closest?.('[role="menu"], [aria-expanded]')) setMoreOpen(false) }
+    document.addEventListener('keydown', close); document.addEventListener('mousedown', close)
+    return () => { document.removeEventListener('keydown', close); document.removeEventListener('mousedown', close) }
+  }, [moreOpen])
+  const [railHidden, setRailHidden] = useState(() => { try { return localStorage.getItem('dx.reviewRailHidden') === '1' } catch { return false } })
+  const toggleRail = () => setRailHidden(v => { const n = !v; try { localStorage.setItem('dx.reviewRailHidden', n ? '1' : '0') } catch { /* ignore */ } return n })
   // One click: ask Xtrium for the SOP again, then run the system checks against it, then show the result.
   const refreshAndCheck = async () => {
     setRefBusy(true)
@@ -359,9 +368,12 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
   const advance = () => { const n = nextInQueue(); if (n) setRid(n.record_id) }
   const stage = rec ? stageOf(rec) : 'review'
   const groups = (['review', 'back', 'sent', 'approved'] as Stage[]).map(k => ({ k, rows: d.records.filter((r: any) => stageOf(r) === k) })).filter(g => g.rows.length > 0)
+  const manyRecords = d.records.length > 1
+  const showRail = manyRecords && !railHidden
   const recNav = (
     <>
-      <nav aria-label="Records" className="hidden lg:block rounded-2xl border border-gray-100 bg-white p-1.5 max-h-[calc(100vh-7rem)] overflow-y-auto">
+      {showRail && <nav aria-label="Records" className="hidden lg:block rounded-2xl border border-gray-100 bg-white p-1.5 max-h-[calc(100vh-7rem)] overflow-y-auto">
+        <button type="button" onClick={toggleRail} className="w-full text-left px-2 py-1 text-[11px] text-gray-400 hover:text-gray-700" title="Hide this list to give the record more room">‹ Hide list</button>
         {groups.map(g => {
           const collapsed = g.k === 'approved' || g.k === 'sent' ? !openGroups[g.k] && g.rows.every((r: any) => r.record_id !== rid) : false
           return (
@@ -386,8 +398,8 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
             </div>
           )
         })}
-      </nav>
-      <div className="lg:hidden">
+      </nav>}
+      <div className={showRail ? 'lg:hidden' : manyRecords ? '' : 'hidden'}>
         <SelectBox label="Record" value={rid} onChange={setRid} className="w-full">
           {groups.map(g => <optgroup key={g.k} label={`${STAGE_LABEL[g.k]} (${g.rows.length})`}>{g.rows.map((r: any) => <option key={r.record_id} value={r.record_id}>{r.record}{r.todo > 0 ? ` (${r.todo} to check)` : ''}</option>)}</optgroup>)}
         </SelectBox>
@@ -410,11 +422,19 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         <span className="ml-auto flex items-center gap-1.5 flex-wrap">
           <Button size="sm" onClick={jumpToWork} title="Jump to the next doubted field (n)">Next doubted{todoLeft ? ` (${todoLeft})` : ''}</Button>
           {!inOverlay && <Button size="sm" variant={docked ? 'primary' : 'secondary'} onClick={openSide} title="SOP, source text and website beside the record (s)">Side by side</Button>}
-          <Button size="sm" variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading…' : 'Check site'}</Button>
-          <FilterChip on={render} onClick={() => setRender(v => !v)} hint="Slower. Use it for sites that build their pages with JavaScript, then run Check site.">Render page</FilterChip>
-          <Button size="sm" variant="secondary" disabled={scanBusy} onClick={runScan} title="Logs missing fields, bad formats and SOP gaps for the whole source">{scanBusy ? 'Running…' : inOverlay ? 'System checks' : 'Run system checks'}</Button>
-          <Button size="sm" variant="secondary" disabled={refBusy || scanBusy} onClick={refreshAndCheck} title="Ask Xtrium for the SOP and category again, then run the system checks against it">{refBusy ? 'Refreshing…' : inOverlay ? 'Refresh + check' : 'Refresh from Xtrium and re-check'}</Button>
-          {d.website && <a href={d.website} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">{inOverlay ? 'Open site' : 'Open source site'}</a>}
+          {manyRecords && railHidden && !inOverlay && <Button size="sm" variant="secondary" onClick={toggleRail} title="Show the list of records">Records ({d.records.length})</Button>}
+          <span className="relative">
+            <Button size="sm" variant="secondary" onClick={() => setMoreOpen(v => !v)} aria-expanded={moreOpen} title="Check site, system checks, refresh from Xtrium, open the source site">More ▾</Button>
+            {moreOpen && (
+              <div role="menu" className="absolute right-0 top-full mt-1.5 z-40 w-64 rounded-xl border border-gray-200 bg-white shadow-xl p-2 space-y-1 [&_button]:w-full [&_button]:justify-start">
+                <Button size="sm" variant="secondary" disabled={siteBusy || nimble === false} onClick={() => { setMoreOpen(false); runSite() }} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading…' : 'Check site'}</Button>
+                <label className="flex items-center gap-2 px-2 py-1 text-xs text-gray-700 cursor-pointer" title="Slower. Use it for sites that build their pages with JavaScript, then run Check site."><input type="checkbox" checked={render} onChange={() => setRender(v => !v)} /> Render page (slower, for JavaScript sites)</label>
+                <Button size="sm" variant="secondary" disabled={scanBusy} onClick={() => { setMoreOpen(false); runScan() }} title="Logs missing fields, bad formats and SOP gaps for the whole source">{scanBusy ? 'Running…' : 'Run system checks'}</Button>
+                <Button size="sm" variant="secondary" disabled={refBusy || scanBusy} onClick={() => { setMoreOpen(false); refreshAndCheck() }} title="Ask Xtrium for the SOP and category again, then run the system checks against it">{refBusy ? 'Refreshing…' : 'Refresh from Xtrium and re-check'}</Button>
+                {d.website && <a href={d.website} target="_blank" rel="noreferrer" onClick={() => setMoreOpen(false)} className="flex items-center rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">Open source site</a>}
+              </div>
+            )}
+          </span>
         </span>
       </div>
       <p className={cn(inOverlay ? "hidden" : "hidden md:block", "text-[11px] text-gray-500 px-1")}>Keys: ↑ ↓ field · c correct · w wrong · m comment · y confirm the audit's suggestion · n next doubted · j k record · s side by side · Esc close</p>
@@ -477,8 +497,8 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         </span>
         <span className="ml-auto"><Button size="sm" variant="secondary" onClick={() => setFocus(false)}>Close side by side</Button></span>
       </div>
-      <div className="flex-1 min-h-0 grid gap-3 p-3 lg:grid-cols-[180px_minmax(0,1fr)_minmax(380px,46%)] overflow-y-auto lg:overflow-hidden">
-        <div className="lg:overflow-y-auto">{recNav}</div>
+      <div className={cn('flex-1 min-h-0 grid gap-3 p-3 overflow-y-auto lg:overflow-hidden', showRail ? 'lg:grid-cols-[176px_minmax(0,1fr)_minmax(380px,46%)]' : 'lg:grid-cols-[minmax(0,1fr)_minmax(380px,46%)]')}>
+        {(showRail || manyRecords) && <div className={cn('lg:overflow-y-auto', !showRail && 'lg:hidden')}>{recNav}</div>}
         <div className="lg:overflow-y-auto min-w-0 space-y-3 pr-1">
           {peerNotes}
           {fieldsSection}
@@ -527,8 +547,8 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
       {panel === 'audit' && <SourceAuditPanel sourceId={sourceId} nimbleReady={nimble === true} result={audit} onResult={setAudit} onClose={() => setPanel('')} onApplied={load}
         onJump={(recordId, field) => { setRid(recordId); setOnlyFlagged(false); setHideDone(false); setActive(field); setPanel('') }} />}
 
-      <div className={cn('grid gap-3 items-start', docked ? 'lg:grid-cols-[200px_minmax(0,1fr)_minmax(440px,42%)]' : 'lg:grid-cols-[210px_minmax(0,1fr)]')}>
-        <div className="lg:sticky lg:top-3 lg:self-start">{recNav}</div>
+      <div className={cn('grid gap-3 items-start', showRail ? (docked ? 'lg:grid-cols-[176px_minmax(0,1fr)_minmax(460px,44%)]' : 'lg:grid-cols-[176px_minmax(0,1fr)]') : (docked ? 'lg:grid-cols-[minmax(0,1fr)_minmax(460px,44%)]' : ''))}>
+        {(showRail || manyRecords) && <div className={cn('lg:sticky lg:top-3 lg:self-start', !showRail && 'lg:hidden')}>{recNav}</div>}
         {fieldsSection}
         {docked && (
           <div className="sticky top-3 self-start h-[calc(100vh-1.5rem)]">
@@ -714,7 +734,7 @@ function FieldRow({ suggestion, onConfirmSuggestion, rec, f, peers, sopRules, we
     ? `https://www.google.com/search?q=${encodeURIComponent(`site:${host} "${f.value.trim()}"`)}` : ''
   const empty = show(f.value) === ''
   return (
-    <div ref={ref} onClick={onActive} className={cn('rounded-xl border border-gray-100 border-l-4 bg-white px-4 py-3', edge, active && 'ring-2 ring-brand-300')}>
+    <div ref={ref} onClick={onActive} className={cn('scroll-my-28 rounded-xl border border-gray-100 border-l-4 bg-white px-4 py-3', edge, active && 'ring-2 ring-brand-300')}>
       <div className="flex items-start gap-3 flex-wrap">
         <div className="min-w-0 flex-1 basis-64">
           <div className="flex items-center gap-1.5 flex-wrap"><span className="text-xs font-semibold text-gray-500">{f.name}</span>
