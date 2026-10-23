@@ -256,6 +256,22 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
     # Keys that exist only inside a list (facilities[].name, products[].product_name) are not required on the record itself,
     # even when a sub-heading or Xtrium's flat list names them.
     top_keys, tblocks = _template_shape(md, tmpl if isinstance(tmpl, dict) else None)
+    schema = sop.get("deliverable_schema") or meta.get("deliverable_schema")
+    if isinstance(schema, str):
+        try:
+            schema = json.loads(schema)
+        except Exception:
+            schema = None
+    schema_required: list = []
+    if isinstance(schema, dict) and isinstance(schema.get("properties"), dict):
+        # Xtrium's own JSON schema is the authority: top-level properties, the top-level required list, and the lists of objects.
+        for k, v in schema["properties"].items():
+            if k not in top_keys:
+                top_keys.append(k)
+            items = v.get("items") if isinstance(v, dict) and v.get("type") == "array" else None
+            if isinstance(items, dict) and isinstance(items.get("properties"), dict):
+                tblocks.setdefault(k, set()).update(items["properties"].keys())
+        schema_required = [x for x in (schema.get("required") or []) if isinstance(x, str)]
     inner_of: dict = {}
     for bk, ks in tblocks.items():
         for k in ks:
@@ -263,6 +279,9 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
                 inner_of.setdefault(k, bk)
     if inner_of:
         required = [f for f in required if f not in inner_of]
+    if schema_required:
+        # the schema's own top-level required list wins over anything flattened
+        required = [f for f in required if f in schema_required] + [f for f in schema_required if f not in required]
     out = {"source_id": source.id, "name": source.name, "category": category, "entity": entity, "sop_code": code, "title": sop.get("title"), "spec_version": spec_v,
            "has_sop": bool(sop or meta), "has_markdown": bool(md), "required_fields": required, "template_keys": list(dict.fromkeys((list(tmpl) if tmpl else []) + md_keys)), "derived_fields": derived,
            "fields": [], "sections": [], "warnings": [], "counts": {},
