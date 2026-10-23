@@ -10,8 +10,8 @@ type Tab = 'sop' | 'text' | 'web' | 'page'
 const present = (v: unknown) => !(v === null || v === undefined || v === '' || (Array.isArray(v) && v.length === 0))
 
 /** Everything needed to check a record, beside the record: the SOP, the text it came from, the website, and the page as Nimble reads it. */
-export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpField, warnings, activeValue, activeField, pageText, pageBusy, nimbleReady, onFetchPage }: {
-  sourceId: string; website?: string | null; rec: any; sopRequired: string[]; onJumpField?: (name: string) => void; warnings?: string[]; activeValue: unknown; activeField: string
+export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpField, warnings, onRefreshCheck, refreshBusy, activeValue, activeField, pageText, pageBusy, nimbleReady, onFetchPage }: {
+  sourceId: string; website?: string | null; rec: any; sopRequired: string[]; onJumpField?: (name: string) => void; warnings?: string[]; onRefreshCheck?: () => void; refreshBusy?: boolean; activeValue: unknown; activeField: string
   pageText?: string; pageBusy: boolean; nimbleReady: boolean; onFetchPage: () => void
 }) {
   const [tab, setTabRaw] = useState<Tab>(() => { try { const v = localStorage.getItem('dx.reviewTab'); return (v === 'text' || v === 'web' || v === 'page' ? v : 'sop') as Tab } catch { return 'sop' } })
@@ -73,6 +73,7 @@ export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpFie
               <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
                 <b className="block mb-1">{warnings.length} thing{warnings.length === 1 ? '' : 's'} to settle with this SOP</b>
                 <ul className="m-0 pl-4 space-y-0.5">{warnings.map((w, i) => <li key={i}>{w}</li>)}</ul>
+                {onRefreshCheck && <div className="mt-2"><Button size="sm" disabled={refreshBusy} onClick={onRefreshCheck} title="Ask Xtrium for the SOP and category again, then run the system checks">{refreshBusy ? 'Refreshing…' : 'Refresh from Xtrium and re-check'}</Button></div>}
               </div>
             )}
             {sopErr ? <Blank title={sopErr} /> : !sop ? <Skeletons rows={4} /> : <SopViewer data={sop} compact />}

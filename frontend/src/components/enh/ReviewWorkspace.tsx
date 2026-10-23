@@ -249,6 +249,21 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
     try { const r = await qualityApi.scan(sourceId); toast.success(r.created ? `System checks found ${r.created} new issue${r.created === 1 ? '' : 's'}` : 'System checks found nothing new'); load() }
     catch (e) { toast.error(err(e, "Couldn't run the checks")) } finally { setScanBusy(false) }
   }
+  const [refBusy, setRefBusy] = useState(false)
+  // One click: ask Xtrium for the SOP again, then run the system checks against it, then show the result.
+  const refreshAndCheck = async () => {
+    setRefBusy(true)
+    try {
+      const s = await qualityApi.sopRequirementsFor(sourceId, true)
+      setSopInfo(s)
+      const r = await qualityApi.scan(sourceId)
+      const bits = [s.just_saved ? 'The SOP changed on Xtrium and the new copy is saved.' : s.origin === 'live' ? 'Checked with Xtrium: the SOP has not changed.' : 'Xtrium could not be reached, so the saved copy was used.']
+      bits.push(r.withdrawn ? `${r.withdrawn} check${r.withdrawn === 1 ? '' : 's'} the SOP no longer makes ${r.withdrawn === 1 ? 'was' : 'were'} withdrawn.` : '')
+      bits.push(r.created ? `${r.created} new issue${r.created === 1 ? '' : 's'} found.` : 'No new issues.')
+      toast.success(bits.filter(Boolean).join(' '))
+      load()
+    } catch (e) { toast.error(err(e, "Couldn't refresh from Xtrium. Try again in a minute.")) } finally { setRefBusy(false) }
+  }
   const load = useCallback(() => qualityApi.reviewSource(sourceId).then(r => { setD(r); setRid(cur => (cur && r.records.some((x: any) => x.record_id === cur) ? cur : r.records[0]?.record_id ?? '')) }).catch(() => setD({ error: true })), [sourceId])
   useEffect(() => { setD(null); load() }, [load])
 
@@ -398,6 +413,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
           <Button size="sm" variant="secondary" disabled={siteBusy || nimble === false} onClick={runSite} title={nimble === false ? 'Add NIMBLE_API_KEY in the server settings to turn this on' : 'Fetch the source website with Nimble and look for each value on it'}>{siteBusy ? 'Reading…' : 'Check site'}</Button>
           <FilterChip on={render} onClick={() => setRender(v => !v)} hint="Slower. Use it for sites that build their pages with JavaScript, then run Check site.">Render page</FilterChip>
           <Button size="sm" variant="secondary" disabled={scanBusy} onClick={runScan} title="Logs missing fields, bad formats and SOP gaps for the whole source">{scanBusy ? 'Running…' : inOverlay ? 'System checks' : 'Run system checks'}</Button>
+          <Button size="sm" variant="secondary" disabled={refBusy || scanBusy} onClick={refreshAndCheck} title="Ask Xtrium for the SOP and category again, then run the system checks against it">{refBusy ? 'Refreshing…' : inOverlay ? 'Refresh + check' : 'Refresh from Xtrium and re-check'}</Button>
           {d.website && <a href={d.website} target="_blank" rel="noreferrer" className="inline-flex items-center rounded-xl border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50">{inOverlay ? 'Open site' : 'Open source site'}</a>}
         </span>
       </div>
@@ -468,7 +484,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
           {fieldsSection}
         </div>
         <div className="min-h-[70vh] lg:min-h-0 lg:h-full">
-          <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} warnings={sopInfo?.warnings} activeValue={activeValue} activeField={active}
+          <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} warnings={sopInfo?.warnings} onRefreshCheck={refreshAndCheck} refreshBusy={refBusy} activeValue={activeValue} activeField={active}
             pageText={site[rid]?.ok ? site[rid].text : undefined} pageBusy={siteBusy} nimbleReady={nimble === true} onFetchPage={runSite} />
         </div>
       </div>
@@ -516,7 +532,7 @@ function SourceDesk({ sourceId, onNextSource, onPrevSource, position, picker }: 
         {fieldsSection}
         {docked && (
           <div className="sticky top-3 self-start h-[calc(100vh-1.5rem)]">
-            <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} warnings={sopInfo?.warnings} activeValue={activeValue} activeField={active}
+            <ReviewSidePanel sourceId={sourceId} website={d.website} rec={rec} sopRequired={d.sop_required ?? []} onJumpField={jumpToField} warnings={sopInfo?.warnings} onRefreshCheck={refreshAndCheck} refreshBusy={refBusy} activeValue={activeValue} activeField={active}
               pageText={site[rid]?.ok ? site[rid].text : undefined} pageBusy={siteBusy} nimbleReady={nimble === true} onFetchPage={runSite} />
           </div>
         )}

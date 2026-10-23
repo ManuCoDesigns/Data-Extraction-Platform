@@ -486,7 +486,7 @@ export const qualityApi = {
   raise: (body: { record_id: string; field?: string; category: string; severity: string; note?: string }) => api.post('/quality/findings', body).then(r => r.data),
   sourceFindings: (sourceId: string, status?: string) => api.get(`/quality/sources/${sourceId}/findings`, { params: { status } }).then(r => r.data),
   resolve: (id: string, body: { status: string; truth_value?: string; note?: string }) => api.post(`/quality/findings/${id}/resolve`, body).then(r => r.data),
-  scan: (sourceId: string) => api.post(`/quality/sources/${sourceId}/scan`).then(r => r.data as { created: number; records: number; sop_checked?: boolean }),
+  scan: (sourceId: string) => api.post(`/quality/sources/${sourceId}/scan`).then(r => r.data as { created: number; withdrawn?: number; records: number; sop_checked?: boolean }),
   sample: (sourceId: string, limit = 30) => api.get(`/quality/sources/${sourceId}/sample`, { params: { limit } }).then(r => r.data),
   audit: (body: { record_id: string; field: string; verdict: string; truth_value?: string; note?: string }) => api.post('/quality/audits', body).then(r => r.data),
   deleteAudit: (id: string) => api.delete(`/quality/audits/${id}`).then(r => r.data),
