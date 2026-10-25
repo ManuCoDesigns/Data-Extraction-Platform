@@ -10,6 +10,8 @@ something they did not do. So:
 - After an admin returns a record, the source goes to "changes requested". Only the records that were sent back can be
   edited. Everything the peers already reviewed stays frozen.
 - Handing the source back to the peers (status ready for review) locks it again.
+- On a record that was sent back, only the fields that were flagged can be changed (open_fields below). Fields the reviewers
+  passed stay as they were. If nothing specific was flagged (only a general note), every field stays open.
 """
 from fastapi import HTTPException
 
@@ -113,3 +115,71 @@ def assert_record_deletable(source, record, user=None) -> str | None:
     if why:
         raise HTTPException(status_code=423, detail=why)
     return None
+
+
+FLAG_TYPES = ("correction", "sop", "rejection")
+
+
+def _flagged_by_comment(record, field: str, e) -> bool:
+    """A field comment that asks for a change, about the value the record was sent back with."""
+    if not isinstance(e, dict):
+        return False
+    kind = e.get("type")
+    if kind == "note":
+        return False
+    if kind is None and e.get("role") == "admin":
+        return False  # a plain admin sign-off note is not a flag
+    if kind is not None and kind not in FLAG_TYPES:
+        return False
+    sent = getattr(record, "fields_at_return", None) or {}
+    if "value_at" in e and field in sent and e.get("value_at") != sent.get(field):
+        return False  # it was about an older value that has since been fixed and sent again
+    return True
+
+
+def open_fields(db, source, record):
+    """The fields an extractor may change on this record. None means every field is open (no field-level limit applies)."""
+    if not (_has_peers(source) and source.status == SourceStatus.CHANGES_REQUESTED):
+        return None
+    st = getattr(record.review_status, "value", record.review_status)
+    if (record.correction_count or 0) == 0 and st != ReviewStatus.REJECTED.value:
+        return None
+    flagged: set = set()
+    for field, lst in (getattr(record, "reviewer_field_comments", None) or {}).items():
+        if field == "_general":
+            continue
+        if any(_flagged_by_comment(record, field, e) for e in (lst or [])):
+            flagged.add(field)
+    try:
+        from app.models.all_models import QualityFinding
+        for f in db.query(QualityFinding).filter(QualityFinding.record_id == record.id, QualityFinding.status.in_(("open", "confirmed"))).all():
+            if f.field:
+                flagged.add(f.field)
+    except Exception:
+        pass
+    return flagged or None
+
+
+def _empty(v) -> bool:
+    return v is None or v == "" or v == [] or v == {}
+
+
+def changed_keys(before: dict, after: dict) -> list:
+    """Keys whose value differs. Adding or dropping an empty value is not a change to anything a reviewer passed."""
+    return sorted(k for k in set(before) | set(after)
+                  if before.get(k) != after.get(k) and not (_empty(before.get(k)) and _empty(after.get(k))))
+
+
+def fields_blocked(db, source, record, user, changed) -> list:
+    """Which of the changed fields this user may not change. Admins are never blocked."""
+    if user is not None and is_admin(user):
+        return []
+    allowed = open_fields(db, source, record)
+    if allowed is None:
+        return []
+    return sorted(k for k in changed if k not in allowed)
+
+
+def blocked_message(blocked, allowed) -> str:
+    return ("Only the fields the reviewers flagged can be changed on this record: " + ", ".join(sorted(allowed)) +
+            ". These were passed as correct and are locked: " + ", ".join(blocked) + ".")

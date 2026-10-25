@@ -1508,8 +1508,15 @@ def list_source_records(
 
     total = q.count()
     records = q.order_by(ExtractedRecord.created_at).offset((page - 1) * page_size).limit(page_size).all()
+    from app.services import record_locks as _rl_
+    _items = [_serialize_record(r) for r in records]
+    if not _rl_.is_admin(current_user):  # tell the extractor which fields of a sent-back record are still open
+        for _it, _r in zip(_items, records):
+            _of = _rl_.open_fields(db, source, _r)
+            if _of is not None:
+                _it.editable_fields = sorted(_of)
     return PaginatedResponse(
-        items=[_serialize_record(r) for r in records],
+        items=_items,
         total=total, page=page, page_size=page_size, pages=math.ceil(total / page_size) or 1,
     )
 
@@ -1589,8 +1596,13 @@ async def upload_corrections(
             continue
         used.add(rec.id)
         before = dict(rec.extracted_fields or {})
+        skipped: list = []
+        _want = _rl.changed_keys(before, mapped)
+        skipped = _rl.fields_blocked(db, source, rec, current_user, _want)
+        if skipped:  # fields the reviewers passed stay exactly as they were; the rest of the row is still applied
+            mapped = {**{k: v for k, v in mapped.items() if k not in skipped}, **{k: before[k] for k in skipped if k in before}}
         if before == mapped:
-            unchanged.append(label)
+            (locked if skipped else unchanged).append(label)
             continue
         rec.extracted_fields = mapped
         ok, errs = validate_record(mapped, schema_fields)
@@ -1607,7 +1619,7 @@ async def upload_corrections(
             after_value={"fields": mapped, "changed": changed_keys, "changed_by": current_user.id, "lock_override": lock_override,
                          "status_at_edit": source.status.value, "via": "corrections_file", "file": file.filename},
         ))
-        updated.append({"record": label, "changed": changed_keys})
+        updated.append({"record": label, "changed": changed_keys, "skipped": skipped})
     source.updated_at = datetime.now(timezone.utc)
     db.flush()
     _recompute_counts(source, db)
@@ -1641,6 +1653,10 @@ def fix_record(
     from app.services import record_locks as _rl  # fix_record.lock
     lock_override = _rl.assert_record_editable(source, record, current_user)
     before = dict(record.extracted_fields or {})
+    _changing = _rl.changed_keys(before, {**before, **payload.extracted_fields})
+    _blocked = _rl.fields_blocked(db, source, record, current_user, _changing)
+    if _blocked:
+        raise HTTPException(status_code=423, detail=_rl.blocked_message(_blocked, _rl.open_fields(db, source, record)))
     record.extracted_fields = {**(record.extracted_fields or {}), **payload.extracted_fields}
     is_valid, errors = validate_record(record.extracted_fields, schema_fields)
     record.is_schema_valid = is_valid

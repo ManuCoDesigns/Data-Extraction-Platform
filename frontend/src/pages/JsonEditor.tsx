@@ -145,7 +145,7 @@ export function JsonEditor({ record, sourceId, canEdit, onSave, onClose }: Props
       setModifiedKeys({})
       toast.success('Record saved')
     } catch (e: any) {
-      toast.error(e?.message || 'Save failed')
+      toast.error(e?.response?.data?.detail || e?.message || 'Save failed')
     } finally { setSaving(false) }
   }
 

@@ -66,7 +66,7 @@ function SourceDetailInner() {
   // An upload that would replace records already seen by peers is refused. This offers to load the same file as corrections instead.
   const [lockedUpload, setLockedUpload] = useState<string | null>(null)
   const [corrBusy, setCorrBusy] = useState(false)
-  const [corrResult, setCorrResult] = useState<{ updated: { record: string; changed: string[] }[]; unchanged: string[]; locked: string[]; unmatched: string[] } | null>(null)
+  const [corrResult, setCorrResult] = useState<{ updated: { record: string; changed: string[]; skipped?: string[] }[]; unchanged: string[]; locked: string[]; unmatched: string[] } | null>(null)
   const applyCorrections = async () => {
     if (!sourceId || !file) return
     setCorrBusy(true)
@@ -1759,7 +1759,7 @@ function SourceDetailInner() {
             {corrResult && (
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-3 text-xs text-emerald-900 space-y-1.5">
                 <p className="m-0"><b>{corrResult.updated.length} updated</b>{corrResult.unchanged.length ? `, ${corrResult.unchanged.length} already matched the file` : ''}.</p>
-                {corrResult.updated.map(u => <p key={u.record} className="m-0">{u.record}: {u.changed.length ? `changed ${u.changed.slice(0, 8).join(', ')}${u.changed.length > 8 ? '…' : ''}` : 'no field changes'}</p>)}
+                {corrResult.updated.map(u => <p key={u.record} className="m-0">{u.record}: {u.changed.length ? `changed ${u.changed.slice(0, 8).join(', ')}${u.changed.length > 8 ? '…' : ''}` : 'no field changes'}{u.skipped && u.skipped.length > 0 ? <span className="text-amber-800"> — left as they were because the reviewers passed them: {u.skipped.join(', ')}</span> : null}</p>)}
                 {corrResult.locked.length > 0 && <p className="m-0 text-amber-800">Not changed because they are locked or not sent back: {corrResult.locked.join(', ')}</p>}
                 {corrResult.unmatched.length > 0 && <p className="m-0 text-amber-800">No matching record, so not added: {corrResult.unmatched.join(', ')}</p>}
                 <p className="m-0">Now hand the source back for review from the source page.</p>

@@ -200,6 +200,7 @@ class RecordOut(BaseModel):
     escalation_reason: Optional[str] = None
     revision_count: int = 0
     reviewer_field_comments: dict[str, Any] = {}
+    editable_fields: Optional[list[str]] = None   # None = every field is open; a list = only these may be changed (sent-back record)
     admin_review_note: Optional[str] = None
     admin_reviewed_at: Optional[datetime] = None
 

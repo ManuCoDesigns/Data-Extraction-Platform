@@ -69,10 +69,10 @@ function SectionHeader({ icon, label, count, grad }: { icon: string; label: stri
 }
 
 // ── Editable field ─────────────────────────────────────────────────────────────
-function EditField({ label, value, field, onSave, required, isExtra, signals }: {
+function EditField({ label, value, field, onSave, required, isExtra, signals, locked }: {
   label: string; value: unknown; field: string; signals?: Signal[]
   onSave: (field: string, val: string) => void
-  required?: boolean; isExtra?: boolean
+  required?: boolean; isExtra?: boolean; locked?: boolean
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(String(value ?? ''))
@@ -88,6 +88,7 @@ function EditField({ label, value, field, onSave, required, isExtra, signals }: 
           {label}
           {required && <span style={{ color: 'var(--tx-ef4444)' }}>*</span>}
           {isExtra && <span style={{ fontSize: 9, padding: '0 5px', borderRadius: 3, background: 'var(--bg-f3e8ff)', color: 'var(--tx-7c3aed)', border: '1px solid var(--bd-e9d5ff)' }}>extra</span>}
+          {locked && <span title="The reviewers passed this field, so it cannot be changed. Fix the fields marked for correction." style={{ fontSize: 9, padding: '0 5px', borderRadius: 3, background: 'var(--bg-ecfdf5)', color: 'var(--tx-059669)', border: '1px solid var(--bd-6ee7b7)', textTransform: 'none' }}>✓ passed, locked</span>}
         </p>
       </div>
       <div style={{ flex: 1, minWidth: 0 }}>
@@ -108,13 +109,13 @@ function EditField({ label, value, field, onSave, required, isExtra, signals }: 
               style={{ padding: '4px 10px', background: '#3b82f6', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', fontSize: 12,fontWeight: 600 }}>Save</button>
           </div>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 24, cursor: 'text' }}
-            onClick={() => { setDraft(String(value ?? '')); setEditing(true) }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 24, cursor: locked ? 'default' : 'text' }}
+            onClick={() => { if (locked) return; setDraft(String(value ?? '')); setEditing(true) }}>
             {display
               ? <span style={{ fontSize: 13, color: 'var(--tx-0f172a)', wordBreak: 'break-word', lineHeight: 1.5 }}>{display}</span>
               : <span style={{ fontSize: 13, color: '#cbd5e1', fontStyle: 'italic' }}>—</span>
             }
-            <Edit3 size={11} style={{ color: '#cbd5e1', flexShrink: 0, opacity: 0 }} className="edit-icon" />
+            {!locked && <Edit3 size={11} style={{ color: '#cbd5e1', flexShrink: 0, opacity: 0 }} className="edit-icon" />}
           </div>
         )}
       </div>
@@ -161,8 +162,10 @@ export function JsonRecordViewer({
       await onFix(record.id, localFields)
       setHasChanges(false)
       toast.success('Changes saved')
-    } catch { toast.error('Save failed') }
+    } catch (e: any) { toast.error(e?.response?.data?.detail || 'Save failed') }
   }
+
+  const isLocked = (f: string) => Array.isArray(record.editable_fields) && !record.editable_fields.includes(f)
 
   const [showAdminReturn, setShowAdminReturn] = useState(false)
   const [adminReturnNote, setAdminReturnNote] = useState('')
@@ -523,7 +526,7 @@ export function JsonRecordViewer({
               const isExtra = extrasFields.includes(field)
               if (localFields[field] === undefined && !isExtra) return null
               return (
-                <EditField key={field} field={field} label={label} signals={signals?.[field]}
+                <EditField key={field} field={field} label={label} signals={signals?.[field]} locked={isLocked(field)}
                   value={localFields[field]} required={required} isExtra={isExtra}
                   onSave={handleSaveField} />
               )
@@ -568,7 +571,7 @@ export function JsonRecordViewer({
                       )}
                     </div>
                   ) : (
-                    <EditField key={field} field={field} label={field.replace(/_/g,' ')} signals={signals?.[field]}
+                    <EditField key={field} field={field} label={field.replace(/_/g,' ')} signals={signals?.[field]} locked={isLocked(field)}
                       value={localFields[field]} isExtra={extrasFields.includes(field)}
                       onSave={handleSaveField} />
                   )

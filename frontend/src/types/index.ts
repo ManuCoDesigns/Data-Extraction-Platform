@@ -110,6 +110,7 @@ export interface LLMFieldFlag {
 
 export interface ExtractedRecord {
   id: string
+  editable_fields?: string[] | null // null or missing: every field is open. A list: only these may be changed (a sent-back record)
   job_id: string
   schema_version: number
   extraction_confidence: ExtractionConfidence

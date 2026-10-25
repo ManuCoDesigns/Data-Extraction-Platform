@@ -311,7 +311,7 @@ export const sourcesApi = {
         : undefined,
     }).then(r => r.data),
   uploadCorrections: (id: string, formData: FormData) =>
-    api.post(`/sources/${id}/upload-corrections`, formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 }).then(r => r.data as { updated: { record: string; changed: string[] }[]; unchanged: string[]; locked: string[]; unmatched: string[]; rows: number }),
+    api.post(`/sources/${id}/upload-corrections`, formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 }).then(r => r.data as { updated: { record: string; changed: string[]; skipped?: string[] }[]; unchanged: string[]; locked: string[]; unmatched: string[]; rows: number }),
   uploadMulti: (id: string, files: File[], onProgress?: (pct: number) => void) => {
     const formData = new FormData()
     files.forEach(f => formData.append('files', f, (f as any).webkitRelativePath || f.name))
