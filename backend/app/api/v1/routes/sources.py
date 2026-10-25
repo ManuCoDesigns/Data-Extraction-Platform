@@ -1514,6 +1514,108 @@ def list_source_records(
     )
 
 
+@router.post("/{source_id}/upload-corrections")
+async def upload_corrections(
+    source_id: str,
+    request: Request,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Load a corrected file into the records that were sent back, in place.
+
+    Unlike a normal upload this never replaces or removes records, so the reviewers' catches, the checks and the history stay
+    attached. Each row is matched to an existing record by its name; the matched record's fields are replaced by the row (so a key
+    that was removed in the file is removed on the record). Records that are locked, and rows that match nothing, are reported and left alone."""
+    source = _get_source_or_404(source_id, db, current_user)
+    if not _is_assigned_extractor(current_user, source):
+        raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
+    import os as _os, unicodedata as _ud
+    ext = _os.path.splitext(file.filename or "")[1].lower()
+    if ext not in (".json", ".csv", ".xlsx", ".xls"):
+        raise HTTPException(status_code=422, detail="Corrections can be loaded from a JSON, CSV or Excel file.")
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail="That file is too large for corrections. Split it, or fix the records one by one.")
+    try:
+        rows = [r for r in _parse_rows(content, ext, file.filename or "") if isinstance(r, dict)]
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Could not read that file: {e}")
+    if not rows:
+        raise HTTPException(status_code=422, detail="No rows found in the file.")
+
+    schema_ver = db.query(SchemaVersion).filter(SchemaVersion.schema_id == source.schema_id).order_by(SchemaVersion.version.desc()).first()
+    schema_fields = schema_ver.definition.get("fields", []) if schema_ver and schema_ver.definition else []
+    records = db.query(ExtractedRecord).join(ExtractionJob).filter(ExtractionJob.source_id == source_id).all()
+    if not records:
+        raise HTTPException(status_code=422, detail="This source has no records to correct. Use Upload Data instead.")
+
+    KEYS = ("canonical_name", "company_name", "segment_name", "regulation_name", "product_name", "name")
+
+    def norm(v):
+        s = _ud.normalize("NFKD", str(v).lower().strip())
+        s = "".join(c for c in s if _ud.category(c) != "Mn").replace("&", "and")
+        return re.sub(r"[^a-z0-9]+", "-", s).strip("-")
+
+    by_key: dict = {}
+    for r in records:
+        cands = [r.canonical_name] + [(r.extracted_fields or {}).get(k) for k in KEYS]
+        for c in cands:
+            if isinstance(c, str) and c.strip():
+                by_key.setdefault(norm(c), r)
+
+    from app.services import record_locks as _rl
+    updated, unchanged, locked, unmatched = [], [], [], []
+    used: set = set()
+    for i, row in enumerate(rows):
+        mapped = dict(row) if ext == ".json" else map_row_to_fields(row, schema_fields)
+        if ext == ".json":
+            for fd in schema_fields:
+                if "fixed_value" in fd:
+                    mapped[fd["name"]] = fd["fixed_value"]
+        label = next((str(mapped.get(k)) for k in KEYS if mapped.get(k)), f"row {i + 1}")
+        rec = next((by_key[norm(mapped[k])] for k in KEYS if isinstance(mapped.get(k), str) and mapped.get(k).strip() and norm(mapped[k]) in by_key), None)
+        if rec is None and len(rows) == 1 and len(records) == 1:
+            rec = records[0]
+        if rec is None or rec.id in used:
+            unmatched.append(label)
+            continue
+        try:
+            lock_override = _rl.assert_record_editable(source, rec, current_user)
+        except HTTPException:
+            locked.append(label)
+            continue
+        used.add(rec.id)
+        before = dict(rec.extracted_fields or {})
+        if before == mapped:
+            unchanged.append(label)
+            continue
+        rec.extracted_fields = mapped
+        ok, errs = validate_record(mapped, schema_fields)
+        rec.is_schema_valid = ok
+        rec.validation_errors = errs
+        rec.extraction_confidence = ExtractionConfidence.HIGH if ok else ExtractionConfidence.FLAGGED
+        if rec.review_status == ReviewStatus.REJECTED and ok:
+            rec.review_status = ReviewStatus.PENDING
+        changed_keys = sorted(k for k in set(before) | set(mapped) if (k in before) != (k in mapped) or before.get(k) != mapped.get(k))
+        db.add(AuditLog(
+            user_id=current_user.id, project_id=source.project_id, source_id=source.id, job_id=rec.job_id, record_id=rec.id,
+            action=AuditAction.SOURCE_RECORD_FIXED,
+            before_value={"fields": before},
+            after_value={"fields": mapped, "changed": changed_keys, "changed_by": current_user.id, "lock_override": lock_override,
+                         "status_at_edit": source.status.value, "via": "corrections_file", "file": file.filename},
+        ))
+        updated.append({"record": label, "changed": changed_keys})
+    source.updated_at = datetime.now(timezone.utc)
+    db.flush()
+    _recompute_counts(source, db)
+    if source.invalid_records == 0 and source.status == SourceStatus.NEEDS_FIXES:
+        source.status = SourceStatus.READY_FOR_REVIEW
+        source.extraction_completed_at = datetime.now(timezone.utc)
+    db.commit()
+    return {"updated": updated, "unchanged": unchanged, "locked": locked, "unmatched": unmatched, "rows": len(rows)}
+
+
 @router.patch("/{source_id}/records/{record_id}", response_model=RecordOut)
 def fix_record(
     source_id: str, record_id: str, payload: SourceRecordFix,

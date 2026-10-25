@@ -63,6 +63,21 @@ function SourceDetailInner() {
   const [tab, setTab] = useState<Tab>('records')
   const [showAsk, setShowAsk] = useState(false)
   const [uploadWarnings, setUploadWarnings] = useState<string[]>([])
+  // An upload that would replace records already seen by peers is refused. This offers to load the same file as corrections instead.
+  const [lockedUpload, setLockedUpload] = useState<string | null>(null)
+  const [corrBusy, setCorrBusy] = useState(false)
+  const [corrResult, setCorrResult] = useState<{ updated: { record: string; changed: string[] }[]; unchanged: string[]; locked: string[]; unmatched: string[] } | null>(null)
+  const applyCorrections = async () => {
+    if (!sourceId || !file) return
+    setCorrBusy(true)
+    try {
+      const fd = new FormData(); fd.append('file', file)
+      const r = await sourcesApi.uploadCorrections(sourceId, fd)
+      setCorrResult(r); setLockedUpload(null)
+      toast.success(r.updated.length ? `Corrections applied to ${r.updated.length} record${r.updated.length === 1 ? '' : 's'}` : 'No record needed a change')
+      load()
+    } catch (e: any) { toast.error(e?.response?.data?.detail || "Couldn't apply the corrections") } finally { setCorrBusy(false) }
+  }
   const [linkInfo, setLinkInfo] = useState<{ status: string; detail?: string } | null>(null)
 
   const formatDuration = (start: string | null | undefined, end: string | null | undefined) => {
@@ -606,7 +621,8 @@ function SourceDetailInner() {
       load()
       setRawFilesLoaded(false)
     } catch (err: any) {
-      toast.error(describeUploadError(err))
+      if (err?.response?.status === 423) { setLockedUpload(String(err.response.data?.detail || 'This source is locked for bulk changes.')); setCorrResult(null) }
+      else toast.error(describeUploadError(err))
     } finally {
       setUploading(false)
       setUploadProgress(0)
@@ -1724,6 +1740,23 @@ function SourceDetailInner() {
               </div>
             )}
 
+            {lockedUpload && (
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-3 text-xs text-indigo-900 space-y-2">
+                <p className="m-0"><b>This file cannot replace the records.</b> {lockedUpload}</p>
+                <p className="m-0">You can load the same file as <b>corrections</b> instead. Each row is matched to a record by its name and updates it in place, so the reviewers' catches stay attached. Only records that were sent back are changed.</p>
+                <Button type="button" size="sm" loading={corrBusy} disabled={!file} onClick={applyCorrections}>Apply as corrections to sent-back records</Button>
+              </div>
+            )}
+            {corrResult && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-3 text-xs text-emerald-900 space-y-1.5">
+                <p className="m-0"><b>{corrResult.updated.length} updated</b>{corrResult.unchanged.length ? `, ${corrResult.unchanged.length} already matched the file` : ''}.</p>
+                {corrResult.updated.map(u => <p key={u.record} className="m-0">{u.record}: {u.changed.length ? `changed ${u.changed.slice(0, 8).join(', ')}${u.changed.length > 8 ? '…' : ''}` : 'no field changes'}</p>)}
+                {corrResult.locked.length > 0 && <p className="m-0 text-amber-800">Not changed because they are locked or not sent back: {corrResult.locked.join(', ')}</p>}
+                {corrResult.unmatched.length > 0 && <p className="m-0 text-amber-800">No matching record, so not added: {corrResult.unmatched.join(', ')}</p>}
+                <p className="m-0">Now hand the source back for review from the source page.</p>
+              </div>
+            )}
+
             <div className="flex gap-1 bg-gray-100 rounded-xl p-1">
               {([
                 { key: 'file',   label: 'File',   icon: Upload },
@@ -1758,7 +1791,7 @@ function SourceDetailInner() {
                     type="file"
                     accept=".csv,.xlsx,.xls,.json,.pdf,.txt,.zip"
                     className="hidden"
-                    onChange={e => { setFile(e.target.files?.[0] ?? null); setFolderFiles(null) }}
+                    onChange={e => { setFile(e.target.files?.[0] ?? null); setFolderFiles(null); setLockedUpload(null); setCorrResult(null) }}
                   />
                   <Upload className="w-6 h-6 mx-auto text-gray-400 mb-2" />
                   {file ? (
