@@ -4,6 +4,7 @@ import { SopViewer } from '@/components/SopViewer'
 import { Blank, Chip, Skeletons, Tabs } from '@/components/enh/kit'
 import { Button } from '@/components/ui'
 import { PageReader } from '@/components/enh/PageReader'
+import { highlightTerms, termsPattern, noTextReason } from '@/lib/highlightTerms'
 
 type Tab = 'sop' | 'text' | 'web' | 'page'
 
@@ -79,7 +80,7 @@ export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpFie
             {sopErr ? <Blank title={sopErr} /> : !sop ? <Skeletons rows={4} /> : <SopViewer data={sop} compact />}
           </div>
         )}
-        {tab === 'text' && (rec?.raw ? <Highlighted text={prettyJson(rec.raw)} needle={activeValue} /> : <Blank title="No source text was saved with this record" />)}
+        {tab === 'text' && (rec?.raw ? <Highlighted text={prettyJson(rec.raw)} needle={activeValue} field={activeField} /> : <Blank title="No source text was saved with this record" />)}
         {tab === 'web' && (cur ? (
           <div className="flex flex-col h-[70vh] min-h-[320px] -m-4">
             {urls.length > 1 && <select value={ui} onChange={e => setUi(Number(e.target.value))} aria-label="Which link" className="m-3 mb-0 text-xs rounded-lg border border-gray-200 px-2 py-1.5 bg-white text-gray-700">{urls.map((u, k) => <option key={u.url} value={k}>{u.label}: {u.url.replace(/^https?:\/\/(www\.)?/, '').slice(0, 50)}</option>)}</select>}
@@ -103,27 +104,37 @@ export function ReviewSidePanel({ sourceId, website, rec, sopRequired, onJumpFie
 
 function prettyJson(t: string) { try { return JSON.stringify(JSON.parse(t), null, 2) } catch { return t } }
 
-/** Text with every occurrence of the active field's value marked, and the first one scrolled into view. */
-function Highlighted({ text, needle }: { text: string; needle: unknown }) {
+/** Text with every occurrence of the active field's value marked, and the first one scrolled into view. A flag or empty value marks its own line instead. */
+function Highlighted({ text, needle, field }: { text: string; needle: unknown; field?: string }) {
   const first = useRef<HTMLElement | null>(null)
-  const n = typeof needle === 'string' ? needle.trim() : typeof needle === 'number' ? String(needle) : ''
-  const parts = useMemo(() => {
-    if (n.length < 3) return [text]
-    const esc = n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')
-    return text.split(new RegExp(`(${esc})`, 'ig'))
-  }, [text, n])
-  useEffect(() => { first.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, [n, text])
+  const { parts, note } = useMemo(() => {
+    const terms = highlightTerms(needle, field)
+    const all = [...terms, ...terms.map(x => JSON.stringify(x).slice(1, -1)).filter(x => !terms.includes(x))] // the raw text may hold the JSON-escaped form
+    const find = (alt: string) => { try { return alt ? text.split(new RegExp(`(${alt})`, 'ig')) : [text] } catch { return [text] } }
+    let p = find(termsPattern(all))
+    if (p.length > 1) return { parts: p, note: '' }
+    if (field) {
+      const key = field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      p = find(`"${key}"\\s*:[^\\n]*`)
+      if (p.length > 1) return { parts: p, note: terms.length ? 'The value itself is not written in this text, so its line is marked.' : `${noTextReason(needle)} Its line is marked instead.` }
+    }
+    return { parts: [text], note: terms.length ? 'This value is not in the source text.' : noTextReason(needle) }
+  }, [text, needle, field])
+  useEffect(() => { first.current?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, [parts])
   let seen = false
   return (
-    <pre className="m-0 text-[12.5px] leading-6 text-gray-800 whitespace-pre-wrap break-words font-mono">
-      {parts.map((p, i) => {
-        if (i % 2 === 1) {
-          const ref = !seen ? (el: HTMLElement | null) => { first.current = el } : undefined
-          seen = true
-          return <mark key={i} ref={ref} className="rounded px-0.5" style={{ background: '#fbbf24', color: '#1c1917' }}>{p}</mark>
-        }
-        return <span key={i}>{p}</span>
-      })}
-    </pre>
+    <div>
+      {note && field && <p className="text-xs text-gray-500 mt-0 mb-2"><b>{field}</b>: {note}</p>}
+      <pre className="m-0 text-[12.5px] leading-6 text-gray-800 whitespace-pre-wrap break-words font-mono">
+        {parts.map((p, i) => {
+          if (i % 2 === 1) {
+            const ref = !seen ? (el: HTMLElement | null) => { first.current = el } : undefined
+            seen = true
+            return <mark key={i} ref={ref} className="rounded px-0.5" style={{ background: '#fbbf24', color: '#1c1917' }}>{p}</mark>
+          }
+          return <span key={i}>{p}</span>
+        })}
+      </pre>
+    </div>
   )
 }

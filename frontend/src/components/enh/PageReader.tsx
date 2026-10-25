@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { highlightTerms, termsPattern, noTextReason } from '@/lib/highlightTerms'
 
 /**
  * The page as Nimble read it, laid out so it can be read: headings, nested lists, links and tables instead of one wall of
@@ -83,11 +84,12 @@ function parse(raw: string): Block[] {
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s+')
 const normUrl = (u: string) => u.trim().toLowerCase().replace(/^https?:\/\/(www\.)?/, '').replace(/\/+$/, '')
 
-type Terms = { field: string; find: string }
+type Terms = { field: string; extra: string[]; find: string }
 
 function mark(str: string, t: Terms, key: string) {
   const parts: string[] = []
-  if (t.field.length >= 3) parts.push(`(${esc(t.field)})`)
+  const fieldTerms = [t.field, ...t.extra].filter(x => x.length >= 3)
+  if (fieldTerms.length) parts.push(`(${termsPattern(fieldTerms)})`)
   if (t.find.length >= 2) parts.push(`(${esc(t.find)})`)
   if (!parts.length || !str) return [<span key={key}>{str}</span>]
   const rx = new RegExp(parts.join('|'), 'ig')
@@ -95,7 +97,7 @@ function mark(str: string, t: Terms, key: string) {
   let last = 0
   let m: RegExpExecArray | null
   let k = 0
-  const hasField = t.field.length >= 3
+  const hasField = fieldTerms.length > 0
   while ((m = rx.exec(str))) {
     if (m[0] === '') { rx.lastIndex++; continue }
     if (m.index > last) nodes.push(<span key={`${key}-${k++}`}>{str.slice(last, m.index)}</span>)
@@ -117,7 +119,8 @@ function inline(text: string, t: Terms, key: string) {
     if (m.index > last) out.push(...mark(text.slice(last, m.index), t, `${key}-t${k++}`))
     if (m[2] !== undefined) {
       const label = plain(m[1]) || normUrl(m[2]).replace(/^[^/]+/, '') || m[2]
-      const exact = t.field.length >= 3 && normUrl(m[2]) === normUrl(t.field)
+      const href = m[2]
+      const exact = [t.field, ...t.extra].some(x => x.length >= 3 && normUrl(href) === normUrl(x))
       const internal = m[2].startsWith('#')
       out.push(
         <a key={`${key}-a${k++}`} href={internal ? undefined : m[2]} target="_blank" rel="noreferrer noopener" title={m[2]} data-hit={exact ? 'field' : undefined}
@@ -140,8 +143,9 @@ function inline(text: string, t: Terms, key: string) {
 
 const hits = (text: string, t: Terms) => {
   const p = plain(text).toLowerCase()
-  const exact = t.field.length >= 3 && Array.from(text.matchAll(LINK)).some(x => normUrl(x[2]) === normUrl(t.field))
-  return exact || (t.field.length >= 3 && p.includes(t.field.toLowerCase())) || (t.find.length >= 2 && p.includes(t.find.toLowerCase()))
+  const ft = [t.field, ...t.extra].filter(x => x.length >= 3)
+  const exact = ft.some(f => Array.from(text.matchAll(LINK)).some(x => normUrl(x[2]) === normUrl(f)))
+  return exact || ft.some(f => p.includes(f.toLowerCase())) || (t.find.length >= 2 && p.includes(t.find.toLowerCase()))
 }
 
 export function PageReader({ text, needle, field }: { text: string; needle: unknown; field?: string }) {
@@ -151,8 +155,10 @@ export function PageReader({ text, needle, field }: { text: string; needle: unkn
   const [cur, setCur] = useState(0)
   const [count, setCount] = useState(0)
   const box = useRef<HTMLDivElement | null>(null)
-  const fieldTerm = typeof needle === 'string' ? needle.trim() : typeof needle === 'number' ? String(needle) : ''
-  const terms: Terms = { field: fieldTerm, find: find.trim() }
+  const valueTerms = useMemo(() => highlightTerms(needle, field), [needle, field])
+  const fieldTerm = valueTerms[0] || ''
+  const terms: Terms = { field: fieldTerm, extra: valueTerms.slice(1), find: find.trim() }
+  const noText = !!field && valueTerms.length === 0 ? noTextReason(needle) : ''
   const blocks = useMemo(() => parse(text), [text])
   const heads = useMemo(() => blocks.filter(b => b.t === 'h') as Extract<Block, { t: 'h' }>[], [blocks])
   const words = useMemo(() => plain(clean(text)).split(' ').filter(Boolean).length, [text])
@@ -167,8 +173,8 @@ export function PageReader({ text, needle, field }: { text: string; needle: unkn
     const i = Math.min(cur, els.length - 1)
     els[i].style.outline = '2px solid #6366f1'
     els[i].scrollIntoView({ block: 'center', behavior: 'smooth' })
-  }, [cur, fieldTerm, find, text, view, count])
-  useEffect(() => { setCur(0) }, [fieldTerm, find, text, view])
+  }, [cur, fieldTerm, find, text, view, count, valueTerms])
+  useEffect(() => { setCur(0) }, [fieldTerm, find, text, view, valueTerms])
   const step = (d: number) => setCur(c => (count ? (c + d + count) % count : 0))
   const jump = (id: string) => { const el = box.current?.querySelector(`[data-hid="${id}"]`) as HTMLElement | null; el?.scrollIntoView({ block: 'start', behavior: 'smooth' }) }
 
@@ -180,7 +186,7 @@ export function PageReader({ text, needle, field }: { text: string; needle: unkn
         </div>
         <input value={find} onChange={e => setFind(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); step(e.shiftKey ? -1 : 1) } }} placeholder="Find in page" aria-label="Find in page"
           className="flex-1 min-w-[120px] text-xs rounded-lg border border-gray-200 px-2.5 py-1.5 bg-white text-gray-800" />
-        <span className="text-xs text-gray-500 tabular-nums" aria-live="polite">{count ? `${Math.min(cur, count - 1) + 1} of ${count}` : (find || fieldTerm.length >= 3) ? 'No match' : ''}</span>
+        <span className="text-xs text-gray-500 tabular-nums" aria-live="polite">{count ? `${Math.min(cur, count - 1) + 1} of ${count}` : (find || fieldTerm.length >= 3) ? 'No match' : (noText ? 'Nothing to mark' : '')}</span>
         <button type="button" onClick={() => step(-1)} disabled={!count} aria-label="Previous match" className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40">‹</button>
         <button type="button" onClick={() => step(1)} disabled={!count} aria-label="Next match" className="text-xs px-2 py-1.5 rounded-lg border border-gray-200 bg-white text-gray-700 disabled:opacity-40">›</button>
         {view === 'read' && heads.length > 1 && (
@@ -191,6 +197,7 @@ export function PageReader({ text, needle, field }: { text: string; needle: unkn
         )}
         <span className="text-[11px] text-gray-400 ml-auto">{words.toLocaleString()} words{field ? <> · marking <b>{field}</b></> : ''}</span>
       </div>
+      {noText && <p className="text-xs text-gray-500 mt-0 mb-2"><b>{field}</b>: {noText}</p>}
       <div ref={box}>
         {view === 'raw' ? (
           <pre className="m-0 text-[12.5px] leading-6 text-gray-800 whitespace-pre-wrap break-words font-mono">{mark(rawText, terms, 'raw')}</pre>
