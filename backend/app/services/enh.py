@@ -159,7 +159,8 @@ def analyse_upload(db: Session, source: Source, job_id: str, rows: list, ext: st
             data = json.loads(raw_entries[0]["content"].decode("utf-8"))
             if isinstance(data, dict):
                 used = next((k for k in JSON_LIST_KEYS if isinstance(data.get(k), list)), None)
-                extra = [(k, len(v)) for k, v in data.items() if isinstance(v, list) and v and k != used]
+                # With no wrapper list the whole object is the one record, so a list inside it ('aliases') is a field of that record, not a skipped list.
+                extra = [(k, len(v)) for k, v in data.items() if isinstance(v, list) and v and k != used] if used else []
                 if extra:
                     names = ", ".join(f"'{k}' ({n} items)" for k, n in extra[:5])
                     which = f"the list '{used}'" if used else "the top-level fields"
