@@ -56,11 +56,11 @@ export function FixPanel({ record, values, signals, onChange, onSave, dirty }: {
     <div className="rounded-2xl border border-amber-300 bg-amber-50/70 px-4 py-3 space-y-3" aria-label="Fields to fix">
       <div className="flex items-center gap-3 flex-wrap">
         <b className="text-sm text-amber-900">Fix these {info.length} field{info.length === 1 ? '' : 's'}</b>
-        <span className="text-xs text-amber-900/80 tabular-nums">{done} of {info.length} changed</span>
+        <span className="text-xs text-amber-800 tabular-nums">{done} of {info.length} changed</span>
         <div className="flex-1 min-w-[60px] h-1.5 rounded-full bg-amber-200 overflow-hidden"><div className="h-full bg-emerald-500" style={{ width: `${info.length ? (100 * done) / info.length : 0}%` }} /></div>
-        <span className="text-[11px] text-amber-900/70">Press <kbd className="px-1 rounded border border-amber-300 bg-white">n</kbd> for the next one</span>
+        <span className="text-[11px] text-amber-800">Press <kbd className="px-1 rounded border border-amber-300 bg-white">n</kbd> for the next one</span>
       </div>
-      <p className="m-0 text-xs text-amber-900/80">The other fields were passed by the reviewers and are locked. Fix only what is listed here, then save.</p>
+      <p className="m-0 text-xs text-amber-800">The other fields were passed by the reviewers and are locked. Fix only what is listed here, then save.</p>
       <ul className="m-0 p-0 list-none space-y-2.5">
         {info.map(i => (
           <li key={i.f} id={`fix-${i.f}`} className={'rounded-xl border bg-white px-3 py-2.5 ' + (i.fixed ? 'border-emerald-300' : 'border-amber-200')}>
