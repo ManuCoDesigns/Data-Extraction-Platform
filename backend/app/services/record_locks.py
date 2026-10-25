@@ -22,6 +22,20 @@ def _has_peers(source) -> bool:
     return bool(getattr(source, "peer_reviews", None))
 
 
+def _has_records(source) -> bool:
+    """True when the source holds at least one record. Counts the rows themselves, not the cached total."""
+    try:
+        from sqlalchemy.orm import object_session
+        from app.models.all_models import ExtractedRecord, ExtractionJob
+        db = object_session(source)
+        if db is not None:
+            return db.query(ExtractedRecord.id).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id) \
+                .filter(ExtractionJob.source_id == source.id).first() is not None
+    except Exception:
+        pass
+    return bool(getattr(source, "total_records", None) or 0)  # no session to look at: fall back to the cached total
+
+
 def source_lock_reason(source) -> str | None:
     """Why the whole source is frozen right now, or None."""
     if _has_peers(source) and source.status in WITH_PEERS:
@@ -47,9 +61,19 @@ def record_lock_reason(source, record) -> str | None:
 
 def bulk_lock_reason(source) -> str | None:
     """Replacing or removing records in bulk (upload, scrape, clear) once peers have been involved."""
+    if not _has_records(source):
+        return None  # nothing left to protect: an empty source can always be filled (a deleted record must not leave it stuck)
     if _has_peers(source) and source.status in WITH_PEERS + (SourceStatus.CHANGES_REQUESTED,):
         return ("Records on this source have been in peer review, so they cannot be replaced or removed in bulk. "
                 "Fix the records that were sent back one by one instead.")
+    return None
+
+
+def delete_lock_reason(source) -> str | None:
+    """Removing a record once peers have been involved. Deleting takes the peers' comments with it, so only an admin may."""
+    if _has_peers(source) and source.status in WITH_PEERS + (SourceStatus.CHANGES_REQUESTED,):
+        return ("This record has been in peer review, so it cannot be deleted. Edit the fields that need fixing instead "
+                "(Edit on the record, or Upload Data, then Apply as corrections). An admin can delete it if it must go.")
     return None
 
 
@@ -74,6 +98,16 @@ def assert_record_editable(source, record, user=None) -> str | None:
 
 def assert_bulk_editable(source, user=None) -> str | None:
     why = bulk_lock_reason(source)
+    if why and user is not None and is_admin(user):
+        return why
+    if why:
+        raise HTTPException(status_code=423, detail=why)
+    return None
+
+
+def assert_record_deletable(source, record, user=None) -> str | None:
+    """Delete follows the edit rules, and on top of that is admin-only once peers have been involved."""
+    why = delete_lock_reason(source) or record_lock_reason(source, record)
     if why and user is not None and is_admin(user):
         return why
     if why:

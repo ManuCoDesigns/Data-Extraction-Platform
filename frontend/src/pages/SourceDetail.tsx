@@ -1117,6 +1117,15 @@ function SourceDetailInner() {
         </div>
       </Card>
 
+      {source.total_records === 0 && ((source.peer_ids ?? []).length > 0 || !!source.assigned_reviewer_id) && ['changes_requested', 'in_review', 'ready_for_review'].includes(source.status) && (
+        <div className="bg-amber-50 border border-amber-300 rounded-xl px-4 py-3 text-sm text-amber-900">
+          <b>This source has peer reviews but no records.</b> The record was removed after review, so the reviewers' comments below no longer have anything to attach to.
+          {isAdmin
+            ? ' Upload the corrected file with Upload Data. Admins are not locked, and the upload is logged. The peers will need to review the new record.'
+            : ' Use Upload Data to add the record again. If it is refused, tell an admin.'}
+        </div>
+      )}
+
       <PeerReviewPanel sourceId={source.id} onChanged={load} />
 
       <FeedbackPanel sourceId={source.id} refreshKey={source.updated_at} onOpenRecord={rid => { const i = records.findIndex((x: any) => x.id === rid); if (i >= 0) setActiveRecordIndex(i) }} />

@@ -2775,7 +2775,7 @@ def delete_source_record(
     if not record:
         raise HTTPException(status_code=404, detail="Record not found in this source")
     from app.services import record_locks as _rl  # delete_record.lock
-    lock_override = _rl.assert_record_editable(source, record, current_user)
+    lock_override = _rl.assert_record_deletable(source, record, current_user)
     db.add(AuditLog(
         user_id=current_user.id, project_id=source.project_id, source_id=source.id, job_id=record.job_id, record_id=record.id,
         action=AuditAction.SOURCE_RECORD_FIXED,
