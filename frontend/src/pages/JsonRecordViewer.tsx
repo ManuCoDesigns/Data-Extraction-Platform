@@ -12,6 +12,7 @@ import { JsonEditor } from './JsonEditor'
 import { RecordRequiredBar } from '@/components/enh/RequiredFields'
 import { EvidencePanel } from '@/components/enh/EvidencePanel'
 import { SIGNAL_LABEL, type Signal } from '@/components/enh/SourceQuality'
+import { FixPanel } from '@/components/enh/FixPanel'
 
 interface SchemaField {
   name: string; type?: string; required?: boolean
@@ -488,6 +489,11 @@ export function JsonRecordViewer({
 
         {/* ── LEFT COLUMN ────────────────────────────────────────────────── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* A sent-back record, for the extractor: the flagged fields first */}
+          {!isAdmin && Array.isArray(record.editable_fields) && record.editable_fields.length > 0 && (
+            <FixPanel record={record} values={localFields} signals={signals} onChange={handleSaveField} onSave={handleSaveAll} dirty={hasChanges} />
+          )}
 
           {/* Validation errors */}
           {(errors.length > 0 || webFlags.length > 0) && (
