@@ -1535,6 +1535,8 @@ async def upload_corrections(
     if ext not in (".json", ".csv", ".xlsx", ".xls"):
         raise HTTPException(status_code=422, detail="Corrections can be loaded from a JSON, CSV or Excel file.")
     content = await file.read()
+    if content.startswith(b"\xef\xbb\xbf"):  # a byte-order mark, which Windows editors add to JSON and CSV files
+        content = content[3:]
     if len(content) > MAX_UPLOAD_SIZE_BYTES:
         raise HTTPException(status_code=413, detail="That file is too large for corrections. Split it, or fix the records one by one.")
     try:
