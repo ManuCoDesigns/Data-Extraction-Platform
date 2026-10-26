@@ -4,6 +4,7 @@ import { qualityApi } from '@/api/client'
 import { Blank, Chip, PAGE, PageHeader, Panel, SelectBox, Skeletons, Tabs, Tile, shortAgo, type Tone } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
 import { FinalCheck } from '@/components/enh/FinalCheck'
+import { RoundsReport } from '@/components/enh/RoundsReport'
 import { ProcessReport } from '@/components/enh/ProcessReport'
 import { ReviewWorkspace } from '@/components/enh/ReviewWorkspace'
 import { SopRequirementsOverview, SopRulesBody } from '@/components/enh/SopRules'
@@ -13,7 +14,7 @@ const scoreTone = (v: number | null | undefined): Tone => (v === null || v === u
 const show = (v: unknown) => (v === null || v === undefined || v === '' ? '(empty)' : typeof v === 'object' ? JSON.stringify(v) : String(v))
 const err = (e: any, d: string) => e?.response?.data?.detail || d
 
-type Tab = 'review' | 'scores' | 'sop' | 'findings' | 'audit' | 'final'
+type Tab = 'review' | 'scores' | 'sop' | 'findings' | 'audit' | 'final' | 'rounds'
 
 export function QualityPage() {
   const [sources, setSources] = useState<any[] | null>(null)
@@ -34,7 +35,7 @@ export function QualityPage() {
     <div className={tab === 'review' && bench ? 'p-3 lg:p-5 max-w-[1760px] mx-auto space-y-3 animate-fade-in' : PAGE}>
       <PageHeader title="Quality" subtitle={tab === 'review' && bench ? undefined : "How accurate the delivered data is, how many errors reviewers caught, and how many got through. Scores come from errors that were checked and from fields an admin verified against the real source."} />
       <div className="flex items-center gap-3 flex-wrap">
-        <Tabs value={tab} onChange={t => { setTab(t) }} items={[{ key: 'review', label: 'Review' }, { key: 'scores', label: 'Scores' }, { key: 'sop', label: 'SOP check' }, { key: 'findings', label: 'Errors logged', count: (sources ?? []).reduce((n, s) => n + s.open_findings, 0) }, { key: 'audit', label: 'Check against source' }, { key: 'final', label: 'Final check' }]} />
+        <Tabs value={tab} onChange={t => { setTab(t) }} items={[{ key: 'review', label: 'Review' }, { key: 'scores', label: 'Scores' }, { key: 'sop', label: 'SOP check' }, { key: 'findings', label: 'Errors logged', count: (sources ?? []).reduce((n, s) => n + s.open_findings, 0) }, { key: 'audit', label: 'Check against source' }, { key: 'final', label: 'Final check' }, { key: 'rounds', label: 'v1 vs v2' }]} />
         {tab !== 'review' && <SelectBox label="Project" value={projectId} onChange={v => { setProjectId(v); setSourceId('') }}>
           <option value="">All projects</option>
           {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -51,6 +52,7 @@ export function QualityPage() {
       {tab === 'findings' && <Findings sourceId={sourceId} source={src} />}
       {tab === 'audit' && <Audit sourceId={sourceId} />}
       {tab === 'final' && <FinalCheck projectId={projectId} sourceId={sourceId} />}
+      {tab === 'rounds' && <RoundsReport projectId={projectId} sourceId={sourceId} />}
     </div>
   )
 }

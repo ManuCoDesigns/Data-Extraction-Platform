@@ -49,7 +49,7 @@ export function RedoModal({ ids, names, sources, onClose, onDone }: { ids: strin
   const apply = async () => {
     if (!plan) return
     const n = plan.assignments.length
-    const warn = startOver && plan.with_records > 0 ? `\n\n${plan.with_records} of them have earlier records. Those are cleared (a copy is kept in the audit trail) and the scores recorded on them are removed.` : ''
+    const warn = startOver && plan.with_records > 0 ? `\n\n${plan.with_records} of them have earlier records. Those are cleared and kept as v1, so you can compare the two rounds later in Quality, v1 vs v2.` : ''
     if (!window.confirm(`Assign ${n} source${n === 1 ? '' : 's'} now?${warn}\n\nEach extractor and reviewer is told what they have been given.`)) return
     setBusy('apply')
     try {
@@ -140,7 +140,7 @@ export function RedoModal({ ids, names, sources, onClose, onDone }: { ids: strin
                 <p className="text-xs text-gray-500 m-0 mt-2">Everyone ticked both extracts and reviews. Admins are left out unless you tick them.</p>
                 <label className="flex items-start gap-2 mt-3 text-sm text-gray-800 cursor-pointer">
                   <input type="checkbox" checked={startOver} onChange={e => { setStartOver(e.target.checked); }} className="mt-1" />
-                  <span><b>Start over.</b> Reset each source to Not started and clear its earlier records, so the new extractor begins fresh. A copy of the old records stays in the audit trail. Untick to only change who is assigned.</span>
+                  <span><b>Start over.</b> Reset each source to Not started and clear its earlier records, so the new extractor begins fresh. The old records, scores and flags are kept as v1 so you can compare them with the new round (Quality, v1 vs v2). Untick to only change who is assigned.</span>
                 </label>
                 <div className="mt-3 flex items-center gap-2">
                   <Button onClick={shuffle} loading={busy === 'plan'} disabled={pool.size < 2 || chosen.size === 0}>{plan ? 'Shuffle again' : `Shuffle ${chosen.size} source${chosen.size === 1 ? '' : 's'}`}</Button>
@@ -159,7 +159,7 @@ export function RedoModal({ ids, names, sources, onClose, onDone }: { ids: strin
                   {plan.notes.map((n: string, i: number) => <div key={i} className="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 px-4 py-2 text-sm">{n}</div>)}
                   {startOver && plan.with_records > 0 && (
                     <div className="rounded-xl border border-red-200 bg-red-50 text-red-900 px-4 py-2 text-sm">
-                      {plan.with_records} of these sources already have records. Starting over clears them and the scores recorded on them. A copy is kept in the audit trail.
+                      {plan.with_records} of these sources already have records. Starting over clears them from the working copy. They are kept, with their scores and flags, as v1 for the v1 vs v2 comparison.
                     </div>
                   )}
 

@@ -1369,12 +1369,24 @@ def redo_apply(body: RedoApplyBody, db: Session = Depends(get_db), user: User = 
             results.append({"source_id": sid, "name": s.name, "ok": False, "reason": why})
             continue
         before = {"status": s.status.value, "extractor": s.assigned_extractor_id, "reviewer": s.assigned_reviewer_id, "records": s.total_records or 0}
-        archived = []
+        archived_n = 0
         if body.start_over:
             recs = (db.query(ExtractedRecord).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id).filter(ExtractionJob.source_id == s.id).all())
-            archived = [{"name": r.canonical_name, "fields": r.extracted_fields, "review_status": r.review_status.value if r.review_status else None} for r in recs]
-            from app.models.all_models import FieldAudit, QualityFinding
+            from app.models.all_models import FieldAudit, QualityFinding, SourceRound
             rids = [r.id for r in recs]
+            archived_n = len(recs)
+            if recs:   # keep v1: the records, the verdicts and the flags, so v1 and v2 can be compared later
+                rn = db.query(func.count(SourceRound.id)).filter(SourceRound.source_id == s.id).scalar() or 0
+                who = {u.id: u.full_name for u in db.query(User).filter(User.id.in_({x for x in [s.assigned_extractor_id] + [p.user_id for p in s.peer_reviews] if x})).all()}
+                db.add(SourceRound(
+                    source_id=s.id, round=rn + 1, created_by=user.id, reason=(body.note or "Re-extraction round").strip(), status_at=s.status.value,
+                    extractor_id=s.assigned_extractor_id, extractor_name=who.get(s.assigned_extractor_id), record_count=len(recs),
+                    reviewers=[{"id": p.user_id, "name": who.get(p.user_id), "status": p.status} for p in s.peer_reviews],
+                    records=[{"id": r.id, "name": r.canonical_name, "fields": r.extracted_fields, "review_status": r.review_status.value if r.review_status else None} for r in recs],
+                    audits=[{"record_id": a.record_id, "field": a.field, "verdict": a.verdict, "first_verdict": a.first_verdict, "extracted_value": a.extracted_value, "truth_value": a.truth_value}
+                            for a in db.query(FieldAudit).filter(FieldAudit.record_id.in_(rids)).all()],
+                    findings=[{"record_id": f.record_id, "field": f.field, "origin": f.origin, "status": f.status, "raised_by": f.raised_by, "fixed_before_final": bool(f.fixed_before_final)}
+                              for f in db.query(QualityFinding).filter(QualityFinding.record_id.in_(rids)).all()]))
             if rids:
                 db.query(FieldAudit).filter(FieldAudit.record_id.in_(rids)).delete(synchronize_session=False)
                 db.query(QualityFinding).filter(QualityFinding.record_id.in_(rids)).delete(synchronize_session=False)
@@ -1392,7 +1404,7 @@ def redo_apply(body: RedoApplyBody, db: Session = Depends(get_db), user: User = 
         db.add(AuditLog(user_id=user.id, project_id=s.project_id, source_id=s.id, action=AuditAction.SOURCE_RESET, before_value=before,
                         after_value={"redo": True, "status": s.status.value, "reason": (body.note or "Re-extraction round").strip(), "records_cleared": body.start_over,
                                      "previous_extractors": sorted(hist[sid]["ext"]), "previous_reviewers": sorted(hist[sid]["rev"]),
-                                     "extractor_id": ex.id, "reviewer_id": rv.id if rv else None, "archived_records": archived, "reset_count": s.reset_count}))
+                                     "extractor_id": ex.id, "reviewer_id": rv.id if rv else None, "kept_as_round": bool(archived_n), "reset_count": s.reset_count}))
         per_ext.setdefault(ex.id, []).append(s)
         if rv:
             per_rev.setdefault(rv.id, []).append(s)

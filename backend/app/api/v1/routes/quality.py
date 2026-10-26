@@ -1286,6 +1286,85 @@ async def answer_key(
     return result
 
 
+@router.get("/rounds")
+def rounds_report(project_id: str = "", source_id: str = "", ignore: str = "retrieved_at", export: str = "",
+                  db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """What changed between the kept first round (v1) and the records now (v2), source by source and field by field."""
+    _need_lead(user)
+    from app.models.all_models import SourceRound
+    from app.services import answer_key as ak
+    ign = {x.strip() for x in (ignore or "").split(",") if x.strip()}
+    srcs = {s.id: s for s in _visible_sources(db, user, project_id or None).all()}
+    if source_id:
+        srcs = {k: v for k, v in srcs.items() if k == source_id}
+    rounds: dict = {}
+    for r in db.query(SourceRound).filter(SourceRound.source_id.in_(list(srcs) or [""])).order_by(SourceRound.round).all():
+        rounds[r.source_id] = r                      # the latest kept round is the one compared
+    uname = {u.id: u.full_name for u in db.query(User).all()}
+    T = {"sources": 0, "v1_records": 0, "v2_records": 0, "fields": 0, "same": 0, "wording": 0, "changed": 0, "added": 0, "removed": 0,
+         "fixed": 0, "regressed": 0, "still_wrong": 0, "unchecked": 0, "records_dropped": 0, "records_new": 0, "v1_wrong": 0, "v1_checked": 0, "v2_wrong": 0, "v2_checked": 0}
+    out = []
+    for sid, rd in rounds.items():
+        s = srcs[sid]
+        v2 = _records(db, sid)
+        v1 = list(rd.records or [])
+        a1 = {(a["record_id"], a["field"]): a for a in (rd.audits or [])}
+        a2 = {(a.record_id, a.field): a for a in db.query(FieldAudit).filter(FieldAudit.source_id == sid).all()}
+        pairs, miss_v1, miss_v2 = ak.match_records([x.get("fields") or {} for x in v1], v2, lambda r: ak.record_name(r.extracted_fields or {}, r.canonical_name))
+        sd = {"source_id": sid, "name": s.name, "round": rd.round, "kept_at": rd.created_at, "v1_extractor": rd.extractor_name or "Unknown",
+              "v2_extractor": uname.get(s.assigned_extractor_id) or "Unassigned", "v1_reviewers": [x.get("name") for x in (rd.reviewers or []) if x.get("name")],
+              "v2_reviewers": sorted(uname.get(p.user_id, "") for p in s.peer_reviews if p.user_id), "v1_records": len(v1), "v2_records": len(v2),
+              "fields": 0, "same": 0, "wording": 0, "changed": 0, "added": 0, "removed": 0, "fixed": 0, "regressed": 0, "still_wrong": 0, "unchecked": 0,
+              "v1_wrong": sum(1 for a in a1.values() if a["verdict"] == "incorrect"), "v1_checked": len(a1),
+              "v2_wrong": sum(1 for a in a2.values() if a.verdict == "incorrect"), "v2_checked": len(a2),
+              "changes": [], "dropped_records": [ak.record_name(v1[i].get("fields") or {}) or v1[i].get("name") or f"record {i + 1}" for i in miss_v1],
+              "new_records": [ak.record_name(v2[j].extracted_fields or {}, v2[j].canonical_name) or f"record {j + 1}" for j in miss_v2]}
+        for i, j in pairs:
+            r1, r2 = v1[i], v2[j]
+            label = ak.record_name(r2.extracted_fields or {}, r2.canonical_name) or r1.get("name") or f"record {j + 1}"
+            for row in ak.compare(r2.extracted_fields or {}, r1.get("fields") or {}, ign):
+                sd["fields"] += 1
+                if row["verdict"] == "correct":
+                    sd["wording" if row["cosmetic"] else "same"] += 1
+                    continue
+                v1v, v2v = row["final_value"], row["extractor_value"]
+                kind = "added" if ak.empty(v1v) else "removed" if ak.empty(v2v) else "changed"
+                sd[kind] += 1
+                x1, x2 = a1.get((r1.get("id"), row["field"])), a2.get((r2.id, row["field"]))
+                if x1 and x1["verdict"] == "incorrect" and ((x2 and x2.verdict == "correct") or (x2 is None and x1.get("truth_value") and ak.judge(v2v, x1["truth_value"])[0] == "correct")):
+                    res = "fixed"
+                elif x1 and x1["verdict"] == "correct" and x2 and x2.verdict == "incorrect":
+                    res = "regressed"
+                elif x1 and x1["verdict"] == "incorrect" and x2 and x2.verdict == "incorrect":
+                    res = "still_wrong"
+                else:
+                    res = "unchecked"
+                sd[res] += 1
+                sd["changes"].append({"record": label, "field": row["field"], "kind": kind, "v1_value": v1v, "v2_value": v2v, "result": res})
+        sd["records_dropped"], sd["records_new"] = len(miss_v1), len(miss_v2)
+        sd["change_pct"] = round(100 * (sd["changed"] + sd["added"] + sd["removed"]) / sd["fields"], 1) if sd["fields"] else None
+        T["sources"] += 1
+        for k in ("fields", "same", "wording", "changed", "added", "removed", "fixed", "regressed", "still_wrong", "unchecked", "v1_wrong", "v1_checked", "v2_wrong", "v2_checked"):
+            T[k] += sd[k]
+        T["v1_records"] += sd["v1_records"]; T["v2_records"] += sd["v2_records"]; T["records_dropped"] += len(miss_v1); T["records_new"] += len(miss_v2)
+        out.append(sd)
+    T["change_pct"] = round(100 * (T["changed"] + T["added"] + T["removed"]) / T["fields"], 1) if T["fields"] else None
+    T["v1_error_pct"] = round(100 * T["v1_wrong"] / T["v1_checked"], 1) if T["v1_checked"] else None
+    T["v2_error_pct"] = round(100 * T["v2_wrong"] / T["v2_checked"], 1) if T["v2_checked"] else None
+    ppl: dict = {}
+    for sd in out:
+        for who, key in ((sd["v1_extractor"], "v1_sources"), (sd["v2_extractor"], "v2_sources")):
+            ppl.setdefault(who, {"name": who, "v1_sources": 0, "v2_sources": 0})[key] += 1
+    result = {"totals": T, "sources": sorted(out, key=lambda x: x["name"].lower()), "people": sorted(ppl.values(), key=lambda x: x["name"].lower()), "ignored_fields": sorted(ign)}
+    if export == "xlsx":
+        from fastapi.responses import Response
+        from app.services import quality_export as qx
+        stamp = enh.now_utc().strftime("%Y%m%d")
+        return Response(content=qx.rounds_xlsx(result, {"generated": stamp}), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f'attachment; filename="v1_vs_v2_{stamp}.xlsx"'})
+    return result
+
+
 # ─── Download of peer-reviewed sources ─────────────────────────────────────────
 
 @router.get("/export")

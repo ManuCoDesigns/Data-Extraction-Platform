@@ -493,6 +493,16 @@ export const qualityApi = {
   scan: (sourceId: string) => api.post(`/quality/sources/${sourceId}/scan`).then(r => r.data as { created: number; withdrawn?: number; records: number; sop_checked?: boolean }),
   sample: (sourceId: string, limit = 30) => api.get(`/quality/sources/${sourceId}/sample`, { params: { limit } }).then(r => r.data),
   audit: (body: { record_id: string; field: string; verdict: string; truth_value?: string; note?: string }) => api.post('/quality/audits', body).then(r => r.data),
+  rounds: (o: { projectId?: string; sourceId?: string } = {}) => api.get('/quality/rounds', { params: { project_id: o.projectId || undefined, source_id: o.sourceId || undefined }, timeout: 120000 }).then(r => r.data),
+  roundsDownload: async (o: { projectId?: string; sourceId?: string } = {}) => {
+    const r = await api.get('/quality/rounds', { params: { project_id: o.projectId || undefined, source_id: o.sourceId || undefined, export: 'xlsx' }, responseType: 'blob', timeout: 120000 })
+    const url = URL.createObjectURL(new Blob([r.data]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `v1_vs_v2_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  },
   answerKey: (file: File, o: { apply?: boolean; projectId?: string; sourceId?: string; decisions?: Record<string, string> }) => {
     const fd = new FormData()
     fd.append('file', file)

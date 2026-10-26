@@ -371,3 +371,57 @@ def final_check_xlsx(res: dict, meta: dict) -> bytes:
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
+
+
+def rounds_xlsx(res: dict, meta: dict) -> bytes:
+    """What changed between the kept first round (v1) and the records now (v2)."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Read me"
+    for i, line in enumerate([
+        "v1 is the first extraction, kept when the source was re-extracted. v2 is what the records say now.",
+        "Records are matched by name. Fields are compared in both directions. Timestamps (%s) are ignored." % (", ".join(res.get("ignored_fields") or []) or "none"),
+        "Same = identical. Wording = only case, spacing or punctuation. Changed = both rounds have a value and they differ. Added = v2 has a value v1 did not. Removed = v1 had a value v2 does not.",
+        "Fixed = v1 was checked wrong and v2 is right. Regressed = v1 was right and v2 is wrong. Still wrong = wrong in both. Unchecked = no verdict to say which is right.",
+        "",
+        "Generated %s." % meta.get("generated", ""),
+    ], 1):
+        ws.cell(i, 1, line)
+    ws.column_dimensions["A"].width = 130
+    head = PatternFill("solid", fgColor="1F2937")
+
+    def sheet(title, cols, rows, widths=None):
+        w = wb.create_sheet(title)
+        w.append(cols)
+        for c in w[1]:
+            c.font, c.fill = Font(bold=True, color="FFFFFF"), head
+        for r in rows:
+            w.append([_cell(v) for v in r])
+        w.freeze_panes = "A2"
+        for i, c in enumerate(cols, 1):
+            w.column_dimensions[get_column_letter(i)].width = (widths or {}).get(c, max(12, min(48, len(c) + 4)))
+        for row in w.iter_rows(min_row=2):
+            for c in row:
+                c.alignment = Alignment(wrap_text=True, vertical="top")
+
+    T = res["totals"]
+    sheet("Summary", ["Measure", "Value"], [
+        ["Sources compared", T["sources"]], ["v1 records", T["v1_records"]], ["v2 records", T["v2_records"]], ["Fields compared", T["fields"]],
+        ["Same", T["same"]], ["Wording only", T["wording"]], ["Changed", T["changed"]], ["Added in v2", T["added"]], ["Removed in v2", T["removed"]], ["Changed %", T["change_pct"]],
+        ["Fixed (v1 wrong, v2 right)", T["fixed"]], ["Regressed (v1 right, v2 wrong)", T["regressed"]], ["Still wrong", T["still_wrong"]], ["Unchecked", T["unchecked"]],
+        ["v1 fields checked", T["v1_checked"]], ["v1 wrong", T["v1_wrong"]], ["v1 error %", T["v1_error_pct"]],
+        ["v2 fields checked", T["v2_checked"]], ["v2 wrong", T["v2_wrong"]], ["v2 error %", T["v2_error_pct"]],
+        ["v1 records dropped", T["records_dropped"]], ["New records in v2", T["records_new"]]], {"Measure": 36})
+    sheet("By source", ["Source", "v1 extractor", "v2 extractor", "v1 reviewers", "v2 reviewers", "v1 records", "v2 records", "Fields", "Same", "Wording", "Changed", "Added", "Removed", "Changed %", "Fixed", "Regressed", "Still wrong", "Unchecked"],
+          [[s["name"], s["v1_extractor"], s["v2_extractor"], ", ".join(s["v1_reviewers"]), ", ".join(s["v2_reviewers"]), s["v1_records"], s["v2_records"], s["fields"], s["same"], s["wording"], s["changed"],
+            s["added"], s["removed"], s["change_pct"], s["fixed"], s["regressed"], s["still_wrong"], s["unchecked"]] for s in res["sources"]], {"Source": 34, "v1 reviewers": 24, "v2 reviewers": 24})
+    sheet("Changed fields", ["Source", "Record", "Field", "Kind", "v1 value", "v2 value", "Result", "v1 extractor", "v2 extractor"],
+          [[s["name"], c["record"], c["field"], c["kind"], c["v1_value"], c["v2_value"], {"fixed": "Fixed", "regressed": "Regressed", "still_wrong": "Still wrong"}.get(c["result"], "Unchecked"),
+            s["v1_extractor"], s["v2_extractor"]] for s in res["sources"] for c in s["changes"]], {"Source": 30, "v1 value": 44, "v2 value": 44, "Field": 26})
+    sheet("Records dropped or new", ["Source", "What", "Records"],
+          [[s["name"], "In v1 only (dropped in v2)", ", ".join(s["dropped_records"])] for s in res["sources"] if s["dropped_records"]] +
+          [[s["name"], "In v2 only (new)", ", ".join(s["new_records"])] for s in res["sources"] if s["new_records"]], {"Source": 34, "What": 28, "Records": 60})
+    sheet("People", ["Person", "Sources in v1", "Sources in v2"], [[p["name"], p["v1_sources"], p["v2_sources"]] for p in res["people"]], {"Person": 28})
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()

@@ -799,3 +799,23 @@ class FieldAudit(Base):
     first_value = Column(JSON, nullable=True)
     first_at = Column(DateTime(timezone=True), nullable=True)
     times_checked = Column(Integer, default=1, server_default='1', nullable=False)
+
+
+class SourceRound(Base):
+    """A kept copy of a source as one extraction round left it (v1), taken before a re-extraction clears it, so the rounds can be compared."""
+    __tablename__ = "source_rounds"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    round = Column(Integer, nullable=False, default=1)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+    created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reason = Column(Text, nullable=True)
+    status_at = Column(String(30), nullable=True)
+    extractor_id = Column(String(36), nullable=True)
+    extractor_name = Column(String(255), nullable=True)
+    reviewers = Column(JSON, nullable=True)          # [{id, name, status}]
+    record_count = Column(Integer, default=0)
+    records = Column(JSON, nullable=True)            # [{id, name, fields, review_status}]
+    audits = Column(JSON, nullable=True)             # [{record_id, field, verdict, first_verdict, extracted_value, truth_value}]
+    findings = Column(JSON, nullable=True)           # [{record_id, field, origin, status, raised_by, fixed_before_final}]
