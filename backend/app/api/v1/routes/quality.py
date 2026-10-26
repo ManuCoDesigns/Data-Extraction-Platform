@@ -4,7 +4,7 @@ import random
 import re
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
@@ -1076,6 +1076,163 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
             also += 1
     db.commit()
     return {"id": a.id, "verdict": a.verdict, "findings_settled": touched, "also_marked": also, "fixed_credit": fixed_credit}
+
+
+# ─── Final records checked against the extractor and the reviewers ─────────────────
+
+@router.post("/answer-key")
+async def answer_key(
+    file: UploadFile = File(...), apply: bool = Form(False), project_id: str = Form(""), source_id: str = Form(""), ignore: str = Form("retrieved_at"),
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """The admin's final records against what the extractor delivered and what the reviewers flagged: error %, accuracy %, catches and false alarms.
+    Without apply it only calculates. With apply it records each verdict as an audit (the same as marking the field in the review workspace).
+    No record is ever edited."""
+    _need_lead(user)
+    from app.services import answer_key as ak
+    from app.services import record_locks as rl
+    content = await file.read()
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="That file is too large.")
+    only = _source(db, user, source_id).name if source_id else None
+    try:
+        key = ak.load_key(file.filename or "", content, only)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=422, detail="Could not read that file. Upload the zip, or the all-records JSON file.")
+    if not key:
+        raise HTTPException(status_code=422, detail="No records found in that file.")
+    ignore_set = {x.strip() for x in (ignore or "").split(",") if x.strip()}
+
+    sources = _visible_sources(db, user, project_id or None).all()
+    by_norm: dict = {}
+    for s in sources:
+        by_norm.setdefault(ak.norm(s.name), []).append(s)
+
+    all_users = {u.id: u for u in db.query(User).all()}
+    by_email = {u.email: u for u in all_users.values()}
+    uname = lambda uid: (all_users[uid].full_name if uid in all_users else "A reviewer")
+
+    out_sources, unmatched_sources, notes = [], [], []
+    ext_tot: dict = {}
+    rev_tot: dict = {}
+    todo: list = []  # (record, row) pairs to write as audits
+    T = {"fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "sources": 0, "records": 0}
+
+    for name, final_recs in key.items():
+        cands = by_norm.get(ak.norm(name), [])
+        if not cands:
+            unmatched_sources.append(name)
+            continue
+        cands = sorted(cands, key=lambda s: -len(_records(db, s.id)))
+        s = cands[0]
+        if len(cands) > 1 and len(_records(db, cands[1].id)):
+            notes.append(f"'{name}' matches {len(cands)} sources with records. Used the one in {s.project_id[:8]}…; pick a project to be sure.")
+        recs = _records(db, s.id)
+        ext_name = lambda r: ak.record_name(r.extracted_fields or {}, r.canonical_name)
+        pairs, miss_final, miss_ext = ak.match_records(final_recs, recs, ext_name)
+
+        peers = {p.user_id for p in s.peer_reviews if p.user_id}
+        if s.assigned_reviewer_id:
+            peers.add(s.assigned_reviewer_id)
+        flags: dict = {}
+        for f in db.query(QualityFinding).filter(QualityFinding.source_id == s.id, QualityFinding.status.in_(("open", "confirmed"))).all():
+            if f.field and f.origin == "reviewer" and f.raised_by and (not peers or f.raised_by in peers):
+                flags.setdefault((f.record_id, f.field), set()).add(f.raised_by)
+        sysflag = {(f.record_id, f.field) for f in db.query(QualityFinding).filter(QualityFinding.source_id == s.id, QualityFinding.origin == "system", QualityFinding.status.in_(("open", "confirmed"))).all() if f.field}
+        for r in recs:
+            for field, lst in (r.reviewer_field_comments or {}).items():
+                if field == "_general":
+                    continue
+                for e in (lst or []):
+                    if isinstance(e, dict) and e.get("role") != "admin" and rl._flagged_by_comment(r, field, e):
+                        u = by_email.get(e.get("user"))
+                        if u and (not peers or u.id in peers):
+                            flags.setdefault((r.id, field), set()).add(u.id)
+
+        ex_name = uname(s.assigned_extractor_id) if s.assigned_extractor_id else "Unassigned"
+        sd = {"source_id": s.id, "name": s.name, "extractor": ex_name, "reviewers": sorted(uname(u) for u in peers),
+              "fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "wrong_fields": [], "false_alarm_fields": [], "records": [],
+              "key_records_unmatched": [ak.record_name(final_recs[i]) or f"record {i + 1}" for i in miss_final],
+              "extractor_records_unmatched": [ak.record_name(recs[j].extracted_fields or {}, recs[j].canonical_name) or f"record {j + 1}" for j in miss_ext]}
+        for i, j in pairs:
+            r, fr = recs[j], final_recs[i]
+            label = ak.record_name(r.extracted_fields or {}, r.canonical_name) or f"record {j + 1}"
+            rows = ak.compare(r.extracted_fields or {}, fr, ignore_set)
+            rec_wrong = 0
+            for row in rows:
+                who = flags.get((r.id, row["field"]), set())
+                sd["fields"] += 1
+                sd["cosmetic"] += 1 if row["cosmetic"] else 0
+                for uid in who:
+                    d = rev_tot.setdefault(uid, {"name": uname(uid), "flags": 0, "caught": 0, "false_alarms": 0, "errors_on_sources": 0, "sources": set()})
+                    d["flags"] += 1
+                    d["sources"].add(s.name)
+                    if row["verdict"] == "wrong":
+                        d["caught"] += 1
+                    else:
+                        d["false_alarms"] += 1
+                if row["verdict"] == "wrong":
+                    rec_wrong += 1
+                    sd["wrong"] += 1
+                    outcome = "caught" if who else "escaped"
+                    sd["caught" if who else "escaped"] += 1
+                    sd["wrong_fields"].append({"record": label, "field": row["field"], "extractor_value": row["extractor_value"], "final_value": row["final_value"],
+                                               "category": row["category"], "flagged_by": sorted(uname(u) for u in who), "system_flagged": (r.id, row["field"]) in sysflag, "outcome": outcome})
+                elif who:
+                    sd["false_alarms"] += 1
+                    sd["false_alarm_fields"].append({"record": label, "field": row["field"], "value": row["extractor_value"], "flagged_by": sorted(uname(u) for u in who)})
+                todo.append((s, r, row))
+            sd["records"].append({"name": label, "matched_to": ak.record_name(fr) or label, "fields": len(rows), "wrong": rec_wrong})
+        sd.update({k: v for k, v in ak.rates(sd["fields"], sd["wrong"]).items() if k in ("error_pct", "accuracy_pct")})
+        sd["catch_rate"] = round(100 * sd["caught"] / sd["wrong"], 1) if sd["wrong"] else None
+        for uid in peers:
+            d = rev_tot.setdefault(uid, {"name": uname(uid), "flags": 0, "caught": 0, "false_alarms": 0, "errors_on_sources": 0, "sources": set()})
+            d["errors_on_sources"] += sd["wrong"]
+            d["sources"].add(s.name)
+        e = ext_tot.setdefault(s.assigned_extractor_id or "-", {"name": ex_name, "fields": 0, "wrong": 0, "sources": 0})
+        e["fields"] += sd["fields"]; e["wrong"] += sd["wrong"]; e["sources"] += 1
+        for k in ("fields", "wrong", "cosmetic", "caught", "escaped", "false_alarms"):
+            T[k] += sd[k]
+        T["sources"] += 1
+        T["records"] += len(pairs)
+        out_sources.append(sd)
+
+    totals = {**T, **ak.rates(T["fields"], T["wrong"]), "catch_rate": round(100 * T["caught"] / T["wrong"], 1) if T["wrong"] else None}
+    extractors = sorted(({**{k: v for k, v in e.items()}, **ak.rates(e["fields"], e["wrong"])} for e in ext_tot.values()), key=lambda x: x["name"].lower())
+    reviewers = sorted(({"name": d["name"], "sources": len(d["sources"]), "flags": d["flags"], "caught": d["caught"], "false_alarms": d["false_alarms"],
+                         "errors_on_their_sources": d["errors_on_sources"],
+                         "catch_rate": round(100 * d["caught"] / d["errors_on_sources"], 1) if d["errors_on_sources"] else None,
+                         "precision": round(100 * d["caught"] / d["flags"], 1) if d["flags"] else None} for d in rev_tot.values()), key=lambda x: x["name"].lower())
+    result = {"mode": "preview", "totals": totals, "sources": sorted(out_sources, key=lambda x: x["name"].lower()), "extractors": extractors, "reviewers": reviewers,
+              "unmatched_sources": unmatched_sources, "notes": notes, "ignored_fields": sorted(ignore_set)}
+
+    if apply:
+        import json as _json
+        written = already = 0
+        skipped: list = []
+        for s, r, row in todo:
+            verdict = "correct" if row["verdict"] == "correct" else "incorrect"
+            fv = row["final_value"]
+            truth = None
+            if verdict == "incorrect":
+                truth = "(should not be there)" if ak.empty(fv) else (fv if isinstance(fv, str) else _json.dumps(fv, ensure_ascii=False))
+            a = db.query(FieldAudit).filter(FieldAudit.record_id == r.id, FieldAudit.field == row["field"]).first()
+            if a and a.verdict == verdict and _same(a.extracted_value, (r.extracted_fields or {}).get(row["field"])) and (verdict == "correct" or _same(a.truth_value, truth)):
+                already += 1
+                continue
+            try:
+                review_mark(MarkBody(record_id=r.id, field=row["field"], verdict=verdict, truth_value=truth,
+                                     note="Checked against the admin's final records." if verdict == "incorrect" else None,
+                                     category=row["category"] or "wrong_value", severity="major"), db, user)
+                written += 1
+            except HTTPException as e:
+                db.rollback()
+                skipped.append({"source": s.name, "field": row["field"], "why": str(e.detail)})
+        result["mode"] = "applied"
+        result["applied"] = {"written": written, "already_recorded": already, "skipped": skipped}
+    return result
 
 
 # ─── Download of peer-reviewed sources ─────────────────────────────────────────

@@ -491,6 +491,14 @@ export const qualityApi = {
   scan: (sourceId: string) => api.post(`/quality/sources/${sourceId}/scan`).then(r => r.data as { created: number; withdrawn?: number; records: number; sop_checked?: boolean }),
   sample: (sourceId: string, limit = 30) => api.get(`/quality/sources/${sourceId}/sample`, { params: { limit } }).then(r => r.data),
   audit: (body: { record_id: string; field: string; verdict: string; truth_value?: string; note?: string }) => api.post('/quality/audits', body).then(r => r.data),
+  answerKey: (file: File, o: { apply?: boolean; projectId?: string; sourceId?: string }) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('apply', o.apply ? 'true' : 'false')
+    if (o.projectId) fd.append('project_id', o.projectId)
+    if (o.sourceId) fd.append('source_id', o.sourceId)
+    return api.post('/quality/answer-key', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 }).then(r => r.data)
+  },
   deleteAudit: (id: string) => api.delete(`/quality/audits/${id}`).then(r => r.data),
   sources: (projectId?: string) => api.get('/quality/sources', { params: { project_id: projectId || undefined } }).then(r => r.data),
   reviewSources: (params: { project_id?: string; scope?: string }) => api.get('/quality/review/sources', { params }).then(r => r.data),
