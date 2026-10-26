@@ -184,7 +184,8 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
                               <td className="pr-3 text-gray-700">{w.flagged_by.length ? w.flagged_by.join(', ') : w.system_flagged ? 'System check' : '—'}</td>
                               <td className="pr-3"><Chip tone={w.outcome === 'caught' ? 'green' : w.outcome === 'escaped' ? 'red' : w.outcome === 'admin_change' ? 'blue' : 'amber'}>{w.outcome === 'caught' ? 'Error, caught' : w.outcome === 'escaped' ? 'Error, got through' : w.outcome === 'admin_change' ? 'Your change' : 'To confirm'}</Chip></td>
                               <td className="whitespace-nowrap">
-                                {w.not_fixed ? <span className="text-xs text-gray-500">Fix it, or change the review verdict</span> : <>
+                                {w.not_fixed ? <button type="button" onClick={() => decide([w.key], 'right')} title="Replace your earlier Wrong verdict with Correct"
+                                  className="text-xs font-semibold rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 px-2 py-1">Overrule: extractor right</button> : <>
                                   <button type="button" onClick={() => decide([w.key], w.decision === 'wrong' ? null : 'wrong')} aria-pressed={w.decision === 'wrong'}
                                     className={`text-xs font-semibold rounded-md border px-2 py-1 mr-1 ${w.decision === 'wrong' ? 'bg-red-600 text-white border-red-600' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}>Extractor wrong</button>
                                   <button type="button" onClick={() => decide([w.key], w.decision === 'right' ? null : 'right')} aria-pressed={w.decision === 'right'}

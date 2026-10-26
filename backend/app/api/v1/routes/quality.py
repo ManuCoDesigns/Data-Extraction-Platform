@@ -1231,7 +1231,10 @@ async def answer_key(
                     else:
                         cls, why = "held", "The value differs and no verdict is recorded. Decide it, or record a verdict in Check against source"
                 elif aud_ok and aud.verdict == "incorrect":
-                    cls, why, not_fixed = "error", "You marked it wrong in review and the final value is still the delivered value (not fixed)", True
+                    if decs.get(key) == "right":
+                        cls, why = "admin", "You overruled your earlier Wrong verdict: the delivered value is right"
+                    else:
+                        cls, why, not_fixed = "error", "You marked it wrong in review and the final value is still the delivered value (not fixed)", True
                 if cls == "correct":
                     sd["correct"] += 1
                 else:
