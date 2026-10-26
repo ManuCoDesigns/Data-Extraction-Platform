@@ -41,6 +41,10 @@ def _source(db: Session, user: User, source_id: str) -> Source:
 _MISSING = object()
 
 
+def _pcts(compared: int, wrong: int) -> dict:
+    return {"error_pct": round(100 * wrong / compared, 1) if compared else None, "accuracy_pct": round(100 - 100 * wrong / compared, 1) if compared else None}
+
+
 def _same(a, b) -> bool:
     """Do two field values say the same thing? Spaces at the ends and empty versus missing do not count as a change."""
     def n(v):
@@ -1088,12 +1092,16 @@ def _json_dumps(o) -> bytes:
 @router.post("/answer-key")
 async def answer_key(
     file: UploadFile = File(...), apply: bool = Form(False), project_id: str = Form(""), source_id: str = Form(""), ignore: str = Form("retrieved_at"), export: str = Form(""),
+    decisions: str = Form(""),
     db: Session = Depends(get_db), user: User = Depends(get_current_user),
 ):
     """The admin's final records against what the extractor delivered and what the reviewers flagged: error %, accuracy %, catches and false alarms.
-    Without apply it only calculates. With apply it records each verdict as an audit (the same as marking the field in the review workspace).
-    No record is ever edited."""
+
+    A field that differs is only a doubt until the admin decides it: "wrong" (the extractor made an error) or "right" (the extractor was right and the
+    admin changed it). Undecided fields are held: they are not counted as errors and nothing is recorded for them. Without apply this only calculates.
+    With apply it records each decided verdict as an audit (the same as marking the field in the review workspace). No record is ever edited."""
     _need_lead(user)
+    import json as _json
     from app.services import answer_key as ak
     from app.services import record_locks as rl
     content = await file.read()
@@ -1108,6 +1116,10 @@ async def answer_key(
         raise HTTPException(status_code=422, detail="Could not read that file. Upload the zip, or the all-records JSON file.")
     if not key:
         raise HTTPException(status_code=422, detail="No records found in that file.")
+    try:
+        decs = {str(k): v for k, v in (_json.loads(decisions) if decisions else {}).items() if v in ("wrong", "right")}
+    except Exception:
+        raise HTTPException(status_code=422, detail="The decisions could not be read.")
     ignore_set = {x.strip() for x in (ignore or "").split(",") if x.strip()}
 
     sources = _visible_sources(db, user, project_id or None).all()
@@ -1122,8 +1134,12 @@ async def answer_key(
     out_sources, unmatched_sources, notes = [], [], []
     ext_tot: dict = {}
     rev_tot: dict = {}
-    todo: list = []  # (record, row) pairs to write as audits
-    T = {"fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "reviewer_flags": 0, "sources": 0, "records": 0}
+    todo: list = []  # (source, record, row, verdict to record)
+    held = 0
+    T = {"fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "fixed": 0, "pending": 0, "admin_changes": 0, "reviewer_flags": 0, "sources": 0, "records": 0}
+
+    def reviewer(uid):
+        return rev_tot.setdefault(uid, {"name": uname(uid), "flags": 0, "caught": 0, "false_alarms": 0, "errors_on_sources": 0, "sources": set()})
 
     for name, final_recs in key.items():
         cands = by_norm.get(ak.norm(name), [])
@@ -1141,10 +1157,10 @@ async def answer_key(
         peers = {p.user_id for p in s.peer_reviews if p.user_id}
         if s.assigned_reviewer_id:
             peers.add(s.assigned_reviewer_id)
-        flags: dict = {}
-        for f in db.query(QualityFinding).filter(QualityFinding.source_id == s.id, QualityFinding.status.in_(("open", "confirmed"))).all():
+        flags: dict = {}  # (record id, field) -> {reviewer id: the value they saw}
+        for f in db.query(QualityFinding).filter(QualityFinding.source_id == s.id, QualityFinding.status.in_(("open", "confirmed", "dismissed"))).all():
             if f.field and f.origin == "reviewer" and f.raised_by and (not peers or f.raised_by in peers):
-                flags.setdefault((f.record_id, f.field), set()).add(f.raised_by)
+                flags.setdefault((f.record_id, f.field), {}).setdefault(f.raised_by, f.extracted_value if f.extracted_value is not None else _MISSING)
         sysflag = {(f.record_id, f.field) for f in db.query(QualityFinding).filter(QualityFinding.source_id == s.id, QualityFinding.origin == "system", QualityFinding.status.in_(("open", "confirmed"))).all() if f.field}
         for r in recs:
             for field, lst in (r.reviewer_field_comments or {}).items():
@@ -1154,11 +1170,12 @@ async def answer_key(
                     if isinstance(e, dict) and e.get("role") != "admin" and rl._flagged_by_comment(r, field, e):
                         u = by_email.get(e.get("user"))
                         if u and (not peers or u.id in peers):
-                            flags.setdefault((r.id, field), set()).add(u.id)
+                            flags.setdefault((r.id, field), {}).setdefault(u.id, _earlier_value(r, s, u.id, field))
 
         ex_name = uname(s.assigned_extractor_id) if s.assigned_extractor_id else "Unassigned"
         sd = {"source_id": s.id, "name": s.name, "extractor": ex_name, "reviewers": sorted(uname(u) for u in peers),
-              "fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "reviewer_flags": len(flags), "wrong_fields": [], "false_alarm_fields": [], "records": [],
+              "fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "fixed": 0, "pending": 0, "admin_changes": 0, "reviewer_flags": len(flags),
+              "wrong_fields": [], "false_alarm_fields": [], "fixed_fields": [], "records": [],
               "key_records_unmatched": [ak.record_name(final_recs[i]) or f"record {i + 1}" for i in miss_final],
               "extractor_records_unmatched": [ak.record_name(recs[j].extracted_fields or {}, recs[j].canonical_name) or f"record {j + 1}" for j in miss_ext]}
         for i, j in pairs:
@@ -1167,45 +1184,68 @@ async def answer_key(
             rows = ak.compare(r.extracted_fields or {}, fr, ignore_set)
             rec_wrong = 0
             for row in rows:
-                who = flags.get((r.id, row["field"]), set())
+                field = row["field"]
+                who = flags.get((r.id, field), {})
+                cur = (r.extracted_fields or {}).get(field)
                 sd["fields"] += 1
                 sd["cosmetic"] += 1 if row["cosmetic"] else 0
-                for uid in who:
-                    d = rev_tot.setdefault(uid, {"name": uname(uid), "flags": 0, "caught": 0, "false_alarms": 0, "errors_on_sources": 0, "sources": set()})
-                    d["flags"] += 1
-                    d["sources"].add(s.name)
-                    if row["verdict"] == "wrong":
-                        d["caught"] += 1
-                    else:
-                        d["false_alarms"] += 1
+                dec = None
                 if row["verdict"] == "wrong":
+                    dec = decs.get(f"{r.id}|{field}", "pending")
+                    entry = {"key": f"{r.id}|{field}", "record": label, "field": field, "extractor_value": row["extractor_value"], "final_value": row["final_value"], "category": row["category"],
+                             "decision": dec, "flagged_by": sorted(uname(u) for u in who), "system_flagged": (r.id, field) in sysflag}
+                    if dec == "pending":
+                        sd["pending"] += 1
+                        entry["outcome"] = "to_confirm"
+                        sd["wrong_fields"].append(entry)
+                        held += 1
+                        continue  # a doubt: not counted, nothing recorded, until the admin decides
+                if dec == "wrong":
                     rec_wrong += 1
                     sd["wrong"] += 1
-                    outcome = "caught" if who else "escaped"
+                    for uid in who:
+                        d = reviewer(uid); d["flags"] += 1; d["caught"] += 1; d["sources"].add(s.name)
+                    entry["outcome"] = "caught" if who else "escaped"
                     sd["caught" if who else "escaped"] += 1
-                    sd["wrong_fields"].append({"record": label, "field": row["field"], "extractor_value": row["extractor_value"], "final_value": row["final_value"],
-                                               "category": row["category"], "flagged_by": sorted(uname(u) for u in who), "system_flagged": (r.id, row["field"]) in sysflag, "outcome": outcome})
-                elif who:
-                    sd["false_alarms"] += 1
-                    sd["false_alarm_fields"].append({"record": label, "field": row["field"], "value": row["extractor_value"], "flagged_by": sorted(uname(u) for u in who)})
-                todo.append((s, r, row))
+                    sd["wrong_fields"].append(entry)
+                    todo.append((s, r, row, "incorrect"))
+                    continue
+                # the extractor's value stands: it matches, differs only in wording, or the admin said the extractor was right
+                if dec == "right":
+                    sd["admin_changes"] += 1
+                    entry["outcome"] = "admin_change"
+                    sd["wrong_fields"].append(entry)
+                for uid, earlier in who.items():
+                    d = reviewer(uid); d["flags"] += 1; d["sources"].add(s.name)
+                    if earlier is not _MISSING and not _same(earlier, cur):  # the reviewer flagged an earlier value that was fixed before the final check: a catch
+                        d["caught"] += 1
+                        sd["fixed"] += 1
+                        sd["fixed_fields"].append({"record": label, "field": field, "was": earlier, "now": cur, "flagged_by": uname(uid)})
+                    else:
+                        d["false_alarms"] += 1
+                        sd["false_alarms"] += 1
+                        sd["false_alarm_fields"].append({"record": label, "field": field, "value": cur, "flagged_by": [uname(uid)]})
+                todo.append((s, r, row, "correct"))
             sd["records"].append({"name": label, "matched_to": ak.record_name(fr) or label, "fields": len(rows), "wrong": rec_wrong})
-        sd.update({k: v for k, v in ak.rates(sd["fields"], sd["wrong"]).items() if k in ("error_pct", "accuracy_pct")})
-        sd["catch_rate"] = round(100 * sd["caught"] / sd["wrong"], 1) if sd["wrong"] else None
+        sd.update(_pcts(sd["fields"] - sd["pending"], sd["wrong"]))
+        sd["catch_rate"] = round(100 * (sd["caught"] + sd["fixed"]) / (sd["wrong"] + sd["fixed"]), 1) if (sd["wrong"] + sd["fixed"]) else None
         for uid in peers:
-            d = rev_tot.setdefault(uid, {"name": uname(uid), "flags": 0, "caught": 0, "false_alarms": 0, "errors_on_sources": 0, "sources": set()})
-            d["errors_on_sources"] += sd["wrong"]
+            d = reviewer(uid)
+            d["errors_on_sources"] += sd["wrong"] + sd["fixed"]
             d["sources"].add(s.name)
-        e = ext_tot.setdefault(s.assigned_extractor_id or "-", {"name": ex_name, "fields": 0, "wrong": 0, "sources": 0})
-        e["fields"] += sd["fields"]; e["wrong"] += sd["wrong"]; e["sources"] += 1
-        for k in ("fields", "wrong", "cosmetic", "caught", "escaped", "false_alarms", "reviewer_flags"):
+        e = ext_tot.setdefault(s.assigned_extractor_id or "-", {"name": ex_name, "fields": 0, "wrong": 0, "pending": 0, "admin_changes": 0, "fixed": 0, "sources": 0})
+        for k in ("fields", "wrong", "pending", "admin_changes", "fixed"):
+            e[k] += sd[k]
+        e["sources"] += 1
+        for k in ("fields", "wrong", "cosmetic", "caught", "escaped", "false_alarms", "fixed", "pending", "admin_changes", "reviewer_flags"):
             T[k] += sd[k]
         T["sources"] += 1
         T["records"] += len(pairs)
         out_sources.append(sd)
 
-    totals = {**T, **ak.rates(T["fields"], T["wrong"]), "catch_rate": round(100 * T["caught"] / T["wrong"], 1) if T["wrong"] else None}
-    extractors = sorted(({**{k: v for k, v in e.items()}, **ak.rates(e["fields"], e["wrong"])} for e in ext_tot.values()), key=lambda x: x["name"].lower())
+    totals = {**T, **_pcts(T["fields"] - T["pending"], T["wrong"]),
+              "catch_rate": round(100 * (T["caught"] + T["fixed"]) / (T["wrong"] + T["fixed"]), 1) if (T["wrong"] + T["fixed"]) else None}
+    extractors = sorted(({**e, **_pcts(e["fields"] - e["pending"], e["wrong"])} for e in ext_tot.values()), key=lambda x: x["name"].lower())
     reviewers = sorted(({"name": d["name"], "sources": len(d["sources"]), "flags": d["flags"], "caught": d["caught"], "false_alarms": d["false_alarms"],
                          "errors_on_their_sources": d["errors_on_sources"],
                          "catch_rate": round(100 * d["caught"] / d["errors_on_sources"], 1) if d["errors_on_sources"] else None,
@@ -1214,11 +1254,9 @@ async def answer_key(
               "unmatched_sources": unmatched_sources, "notes": notes, "ignored_fields": sorted(ignore_set)}
 
     if apply:
-        import json as _json
         written = already = 0
         skipped: list = []
-        for s, r, row in todo:
-            verdict = "correct" if row["verdict"] == "correct" else "incorrect"
+        for s, r, row, verdict in todo:
             fv = row["final_value"]
             truth = None
             if verdict == "incorrect":
@@ -1236,7 +1274,7 @@ async def answer_key(
                 db.rollback()
                 skipped.append({"source": s.name, "field": row["field"], "why": str(e.detail)})
         result["mode"] = "applied"
-        result["applied"] = {"written": written, "already_recorded": already, "skipped": skipped}
+        result["applied"] = {"written": written, "already_recorded": already, "held": held, "skipped": skipped}
     if export in ("xlsx", "json"):
         from fastapi.responses import Response
         from app.services import quality_export as qx

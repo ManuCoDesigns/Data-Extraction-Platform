@@ -491,18 +491,20 @@ export const qualityApi = {
   scan: (sourceId: string) => api.post(`/quality/sources/${sourceId}/scan`).then(r => r.data as { created: number; withdrawn?: number; records: number; sop_checked?: boolean }),
   sample: (sourceId: string, limit = 30) => api.get(`/quality/sources/${sourceId}/sample`, { params: { limit } }).then(r => r.data),
   audit: (body: { record_id: string; field: string; verdict: string; truth_value?: string; note?: string }) => api.post('/quality/audits', body).then(r => r.data),
-  answerKey: (file: File, o: { apply?: boolean; projectId?: string; sourceId?: string }) => {
+  answerKey: (file: File, o: { apply?: boolean; projectId?: string; sourceId?: string; decisions?: Record<string, string> }) => {
     const fd = new FormData()
     fd.append('file', file)
     fd.append('apply', o.apply ? 'true' : 'false')
+    if (o.decisions && Object.keys(o.decisions).length) fd.append('decisions', JSON.stringify(o.decisions))
     if (o.projectId) fd.append('project_id', o.projectId)
     if (o.sourceId) fd.append('source_id', o.sourceId)
     return api.post('/quality/answer-key', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 }).then(r => r.data)
   },
-  answerKeyDownload: async (file: File, o: { format: 'xlsx' | 'json'; apply?: boolean; projectId?: string; sourceId?: string }) => {
+  answerKeyDownload: async (file: File, o: { format: 'xlsx' | 'json'; apply?: boolean; projectId?: string; sourceId?: string; decisions?: Record<string, string> }) => {
     const fd = new FormData()
     fd.append('file', file)
     fd.append('apply', 'false')
+    if (o.decisions && Object.keys(o.decisions).length) fd.append('decisions', JSON.stringify(o.decisions))
     fd.append('export', o.format)
     if (o.projectId) fd.append('project_id', o.projectId)
     if (o.sourceId) fd.append('source_id', o.sourceId)

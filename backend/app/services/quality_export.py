@@ -319,6 +319,9 @@ def final_check_xlsx(res: dict, meta: dict) -> bytes:
         "Wording that differs only in case, spacing or punctuation counts as correct.",
         "Caught = a wrong field a reviewer had flagged. Got through = a wrong field nobody flagged. False alarm = a field a reviewer flagged that was right.",
         "Reviewer catch rate = wrong fields they flagged / all wrong fields on their sources. Precision = their flags that were really wrong.",
+        "To confirm = the final value differs and the admin has not decided yet. Held fields are not counted as errors and nothing is recorded for them.",
+        "Admin change = the admin decided the extractor was right and the final value is a change. Counted correct.",
+        "Fixed after review = a reviewer flagged an earlier value that the extractor then fixed. Counted as a reviewer catch, not as an error.",
         "Nothing was edited. The extractor's values are as they were delivered.",
         "",
         "Generated %s. %s" % (meta.get("generated", ""), "Verdicts were recorded as audits." if res.get("mode") == "applied" else "Check only: nothing was recorded."),
@@ -345,18 +348,20 @@ def final_check_xlsx(res: dict, meta: dict) -> bytes:
     T = res["totals"]
     sheet("Summary", ["Measure", "Value"], [
         ["Accuracy %", T["accuracy_pct"]], ["Error rate %", T["error_pct"]], ["Fields compared", T["fields"]], ["Wrong fields", T["wrong"]],
-        ["Caught by reviewers", T["caught"]], ["Got through", T["escaped"]], ["Reviewer catch rate %", T["catch_rate"]], ["False alarms", T["false_alarms"]],
+        ["Caught by reviewers", T["caught"]], ["Fixed after review (catches)", T.get("fixed", 0)], ["Got through", T["escaped"]], ["To confirm (held)", T.get("pending", 0)], ["Admin changes (extractor right)", T.get("admin_changes", 0)], ["Reviewer catch rate %", T["catch_rate"]], ["False alarms", T["false_alarms"]],
         ["Wording-only differences (counted correct)", T["cosmetic"]], ["Sources", T["sources"]], ["Records matched", T["records"]]], {"Measure": 44})
-    sheet("By source", ["Source", "Extractor", "Reviewers", "Fields", "Wrong", "Error %", "Accuracy %", "Caught", "Got through", "False alarms", "Catch rate %"],
-          [[s["name"], s["extractor"], ", ".join(s["reviewers"]), s["fields"], s["wrong"], s["error_pct"], s["accuracy_pct"], s["caught"], s["escaped"], s["false_alarms"], s["catch_rate"]] for s in res["sources"]],
+    sheet("By source", ["Source", "Extractor", "Reviewers", "Fields", "Wrong", "To confirm", "Error %", "Accuracy %", "Caught", "Fixed after review", "Got through", "False alarms", "Catch rate %"],
+          [[s["name"], s["extractor"], ", ".join(s["reviewers"]), s["fields"], s["wrong"], s.get("pending", 0), s["error_pct"], s["accuracy_pct"], s["caught"], s.get("fixed", 0), s["escaped"], s["false_alarms"], s["catch_rate"]] for s in res["sources"]],
           {"Source": 36, "Reviewers": 30})
     sheet("Wrong fields", ["Source", "Extractor", "Record", "Field", "Extractor delivered", "Final value", "Kind", "Flagged by", "System check flagged", "Result"],
           [[s["name"], s["extractor"], w["record"], w["field"], w["extractor_value"], w["final_value"], w["category"], ", ".join(w["flagged_by"]), "yes" if w["system_flagged"] else "",
-            "Caught" if w["outcome"] == "caught" else "Got through"] for s in res["sources"] for w in s["wrong_fields"]],
+            {"caught": "Caught", "escaped": "Got through", "to_confirm": "To confirm", "admin_change": "Admin change"}.get(w["outcome"], w["outcome"])] for s in res["sources"] for w in s["wrong_fields"]],
           {"Source": 30, "Extractor delivered": 44, "Final value": 44, "Field": 26})
+    sheet("Fixed after review", ["Source", "Record", "Field", "Flagged value", "Now", "Flagged by"],
+          [[s["name"], f["record"], f["field"], f["was"], f["now"], f["flagged_by"]] for s in res["sources"] for f in s.get("fixed_fields", [])], {"Source": 30, "Flagged value": 40, "Now": 40})
     sheet("False alarms", ["Source", "Record", "Field", "Value", "Flagged by"],
           [[s["name"], f["record"], f["field"], f["value"], ", ".join(f["flagged_by"])] for s in res["sources"] for f in s["false_alarm_fields"]], {"Source": 30, "Value": 44})
-    sheet("Extractors", ["Extractor", "Sources", "Fields", "Wrong", "Error %", "Accuracy %"], [[e["name"], e["sources"], e["fields"], e["wrong"], e["error_pct"], e["accuracy_pct"]] for e in res["extractors"]], {"Extractor": 28})
+    sheet("Extractors", ["Extractor", "Sources", "Fields", "Wrong", "To confirm", "Error %", "Accuracy %"], [[e["name"], e["sources"], e["fields"], e["wrong"], e.get("pending", 0), e["error_pct"], e["accuracy_pct"]] for e in res["extractors"]], {"Extractor": 28})
     sheet("Reviewers", ["Reviewer", "Sources", "Flags", "Caught", "False alarms", "Wrong fields on their sources", "Catch rate %", "Precision %"],
           [[r["name"], r["sources"], r["flags"], r["caught"], r["false_alarms"], r["errors_on_their_sources"], r["catch_rate"], r["precision"]] for r in res["reviewers"]], {"Reviewer": 28})
     rows = [[s["name"], "Final record with no match", ", ".join(s["key_records_unmatched"])] for s in res["sources"] if s["key_records_unmatched"]]
