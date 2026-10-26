@@ -64,7 +64,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             <Tile label="Accuracy" value={pc(t.accuracy_pct)} tone={accTone(t.accuracy_pct)} hint={`${t.fields - t.wrong} of ${t.fields} fields match the final records`} />
             <Tile label="Error rate" value={pc(t.error_pct)} tone={t.wrong ? 'red' : 'green'} hint={`${t.wrong} wrong of ${t.fields} fields compared`} />
-            <Tile label="Reviewer catch rate" value={pc(t.catch_rate)} tone={accTone(t.catch_rate)} hint={t.reviewer_flags === 0 ? 'No field-level reviewer flags were found, so nothing counts as caught. Reviewers may have commented on the whole source only.' : `${t.caught} caught, ${t.escaped} got through`} />
+            <Tile label="Reviewer catch rate" value={t.reviewer_flags === 0 ? '–' : pc(t.catch_rate)} tone={t.reviewer_flags === 0 ? 'gray' : accTone(t.catch_rate)} hint={t.reviewer_flags === 0 ? 'No field-level reviewer flags were found, so nothing counts as caught. Reviewers may have commented on the whole source only.' : `${t.caught} caught, ${t.escaped} got through`} />
             <Tile label="False alarms" value={t.false_alarms} tone={t.false_alarms ? 'amber' : 'green'} hint="Fields a reviewer flagged that were right" />
             <Tile label="Sources" value={t.sources} hint={`${t.records} records matched`} />
             <Tile label="Wording only" value={t.cosmetic} hint="Different case or spacing, counted as correct" />
@@ -140,9 +140,9 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
               <table className="w-full text-sm border-collapse">
                 <thead><tr className="text-left text-[11px] text-gray-500 border-b border-gray-100">{['Reviewer', 'Flags', 'Caught', 'False alarms', 'Catch rate', 'Precision'].map(h => <th key={h} className="px-3 py-2 font-semibold">{h}</th>)}</tr></thead>
                 <tbody>{res.reviewers.map((r: any) => (
-                  <tr key={r.name} className="border-b border-gray-50"><td className="px-3 py-2 font-semibold text-gray-900">{r.name}</td><td className="px-3 py-2 tabular-nums">{r.flags}</td><td className="px-3 py-2 tabular-nums">{r.caught}</td><td className="px-3 py-2 tabular-nums">{r.false_alarms}</td><td className="px-3 py-2"><Chip tone={accTone(r.catch_rate)}>{pc(r.catch_rate)}</Chip></td><td className="px-3 py-2 tabular-nums">{pc(r.precision)}</td></tr>))}</tbody>
+                  <tr key={r.name} className="border-b border-gray-50"><td className="px-3 py-2 font-semibold text-gray-900">{r.name}</td><td className="px-3 py-2 tabular-nums">{r.flags}</td><td className="px-3 py-2 tabular-nums">{r.caught}</td><td className="px-3 py-2 tabular-nums">{r.false_alarms}</td><td className="px-3 py-2">{r.flags === 0 ? <Chip tone="gray" title="This reviewer raised no field-level flag, so there is nothing to score">No flags</Chip> : <Chip tone={accTone(r.catch_rate)}>{pc(r.catch_rate)}</Chip>}</td><td className="px-3 py-2 tabular-nums">{pc(r.precision)}</td></tr>))}</tbody>
               </table>
-              <p className="m-0 px-3 py-2 text-[11px] text-gray-500">Catch rate: errors they flagged out of all wrong fields on their sources. Precision: their flags that were really wrong.</p>
+              <p className="m-0 px-3 py-2 text-[11px] text-gray-500">Catch rate: errors they flagged out of all wrong fields on their sources. Precision: their flags that were really wrong. "No flags" means they raised nothing on a specific field, so the rate is not scored.</p>
             </Panel>
           </div>
 
