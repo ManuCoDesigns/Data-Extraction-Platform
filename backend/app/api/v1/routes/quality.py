@@ -1136,7 +1136,7 @@ async def answer_key(
     rev_tot: dict = {}
     todo: list = []  # (source, record, row, verdict to record)
     held = 0
-    T = {"fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "fixed": 0, "pending": 0, "admin_changes": 0, "reviewer_flags": 0, "sources": 0, "records": 0}
+    T = {"fields": 0, "correct": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "fixed": 0, "pending": 0, "admin_changes": 0, "not_fixed": 0, "unmatched_fields": 0, "sop_failures": 0, "reviewer_flags": 0, "sources": 0, "records": 0}
 
     def reviewer(uid):
         return rev_tot.setdefault(uid, {"name": uname(uid), "flags": 0, "caught": 0, "false_alarms": 0, "errors_on_sources": 0, "sources": set()})
@@ -1173,9 +1173,17 @@ async def answer_key(
                             flags.setdefault((r.id, field), {}).setdefault(u.id, _earlier_value(r, s, u.id, field))
 
         ex_name = uname(s.assigned_extractor_id) if s.assigned_extractor_id else "Unassigned"
+        audits = {(x.record_id, x.field): x for x in db.query(FieldAudit).filter(FieldAudit.source_id == s.id).all()}
+        try:
+            req = _sop_for(s)
+        except Exception:
+            req = {"known": False, "required": [], "allowed": None, "specs": {}, "blocks": {}}
+        sop_on = bool(req.get("known") and req.get("required"))
+        required_set = set(req.get("required") or []) if sop_on else set()
         sd = {"source_id": s.id, "name": s.name, "extractor": ex_name, "reviewers": sorted(uname(u) for u in peers),
-              "fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "fixed": 0, "pending": 0, "admin_changes": 0, "reviewer_flags": len(flags),
-              "wrong_fields": [], "false_alarm_fields": [], "fixed_fields": [], "records": [],
+              "fields": 0, "correct": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "fixed": 0, "pending": 0, "admin_changes": 0, "not_fixed": 0,
+              "unmatched_fields": 0, "sop_failures": 0, "reviewer_flags": len(flags),
+              "wrong_fields": [], "false_alarm_fields": [], "fixed_fields": [], "records": [], "unmatched_scored": [], "sop_failure_list": [],
               "key_records_unmatched": [ak.record_name(final_recs[i]) or f"record {i + 1}" for i in miss_final],
               "extractor_records_unmatched": [ak.record_name(recs[j].extracted_fields or {}, recs[j].canonical_name) or f"record {j + 1}" for j in miss_ext]}
         for i, j in pairs:
@@ -1183,36 +1191,72 @@ async def answer_key(
             label = ak.record_name(r.extracted_fields or {}, r.canonical_name) or f"record {j + 1}"
             rows = ak.compare(r.extracted_fields or {}, fr, ignore_set)
             rec_wrong = 0
+            if sop_on:   # the SOP applies to the final record, and is reported apart from extractor errors
+                try:
+                    sc = q.sop_check(fr, req["required"], req["allowed"], req.get("specs"), req.get("blocks"))
+                    for f_ in sc["missing"]:
+                        sd["sop_failure_list"].append({"record": label, "field": f_, "rule": "SOP rule", "why": "A required field is empty in the final record"})
+                    for f_ in sc.get("extra") or []:
+                        sd["sop_failure_list"].append({"record": label, "field": f_, "rule": "Schema", "why": "This field is not allowed by the SOP"})
+                    for x in sc["bad"]:
+                        if not x.get("case_only"):
+                            sd["sop_failure_list"].append({"record": label, "field": x["field"], "rule": "SOP rule", "why": (f"Allowed: {', '.join(x['allowed'])}. Has: {x['value']}" if x.get("allowed") else f"{x['value']}: {x.get('reason')}")})
+                except Exception:
+                    pass
             for row in rows:
                 field = row["field"]
                 who = flags.get((r.id, field), {})
                 cur = (r.extracted_fields or {}).get(field)
+                key = f"{r.id}|{field}"
+                aud = audits.get((r.id, field))
+                aud_ok = bool(aud and _same(aud.extracted_value, cur))      # the verdict still describes the value that is there now
                 sd["fields"] += 1
                 sd["cosmetic"] += 1 if row["cosmetic"] else 0
-                dec = None
+                cls, why, not_fixed = "correct", "", False
                 if row["verdict"] == "wrong":
-                    dec = decs.get(f"{r.id}|{field}", "pending")
-                    entry = {"key": f"{r.id}|{field}", "record": label, "field": field, "extractor_value": row["extractor_value"], "final_value": row["final_value"], "category": row["category"],
-                             "decision": dec, "flagged_by": sorted(uname(u) for u in who), "system_flagged": (r.id, field) in sysflag}
-                    if dec == "pending":
+                    kind_removed, kind_added = ak.empty(row["final_value"]), ak.empty(row["extractor_value"])
+                    forced = decs.get(key)
+                    if forced:
+                        cls, why = ("error" if forced == "wrong" else "admin"), "Decided by you in the Final check"
+                    elif aud_ok and aud.verdict == "incorrect":
+                        cls, why = "error", "You marked the delivered value wrong in review"
+                    elif aud_ok and aud.verdict == "correct":
+                        cls, why = "admin", "You marked the delivered value correct in review, so the final value is your change"
+                    elif kind_removed and not who and (r.id, field) not in sysflag:
+                        cls, why = "admin", "Removed by the admin with no reason recorded and nobody flagged it"
+                    elif kind_added and field in required_set:
+                        cls, why = "error", "A required field the extractor left empty"
+                    elif kind_added and not who:
+                        cls, why = "admin", "An optional field the admin added"
+                    else:
+                        cls, why = "held", "The value differs and no verdict is recorded. Decide it, or record a verdict in Check against source"
+                elif aud_ok and aud.verdict == "incorrect":
+                    cls, why, not_fixed = "error", "You marked it wrong in review and the final value is still the delivered value (not fixed)", True
+                if cls == "correct":
+                    sd["correct"] += 1
+                else:
+                    entry = {"key": key, "record": label, "field": field, "extractor_value": row["extractor_value"], "final_value": row["final_value"], "category": row["category"] or "wrong_value",
+                             "decision": decs.get(key) or ("pending" if cls == "held" else None), "class": {"error": "extractor_error", "admin": "admin_change", "held": "held"}[cls], "reason": why,
+                             "not_fixed": not_fixed, "flagged_by": sorted(uname(u) for u in who), "system_flagged": (r.id, field) in sysflag}
+                    if cls == "held":
                         sd["pending"] += 1
                         entry["outcome"] = "to_confirm"
                         sd["wrong_fields"].append(entry)
                         held += 1
-                        continue  # a doubt: not counted, nothing recorded, until the admin decides
-                if dec == "wrong":
-                    rec_wrong += 1
-                    sd["wrong"] += 1
-                    for uid in who:
-                        d = reviewer(uid); d["flags"] += 1; d["caught"] += 1; d["sources"].add(s.name)
-                    entry["outcome"] = "caught" if who else "escaped"
-                    sd["caught" if who else "escaped"] += 1
-                    sd["wrong_fields"].append(entry)
-                    todo.append((s, r, row, "incorrect"))
-                    continue
-                # the extractor's value stands: it matches, differs only in wording, or the admin said the extractor was right
-                if dec == "right":
-                    sd["admin_changes"] += 1
+                        continue  # a doubt: nothing is recorded until the admin decides
+                    if cls == "error":
+                        rec_wrong += 1
+                        sd["wrong"] += 1
+                        sd["not_fixed"] += 1 if not_fixed else 0
+                        for uid in who:
+                            d = reviewer(uid); d["flags"] += 1; d["caught"] += 1; d["sources"].add(s.name)
+                        entry["outcome"] = "caught" if who else "escaped"
+                        sd["caught" if who else "escaped"] += 1
+                        sd["wrong_fields"].append(entry)
+                        if not not_fixed:
+                            todo.append((s, r, row, "incorrect"))
+                        continue
+                    sd["admin_changes"] += 1       # the extractor's value stands and the admin changed it
                     entry["outcome"] = "admin_change"
                     sd["wrong_fields"].append(entry)
                 for uid, earlier in who.items():
@@ -1227,27 +1271,44 @@ async def answer_key(
                         sd["false_alarm_fields"].append({"record": label, "field": field, "value": cur, "flagged_by": [uname(uid)]})
                 todo.append((s, r, row, "correct"))
             sd["records"].append({"name": label, "matched_to": ak.record_name(fr) or label, "fields": len(rows), "wrong": rec_wrong})
-        sd.update(_pcts(sd["fields"] - sd["pending"], sd["wrong"]))
+        # a delivered record with no final record is the wrong entity or the wrong source: every one of its fields is scored as wrong (you can overrule it)
+        for j in miss_ext:
+            r = recs[j]
+            names_ = [k for k, v in (r.extracted_fields or {}).items() if k not in ignore_set and not ak.empty(v)]
+            if not names_:
+                continue
+            label = ak.record_name(r.extracted_fields or {}, r.canonical_name) or f"record {j + 1}"
+            ok_ = decs.get(f"rec|{r.id}") == "right"
+            sd["fields"] += len(names_)
+            sd["unmatched_fields"] += len(names_)
+            sd["admin_changes" if ok_ else "wrong"] += len(names_)
+            sd["unmatched_scored"].append({"key": f"rec|{r.id}", "record": label, "fields": len(names_), "decision": "right" if ok_ else "wrong",
+                                           "replaced_by": [ak.record_name(final_recs[i]) or f"record {i + 1}" for i in miss_final]})
+            if not ok_:
+                for f_ in names_:
+                    todo.append((s, r, {"field": f_, "final_value": None, "category": "unsupported_value"}, "incorrect"))
+        sd["sop_failures"] = len(sd["sop_failure_list"])
+        sd.update(_pcts(sd["fields"], sd["wrong"]))
         sd["catch_rate"] = round(100 * (sd["caught"] + sd["fixed"]) / (sd["wrong"] + sd["fixed"]), 1) if (sd["wrong"] + sd["fixed"]) else None
         for uid in peers:
             d = reviewer(uid)
             d["errors_on_sources"] += sd["wrong"] + sd["fixed"]
             d["sources"].add(s.name)
-        e = ext_tot.setdefault(s.assigned_extractor_id or "-", {"name": ex_name, "fields": 0, "wrong": 0, "pending": 0, "admin_changes": 0, "fixed": 0, "sources": 0})
-        for k in ("fields", "wrong", "pending", "admin_changes", "fixed"):
+        e = ext_tot.setdefault(s.assigned_extractor_id or "-", {"name": ex_name, "fields": 0, "correct": 0, "wrong": 0, "pending": 0, "admin_changes": 0, "fixed": 0, "not_fixed": 0, "sop_failures": 0, "sources": 0})
+        for k in ("fields", "correct", "wrong", "pending", "admin_changes", "fixed", "not_fixed", "sop_failures"):
             e[k] += sd[k]
         e["sources"] += 1
-        for k in ("fields", "wrong", "cosmetic", "caught", "escaped", "false_alarms", "fixed", "pending", "admin_changes", "reviewer_flags"):
+        for k in ("fields", "correct", "wrong", "cosmetic", "caught", "escaped", "false_alarms", "fixed", "pending", "admin_changes", "not_fixed", "unmatched_fields", "sop_failures", "reviewer_flags"):
             T[k] += sd[k]
         T["sources"] += 1
         T["records"] += len(pairs)
         out_sources.append(sd)
 
-    totals = {**T, **_pcts(T["fields"] - T["pending"], T["wrong"]),
+    totals = {**T, **_pcts(T["fields"], T["wrong"]),
               "catch_rate": round(100 * (T["caught"] + T["fixed"]) / (T["wrong"] + T["fixed"]), 1) if (T["wrong"] + T["fixed"]) else None}
-    extractors = sorted(({**e, **_pcts(e["fields"] - e["pending"], e["wrong"])} for e in ext_tot.values()), key=lambda x: x["name"].lower())
+    extractors = sorted(({**e, **_pcts(e["fields"], e["wrong"])} for e in ext_tot.values()), key=lambda x: x["name"].lower())
     reviewers = sorted(({"name": d["name"], "sources": len(d["sources"]), "flags": d["flags"], "caught": d["caught"], "false_alarms": d["false_alarms"],
-                         "errors_on_their_sources": d["errors_on_sources"],
+                         "errors_on_their_sources": d["errors_on_sources"], "missed": max(0, d["errors_on_sources"] - d["caught"]),
                          "catch_rate": round(100 * d["caught"] / d["errors_on_sources"], 1) if d["errors_on_sources"] else None,
                          "precision": round(100 * d["caught"] / d["flags"], 1) if d["flags"] else None} for d in rev_tot.values()), key=lambda x: x["name"].lower())
     result = {"mode": "preview", "totals": totals, "sources": sorted(out_sources, key=lambda x: x["name"].lower()), "extractors": extractors, "reviewers": reviewers,
@@ -1261,6 +1322,8 @@ async def answer_key(
             truth = None
             if verdict == "incorrect":
                 truth = "(should not be there)" if ak.empty(fv) else (fv if isinstance(fv, str) else _json.dumps(fv, ensure_ascii=False))
+            if verdict == "correct" and row["field"] not in (r.extracted_fields or {}):
+                continue           # nothing delivered on this field, so there is nothing to mark correct
             a = db.query(FieldAudit).filter(FieldAudit.record_id == r.id, FieldAudit.field == row["field"]).first()
             if a and a.verdict == verdict and _same(a.extracted_value, (r.extracted_fields or {}).get(row["field"])) and (verdict == "correct" or _same(a.truth_value, truth)):
                 already += 1
