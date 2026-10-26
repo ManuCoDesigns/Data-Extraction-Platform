@@ -9,7 +9,17 @@ interface Person { user_id: string; name: string; email: string; role: string }
  * Re-extraction round. Pick who takes part, press Shuffle, look at the plan, apply.
  * Every source gets a new extractor and a new reviewer. Nobody gets a source they worked on before, and everyone ends up with the same load.
  */
-export function RedoModal({ ids, names, onClose, onDone }: { ids: string[]; names: Record<string, string>; onClose: () => void; onDone: () => void }) {
+export interface RedoSource { id: string; name: string; status: string; extractor?: string }
+
+export function RedoModal({ ids, names, sources, onClose, onDone }: { ids: string[]; names: Record<string, string>; sources?: RedoSource[]; onClose: () => void; onDone: () => void }) {
+  const list: RedoSource[] = useMemo(() => sources ?? ids.map(i => ({ id: i, name: names[i] ?? 'A source', status: '' })), [sources, ids, names])
+  const [chosen, setChosen] = useState<Set<string>>(new Set(ids.length ? ids : list.map(s => s.id)))
+  const [q, setQ] = useState('')
+  const [stat, setStat] = useState('')
+  const shown = useMemo(() => list.filter(s => (!stat || s.status === stat) && (s.name + ' ' + (s.extractor ?? '')).toLowerCase().includes(q.toLowerCase())), [list, stat, q])
+  const stats = useMemo(() => { const m: Record<string, number> = {}; list.forEach(s => { if (s.status) m[s.status] = (m[s.status] ?? 0) + 1 }); return m }, [list])
+  const setMany = (xs: RedoSource[], on: boolean) => { setPlan(null); setChosen(c => { const n = new Set(c); xs.forEach(x => (on ? n.add(x.id) : n.delete(x.id))); return n }) }
+  const pick = [...chosen]
   const [people, setPeople] = useState<Person[]>([])
   const [pool, setPool] = useState<Set<string>>(new Set())
   const [startOver, setStartOver] = useState(true)
@@ -33,7 +43,7 @@ export function RedoModal({ ids, names, onClose, onDone }: { ids: string[]; name
   const toggle = (id: string) => { setPlan(null); setPool(s => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n }) }
   const shuffle = async () => {
     setBusy('plan')
-    try { setPlan(await enhApi.redoPlan({ source_ids: ids, extractor_ids: [...pool] })) }
+    try { setPlan(await enhApi.redoPlan({ source_ids: pick, extractor_ids: [...pool] })) }
     catch (e: any) { toast.error(e?.response?.data?.detail || "Couldn't make a plan") } finally { setBusy('') }
   }
   const apply = async () => {
@@ -59,7 +69,7 @@ export function RedoModal({ ids, names, onClose, onDone }: { ids: string[]; name
         <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-gray-100">
           <div>
             <h3 className="text-lg font-semibold text-gray-900 m-0 flex items-center gap-2"><Shuffle className="w-5 h-5 text-brand-600" /> Re-extract and shuffle</h3>
-            <p className="text-sm text-gray-500 m-0 mt-0.5">{ids.length} source{ids.length === 1 ? '' : 's'} selected. Each gets a new extractor and a new reviewer. Nobody gets a source they worked on before.</p>
+            <p className="text-sm text-gray-500 m-0 mt-0.5">{chosen.size} of {list.length} source{list.length === 1 ? '' : 's'} chosen. Each gets a new extractor and a new reviewer. Nobody gets a source they worked on before.</p>
           </div>
           <button onClick={onClose} aria-label="Close" className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X className="w-4 h-4" /></button>
         </div>
@@ -79,6 +89,38 @@ export function RedoModal({ ids, names, onClose, onDone }: { ids: string[]; name
             </div>
           ) : (
             <>
+              <section aria-label="Which sources">
+                <div className="flex items-center gap-2 flex-wrap mb-2">
+                  <p className="text-sm font-semibold text-gray-900 m-0 mr-1">Which sources</p>
+                  <button type="button" onClick={() => setStat('')} aria-pressed={!stat} className={cn('text-xs font-semibold rounded-lg border px-2.5 py-1', !stat ? 'bg-brand-600 border-brand-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50')}>All {list.length}</button>
+                  {Object.entries(stats).map(([k, n]) => (
+                    <button key={k} type="button" onClick={() => setStat(stat === k ? '' : k)} aria-pressed={stat === k}
+                      className={cn('text-xs font-semibold rounded-lg border px-2.5 py-1 capitalize', stat === k ? 'bg-brand-600 border-brand-600 text-white' : 'border-gray-200 text-gray-600 hover:bg-gray-50')}>{st(k)} {n}</button>
+                  ))}
+                  <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search" aria-label="Search sources" className="ml-auto text-sm border border-gray-200 rounded-lg px-2.5 py-1 w-40 focus:outline-none focus:ring-2 focus:ring-brand-200" />
+                </div>
+                <div className="flex items-center gap-3 text-xs mb-1.5">
+                  <button type="button" className="font-semibold text-brand-700 hover:underline" onClick={() => setMany(shown, true)}>Tick all {shown.length} shown</button>
+                  <button type="button" className="font-semibold text-gray-600 hover:underline" onClick={() => setMany(shown, false)}>Untick shown</button>
+                  <button type="button" className="font-semibold text-gray-600 hover:underline" onClick={() => { setPlan(null); setChosen(new Set()) }}>Clear all</button>
+                </div>
+                <ul className="m-0 p-1 list-none max-h-44 overflow-y-auto rounded-xl border border-gray-100 grid sm:grid-cols-2 gap-x-2">
+                  {shown.length === 0 && <li className="px-3 py-4 text-sm text-gray-400 col-span-2">No sources match.</li>}
+                  {shown.map(s => {
+                    const on = chosen.has(s.id)
+                    return (
+                      <li key={s.id}>
+                        <button type="button" role="checkbox" aria-checked={on} onClick={() => setMany([s], !on)} className={cn('w-full flex items-center gap-2 px-2 py-1.5 rounded-lg text-left text-sm', on ? 'bg-brand-50' : 'hover:bg-gray-50')}>
+                          <span className={cn('w-4 h-4 rounded border flex items-center justify-center shrink-0', on ? 'bg-brand-600 border-brand-600 text-white' : 'border-gray-300')}>{on && <Check className="w-3 h-3" />}</span>
+                          <span className="truncate flex-1 text-gray-900">{s.name}</span>
+                          <span className="text-[11px] text-gray-400 truncate max-w-[40%]">{s.extractor ?? ''}</span>
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </section>
+
               <section aria-label="Who takes part">
                 <p className="text-sm font-semibold text-gray-900 m-0 mb-2">Who takes part</p>
                 <div className="flex flex-wrap gap-2">
@@ -101,7 +143,7 @@ export function RedoModal({ ids, names, onClose, onDone }: { ids: string[]; name
                   <span><b>Start over.</b> Reset each source to Not started and clear its earlier records, so the new extractor begins fresh. A copy of the old records stays in the audit trail. Untick to only change who is assigned.</span>
                 </label>
                 <div className="mt-3 flex items-center gap-2">
-                  <Button onClick={shuffle} loading={busy === 'plan'} disabled={pool.size < 2}>{plan ? 'Shuffle again' : 'Shuffle'}</Button>
+                  <Button onClick={shuffle} loading={busy === 'plan'} disabled={pool.size < 2 || chosen.size === 0}>{plan ? 'Shuffle again' : `Shuffle ${chosen.size} source${chosen.size === 1 ? '' : 's'}`}</Button>
                   {pool.size < 2 && <span className="text-xs text-amber-700">Pick at least two people, so the extractor and reviewer differ.</span>}
                 </div>
               </section>

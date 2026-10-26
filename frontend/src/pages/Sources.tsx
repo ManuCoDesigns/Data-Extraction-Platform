@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   Plus, Globe, Database, LayoutGrid, Table as TableIcon,
-  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2, Zap, ListChecks, LayoutPanelLeft
+  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2, Zap, ListChecks, LayoutPanelLeft, Shuffle
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, xtriumApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -11,6 +11,7 @@ import { useAuthStore } from '@/store/auth'
 import { useCapability } from '@/lib/permissions'
 import { MyQueue } from '@/components/MyQueue'
 import { SourcesWorkbench } from '@/components/SourcesWorkbench'
+import { RedoModal } from '@/components/enh/RedoModal'
 import { enhApi } from '@/api/client'
 import { saveNav } from '@/lib/sourceNav'
 import { isPeerOf } from '@/lib/peers'
@@ -117,6 +118,7 @@ export function SourcesPage() {
 
   // ── Xtrium Catalog IQ pull ────────────────────────────────────────────────
   const [showXtriumPull, setShowXtriumPull] = useState(false)
+  const [showRedo, setShowRedo] = useState(false)
   const [xtriumProjectId, setXtriumProjectId] = useState(projectId ?? '')
   const [xtriumBatchSize, setXtriumBatchSize] = useState(25)
   const [pullingXtrium, setPullingXtrium] = useState(false)
@@ -275,6 +277,9 @@ export function SourcesPage() {
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
+            <Button variant="secondary" onClick={() => setShowRedo(true)} title="Give sources a new extractor and reviewer, shuffled evenly across the team">
+              <Shuffle className="w-4 h-4" /> Re-extract
+            </Button>
             <Button variant="secondary" onClick={() => {
                 setXtriumProjectId(projectId ?? '')
                 setXtriumBatchSize(25)
@@ -599,6 +604,9 @@ export function SourcesPage() {
           </div>
         </form>
       </Modal>
+
+      {showRedo && <RedoModal ids={[]} names={{}} onClose={() => setShowRedo(false)} onDone={load}
+        sources={filtered.map(s => ({ id: s.id, name: s.name, status: s.status, extractor: s.assigned_extractor_name }))} />}
 
       {/* Pull from Xtrium modal */}
       <Modal open={showXtriumPull} onClose={() => !pullingXtrium && setShowXtriumPull(false)} title="Pull from Xtrium Catalog IQ"
