@@ -1080,9 +1080,14 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
 
 # ─── Final records checked against the extractor and the reviewers ─────────────────
 
+def _json_dumps(o) -> bytes:
+    import json as _j
+    return _j.dumps(o, ensure_ascii=False, indent=2, default=str).encode("utf-8")
+
+
 @router.post("/answer-key")
 async def answer_key(
-    file: UploadFile = File(...), apply: bool = Form(False), project_id: str = Form(""), source_id: str = Form(""), ignore: str = Form("retrieved_at"),
+    file: UploadFile = File(...), apply: bool = Form(False), project_id: str = Form(""), source_id: str = Form(""), ignore: str = Form("retrieved_at"), export: str = Form(""),
     db: Session = Depends(get_db), user: User = Depends(get_current_user),
 ):
     """The admin's final records against what the extractor delivered and what the reviewers flagged: error %, accuracy %, catches and false alarms.
@@ -1118,7 +1123,7 @@ async def answer_key(
     ext_tot: dict = {}
     rev_tot: dict = {}
     todo: list = []  # (record, row) pairs to write as audits
-    T = {"fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "sources": 0, "records": 0}
+    T = {"fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "reviewer_flags": 0, "sources": 0, "records": 0}
 
     for name, final_recs in key.items():
         cands = by_norm.get(ak.norm(name), [])
@@ -1153,7 +1158,7 @@ async def answer_key(
 
         ex_name = uname(s.assigned_extractor_id) if s.assigned_extractor_id else "Unassigned"
         sd = {"source_id": s.id, "name": s.name, "extractor": ex_name, "reviewers": sorted(uname(u) for u in peers),
-              "fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "wrong_fields": [], "false_alarm_fields": [], "records": [],
+              "fields": 0, "wrong": 0, "cosmetic": 0, "caught": 0, "escaped": 0, "false_alarms": 0, "reviewer_flags": len(flags), "wrong_fields": [], "false_alarm_fields": [], "records": [],
               "key_records_unmatched": [ak.record_name(final_recs[i]) or f"record {i + 1}" for i in miss_final],
               "extractor_records_unmatched": [ak.record_name(recs[j].extracted_fields or {}, recs[j].canonical_name) or f"record {j + 1}" for j in miss_ext]}
         for i, j in pairs:
@@ -1193,7 +1198,7 @@ async def answer_key(
             d["sources"].add(s.name)
         e = ext_tot.setdefault(s.assigned_extractor_id or "-", {"name": ex_name, "fields": 0, "wrong": 0, "sources": 0})
         e["fields"] += sd["fields"]; e["wrong"] += sd["wrong"]; e["sources"] += 1
-        for k in ("fields", "wrong", "cosmetic", "caught", "escaped", "false_alarms"):
+        for k in ("fields", "wrong", "cosmetic", "caught", "escaped", "false_alarms", "reviewer_flags"):
             T[k] += sd[k]
         T["sources"] += 1
         T["records"] += len(pairs)
@@ -1232,6 +1237,14 @@ async def answer_key(
                 skipped.append({"source": s.name, "field": row["field"], "why": str(e.detail)})
         result["mode"] = "applied"
         result["applied"] = {"written": written, "already_recorded": already, "skipped": skipped}
+    if export in ("xlsx", "json"):
+        from fastapi.responses import Response
+        from app.services import quality_export as qx
+        stamp = enh.now_utc().strftime("%Y%m%d")
+        if export == "json":
+            return Response(content=_json_dumps(result), media_type="application/json", headers={"Content-Disposition": f'attachment; filename="final_check_{stamp}.json"'})
+        return Response(content=qx.final_check_xlsx(result, {"generated": stamp}), media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f'attachment; filename="final_check_{stamp}.xlsx"'})
     return result
 
 

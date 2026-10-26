@@ -304,3 +304,65 @@ def process_workbook(sc: dict, meta: dict) -> bytes:
     bio = io.BytesIO()
     wb.save(bio)
     return bio.getvalue()
+
+
+def final_check_xlsx(res: dict, meta: dict) -> bytes:
+    """The final-records check: summary, per source, every wrong field with who flagged it, false alarms, extractors and reviewers."""
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Read me"
+    for i, line in enumerate([
+        "Final records checked against what the extractor delivered and what the reviewers flagged.",
+        "",
+        "Error % = wrong fields / fields compared x 100. Accuracy % = 100 - error %.",
+        "A field is compared when either side has a value. Timestamps (%s) are not compared." % (", ".join(res.get("ignored_fields") or []) or "none"),
+        "Wording that differs only in case, spacing or punctuation counts as correct.",
+        "Caught = a wrong field a reviewer had flagged. Got through = a wrong field nobody flagged. False alarm = a field a reviewer flagged that was right.",
+        "Reviewer catch rate = wrong fields they flagged / all wrong fields on their sources. Precision = their flags that were really wrong.",
+        "Nothing was edited. The extractor's values are as they were delivered.",
+        "",
+        "Generated %s. %s" % (meta.get("generated", ""), "Verdicts were recorded as audits." if res.get("mode") == "applied" else "Check only: nothing was recorded."),
+    ], 1):
+        ws.cell(i, 1, line)
+    ws.column_dimensions["A"].width = 120
+    head = PatternFill("solid", fgColor="1F2937")
+
+    def sheet(title, cols, rows, widths=None):
+        w = wb.create_sheet(title)
+        w.append(cols)
+        for c in w[1]:
+            c.font, c.fill = Font(bold=True, color="FFFFFF"), head
+        for r in rows:
+            w.append([_cell(v) for v in r])
+        w.freeze_panes = "A2"
+        for i, c in enumerate(cols, 1):
+            w.column_dimensions[get_column_letter(i)].width = (widths or {}).get(c, max(12, min(48, len(c) + 4)))
+        for row in w.iter_rows(min_row=2):
+            for c in row:
+                c.alignment = Alignment(wrap_text=True, vertical="top")
+        return w
+
+    T = res["totals"]
+    sheet("Summary", ["Measure", "Value"], [
+        ["Accuracy %", T["accuracy_pct"]], ["Error rate %", T["error_pct"]], ["Fields compared", T["fields"]], ["Wrong fields", T["wrong"]],
+        ["Caught by reviewers", T["caught"]], ["Got through", T["escaped"]], ["Reviewer catch rate %", T["catch_rate"]], ["False alarms", T["false_alarms"]],
+        ["Wording-only differences (counted correct)", T["cosmetic"]], ["Sources", T["sources"]], ["Records matched", T["records"]]], {"Measure": 44})
+    sheet("By source", ["Source", "Extractor", "Reviewers", "Fields", "Wrong", "Error %", "Accuracy %", "Caught", "Got through", "False alarms", "Catch rate %"],
+          [[s["name"], s["extractor"], ", ".join(s["reviewers"]), s["fields"], s["wrong"], s["error_pct"], s["accuracy_pct"], s["caught"], s["escaped"], s["false_alarms"], s["catch_rate"]] for s in res["sources"]],
+          {"Source": 36, "Reviewers": 30})
+    sheet("Wrong fields", ["Source", "Extractor", "Record", "Field", "Extractor delivered", "Final value", "Kind", "Flagged by", "System check flagged", "Result"],
+          [[s["name"], s["extractor"], w["record"], w["field"], w["extractor_value"], w["final_value"], w["category"], ", ".join(w["flagged_by"]), "yes" if w["system_flagged"] else "",
+            "Caught" if w["outcome"] == "caught" else "Got through"] for s in res["sources"] for w in s["wrong_fields"]],
+          {"Source": 30, "Extractor delivered": 44, "Final value": 44, "Field": 26})
+    sheet("False alarms", ["Source", "Record", "Field", "Value", "Flagged by"],
+          [[s["name"], f["record"], f["field"], f["value"], ", ".join(f["flagged_by"])] for s in res["sources"] for f in s["false_alarm_fields"]], {"Source": 30, "Value": 44})
+    sheet("Extractors", ["Extractor", "Sources", "Fields", "Wrong", "Error %", "Accuracy %"], [[e["name"], e["sources"], e["fields"], e["wrong"], e["error_pct"], e["accuracy_pct"]] for e in res["extractors"]], {"Extractor": 28})
+    sheet("Reviewers", ["Reviewer", "Sources", "Flags", "Caught", "False alarms", "Wrong fields on their sources", "Catch rate %", "Precision %"],
+          [[r["name"], r["sources"], r["flags"], r["caught"], r["false_alarms"], r["errors_on_their_sources"], r["catch_rate"], r["precision"]] for r in res["reviewers"]], {"Reviewer": 28})
+    rows = [[s["name"], "Final record with no match", ", ".join(s["key_records_unmatched"])] for s in res["sources"] if s["key_records_unmatched"]]
+    rows += [[s["name"], "Extractor record with no match", ", ".join(s["extractor_records_unmatched"])] for s in res["sources"] if s["extractor_records_unmatched"]]
+    rows += [[n, "Source not found", ""] for n in res["unmatched_sources"]]
+    sheet("Not scored", ["Source", "Why", "Records"], rows, {"Source": 36, "Why": 32, "Records": 50})
+    bio = io.BytesIO()
+    wb.save(bio)
+    return bio.getvalue()

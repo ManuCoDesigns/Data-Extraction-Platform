@@ -16,9 +16,16 @@ const err = (e: any, d: string) => e?.response?.data?.detail || d
 
 export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceId: string }) {
   const [file, setFile] = useState<File | null>(null)
-  const [busy, setBusy] = useState<'check' | 'apply' | ''>('')
+  const [busy, setBusy] = useState<'check' | 'apply' | 'download' | ''>('')
   const [res, setRes] = useState<any>(null)
   const [open, setOpen] = useState<Record<string, boolean>>({})
+
+  const download = async (format: 'xlsx' | 'json') => {
+    if (!file) return
+    setBusy('download')
+    try { await qualityApi.answerKeyDownload(file, { format, projectId, sourceId }) }
+    catch (e) { toast.error(err(e, "Couldn't make that download")) } finally { setBusy('') }
+  }
 
   const run = async (apply: boolean) => {
     if (!file) return toast.error('Choose the file first')
@@ -40,6 +47,8 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
             className="text-sm text-gray-700 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:text-white file:px-3 file:py-1.5 file:text-sm file:font-semibold" />
           <Button onClick={() => run(false)} disabled={!file || !!busy}>{busy === 'check' ? 'Checking…' : 'Check'}</Button>
           {res && res.mode === 'preview' && <Button variant="secondary" onClick={() => run(true)} disabled={!!busy}>{busy === 'apply' ? 'Recording…' : 'Record these as audits'}</Button>}
+          {res && <Button variant="secondary" onClick={() => download('xlsx')} disabled={!!busy} title="Summary, per source, every wrong field, reviewers and extractors">{busy === 'download' ? 'Preparing…' : 'Download Excel'}</Button>}
+          {res && <Button variant="secondary" onClick={() => download('json')} disabled={!!busy}>Download JSON</Button>}
         </div>
         {sourceId && <p className="text-xs text-gray-500 mt-2 mb-0">A single list of records will be checked against the source picked above.</p>}
       </Panel>
@@ -55,7 +64,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
           <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
             <Tile label="Accuracy" value={pc(t.accuracy_pct)} tone={accTone(t.accuracy_pct)} hint={`${t.fields - t.wrong} of ${t.fields} fields match the final records`} />
             <Tile label="Error rate" value={pc(t.error_pct)} tone={t.wrong ? 'red' : 'green'} hint={`${t.wrong} wrong of ${t.fields} fields compared`} />
-            <Tile label="Reviewer catch rate" value={pc(t.catch_rate)} tone={accTone(t.catch_rate)} hint={`${t.caught} caught, ${t.escaped} got through`} />
+            <Tile label="Reviewer catch rate" value={pc(t.catch_rate)} tone={accTone(t.catch_rate)} hint={t.reviewer_flags === 0 ? 'No field-level reviewer flags were found, so nothing counts as caught. Reviewers may have commented on the whole source only.' : `${t.caught} caught, ${t.escaped} got through`} />
             <Tile label="False alarms" value={t.false_alarms} tone={t.false_alarms ? 'amber' : 'green'} hint="Fields a reviewer flagged that were right" />
             <Tile label="Sources" value={t.sources} hint={`${t.records} records matched`} />
             <Tile label="Wording only" value={t.cosmetic} hint="Different case or spacing, counted as correct" />
@@ -83,6 +92,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
                       </tr>
                       {open[s.source_id] && (
                         <tr><td colSpan={9} className="px-3 pb-3 bg-gray-50">
+                          <p className="m-0 pt-2 text-xs text-gray-500">Reviewer flags found on this source: {s.reviewer_flags}</p>
                           {s.wrong_fields.length === 0 && s.false_alarm_fields.length === 0 && <p className="m-0 py-2 text-sm text-emerald-700">Every field matches the final record.</p>}
                           {s.wrong_fields.length > 0 && (
                             <table className="w-full text-[13px] border-collapse mt-2">
