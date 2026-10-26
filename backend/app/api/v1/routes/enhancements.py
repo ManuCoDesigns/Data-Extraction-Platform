@@ -1229,3 +1229,182 @@ def messages_inbox(db: Session = Depends(get_db), user: User = Depends(get_curre
                          "last_body": t["last"].body[:160], "last_who": names.get(t["last"].user_id) or "Former member",
                          "last_at": t["last"].created_at, "count": t["count"], "unread": t["unread"], "stage": s.status.value} for s, t in rows],
             "unread": sum(t["unread"] for _, t in rows)}
+
+
+# ─── Re-extraction: shuffle a batch of sources across the team ───────────────
+
+class RedoPlanBody(BaseModel):
+    source_ids: list[str]
+    extractor_ids: list[str]
+    reviewer_ids: list[str] | None = None      # default: the same people
+    seed: int | None = None
+
+
+class RedoAssign(BaseModel):
+    source_id: str
+    extractor_id: str
+    reviewer_id: str | None = None
+
+
+class RedoApplyBody(BaseModel):
+    assignments: list[RedoAssign]
+    start_over: bool = True                    # reset each source to Not started and clear its earlier records (archived in the audit trail)
+    note: str | None = None
+
+
+def _redo_history(db: Session, sources: list) -> dict:
+    """Who has already extracted or reviewed each source: current owner, anyone who uploaded to it, and earlier rounds."""
+    hist = {s.id: {"ext": set(), "rev": set()} for s in sources}
+    ids = list(hist)
+    for s in sources:
+        if s.assigned_extractor_id:
+            hist[s.id]["ext"].add(s.assigned_extractor_id)
+        if s.assigned_reviewer_id:
+            hist[s.id]["rev"].add(s.assigned_reviewer_id)
+        for p in s.peer_reviews:
+            if p.user_id:
+                hist[s.id]["rev"].add(p.user_id)
+    for sid, uid in db.query(ExtractionJob.source_id, ExtractionJob.created_by).filter(ExtractionJob.source_id.in_(ids)).all():
+        if uid:
+            hist[sid]["ext"].add(uid)
+    for a in db.query(AuditLog).filter(AuditLog.source_id.in_(ids), AuditLog.action == AuditAction.SOURCE_RESET).all():
+        v = a.after_value or {}
+        for u in v.get("previous_extractors") or []:
+            hist[a.source_id]["ext"].add(u)
+        for u in v.get("previous_reviewers") or []:
+            hist[a.source_id]["rev"].add(u)
+    return hist
+
+
+@router.post("/redo/plan")
+def redo_plan(body: RedoPlanBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Preview only: who would extract and review each chosen source. Nothing is changed."""
+    import random as _r
+    from app.services import redo
+    if not (_roles(user) & {"org_admin", "project_admin"}):
+        raise HTTPException(status_code=403, detail="Only admins can do this.")
+    if not body.source_ids or not body.extractor_ids:
+        raise HTTPException(status_code=422, detail="Choose the sources and who should extract.")
+    if len(body.source_ids) > 300:
+        raise HTTPException(status_code=422, detail="Choose 300 sources or fewer.")
+    sources = _visible_sources(db, user).filter(Source.id.in_(body.source_ids)).all()
+    people = {u.id: u for u in db.query(User).filter(User.id.in_(set(body.extractor_ids) | set(body.reviewer_ids or body.extractor_ids)), User.is_active == True).all()}  # noqa: E712
+    ext = [u for u in dict.fromkeys(body.extractor_ids) if u in people]
+    rev = [u for u in dict.fromkeys(body.reviewer_ids if body.reviewer_ids is not None else body.extractor_ids) if u in people]
+    if not ext:
+        raise HTTPException(status_code=422, detail="Choose at least one active person to extract.")
+    hist = _redo_history(db, sources)
+    checks = {c.source_id: c.status for c in db.query(SourceLinkCheck).filter(SourceLinkCheck.source_id.in_([s.id for s in sources])).all()}
+    members: dict = {}
+    for pid, uid in db.query(ProjectMember.project_id, ProjectMember.user_id).filter(ProjectMember.project_id.in_({s.project_id for s in sources})).all():
+        members.setdefault(pid, set()).add(uid)
+    rows = [{"id": s.id, "name": s.name, "prev_extractors": hist[s.id]["ext"], "prev_reviewers": hist[s.id]["rev"], "records": s.total_records or 0,
+             "link": checks.get(s.id), "members": members.get(s.project_id, set())} for s in sources]
+    seed = body.seed if body.seed is not None else _r.randint(1, 10**9)
+    plan = redo.build_plan(rows, ext, rev, seed)
+    nm = {u: people[u].full_name for u in people}
+    allnames = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(set().union(*[h["ext"] | h["rev"] for h in hist.values()]) or {""})).all()}
+    by = {s.id: s for s in sources}
+    out = []
+    for a in plan["assignments"]:
+        s = by[a["source_id"]]
+        out.append({"source_id": s.id, "name": s.name, "status": s.status.value, "records": s.total_records or 0, "link": checks.get(s.id),
+                    "extractor_id": a["extractor"], "extractor": nm.get(a["extractor"]),
+                    "reviewer_id": a["reviewer"], "reviewer": nm.get(a["reviewer"]) if a["reviewer"] else None,
+                    "was_extractor": sorted(allnames.get(u, "Someone") for u in hist[s.id]["ext"]),
+                    "was_reviewer": sorted(allnames.get(u, "Someone") for u in hist[s.id]["rev"])})
+    out.sort(key=lambda r: r["name"].lower())
+    summ = {u: {"user_id": u, "name": nm[u], "extract": 0, "review": 0, "hard_links": 0, "earlier_records": 0, "load": 0.0} for u in set(ext) | set(rev)}
+    for r in out:
+        e = summ[r["extractor_id"]]
+        e["extract"] += 1
+        e["hard_links"] += 1 if r["link"] in redo.PROBLEM_LINKS else 0
+        e["earlier_records"] += r["records"]
+        e["load"] += redo.weight({"records": r["records"], "link": r["link"]})
+        if r["reviewer_id"]:
+            summ[r["reviewer_id"]]["review"] += 1
+    people_out = sorted(summ.values(), key=lambda p: p["name"].lower())
+    for p in people_out:
+        p["load"] = round(p["load"], 1)
+        p["total"] = p["extract"] + p["review"]
+    skipped = [{"source_id": u["source_id"], "name": by[u["source_id"]].name if u["source_id"] in by else "A source", "why": u["why"], "partial": bool(u.get("partial"))} for u in plan["unassigned"]]
+    missing = [{"source_id": i, "name": "A source", "why": "Not found, or you can't see it"} for i in body.source_ids if i not in by]
+    return {"seed": seed, "assignments": out, "people": people_out, "unassigned": skipped + missing, "notes": plan["notes"],
+            "with_records": sum(1 for r in out if r["records"] > 0)}
+
+
+@router.post("/redo/apply")
+def redo_apply(body: RedoApplyBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Apply a previewed plan. Every rule is checked again here, so a stale or edited plan cannot break them."""
+    from app.api.v1.routes.sources import _safe_clear_old_jobs
+    if not (_roles(user) & {"org_admin", "project_admin"}):
+        raise HTTPException(status_code=403, detail="Only admins can do this.")
+    if not body.assignments:
+        raise HTTPException(status_code=422, detail="There is nothing to apply.")
+    if len(body.assignments) > 300:
+        raise HTTPException(status_code=422, detail="Too many sources at once.")
+    by_src = {a.source_id: a for a in body.assignments}
+    sources = {s.id: s for s in _visible_sources(db, user).filter(Source.id.in_(list(by_src))).all()}
+    people = {u.id: u for u in db.query(User).filter(User.id.in_({x for a in body.assignments for x in (a.extractor_id, a.reviewer_id) if x}), User.is_active == True).all()}  # noqa: E712
+    hist = _redo_history(db, list(sources.values()))
+    results, per_ext, per_rev = [], {}, {}
+    for sid, a in by_src.items():
+        s = sources.get(sid)
+        if not s:
+            results.append({"source_id": sid, "ok": False, "reason": "Not found, or you can't see it"})
+            continue
+        ex, rv = people.get(a.extractor_id), people.get(a.reviewer_id) if a.reviewer_id else None
+        why = None
+        if not ex:
+            why = "The extractor is not an active user"
+        elif a.extractor_id in hist[sid]["ext"]:
+            why = f"{ex.full_name} extracted it before"
+        elif a.reviewer_id and not rv:
+            why = "The reviewer is not an active user"
+        elif a.reviewer_id and (a.reviewer_id == a.extractor_id or a.reviewer_id in hist[sid]["ext"]):
+            why = "The reviewer cannot be someone who extracted it"
+        else:
+            why = _eligible(db, s, ex) or (_eligible(db, s, rv) if rv else None)
+        if why:
+            results.append({"source_id": sid, "name": s.name, "ok": False, "reason": why})
+            continue
+        before = {"status": s.status.value, "extractor": s.assigned_extractor_id, "reviewer": s.assigned_reviewer_id, "records": s.total_records or 0}
+        archived = []
+        if body.start_over:
+            recs = (db.query(ExtractedRecord).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id).filter(ExtractionJob.source_id == s.id).all())
+            archived = [{"name": r.canonical_name, "fields": r.extracted_fields, "review_status": r.review_status.value if r.review_status else None} for r in recs]
+            from app.models.all_models import FieldAudit, QualityFinding
+            rids = [r.id for r in recs]
+            if rids:
+                db.query(FieldAudit).filter(FieldAudit.record_id.in_(rids)).delete(synchronize_session=False)
+                db.query(QualityFinding).filter(QualityFinding.record_id.in_(rids)).delete(synchronize_session=False)
+            _safe_clear_old_jobs(s.id, db)
+            s.status = SourceStatus.NOT_STARTED
+            s.total_records = s.valid_records = s.invalid_records = s.approved_records = 0
+            s.review_started_at = s.review_completed_at = s.approved_at = None
+            s.reset_count = (s.reset_count or 0) + 1
+        for p in list(s.peer_reviews):
+            s.peer_reviews.remove(p)
+        s.assigned_extractor_id = ex.id
+        s.assigned_reviewer_id = rv.id if rv else None
+        if rv:
+            s.peer_reviews.append(SourcePeerReview(user_id=rv.id, status="pending", assigned_by=user.id))
+        db.add(AuditLog(user_id=user.id, project_id=s.project_id, source_id=s.id, action=AuditAction.SOURCE_RESET, before_value=before,
+                        after_value={"redo": True, "status": s.status.value, "reason": (body.note or "Re-extraction round").strip(), "records_cleared": body.start_over,
+                                     "previous_extractors": sorted(hist[sid]["ext"]), "previous_reviewers": sorted(hist[sid]["rev"]),
+                                     "extractor_id": ex.id, "reviewer_id": rv.id if rv else None, "archived_records": archived, "reset_count": s.reset_count}))
+        per_ext.setdefault(ex.id, []).append(s)
+        if rv:
+            per_rev.setdefault(rv.id, []).append(s)
+        results.append({"source_id": sid, "name": s.name, "ok": True})
+    db.commit()
+    for uid, lst in per_ext.items():
+        notify(db, uid, f"Re-extraction: {len(lst)} new source{'s' if len(lst) != 1 else ''} for you",
+               "You have been given these sources to extract fresh: " + ", ".join(x.name for x in lst[:8]) + (f" and {len(lst) - 8} more" if len(lst) > 8 else "") + ". Find them under Sources.",
+               "/sources", "assigned", ACTION)
+    for uid, lst in per_rev.items():
+        notify(db, uid, f"Re-extraction: you will review {len(lst)} source{'s' if len(lst) != 1 else ''}",
+               "You will peer review these once the extractor delivers them: " + ", ".join(x.name for x in lst[:8]) + (f" and {len(lst) - 8} more" if len(lst) > 8 else "") + ".",
+               "/sources", "peer_requested", INFO)
+    db.commit()
+    return {"results": results, "done": sum(1 for r in results if r["ok"]), "skipped": sum(1 for r in results if not r["ok"])}

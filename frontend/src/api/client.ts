@@ -463,6 +463,8 @@ export const enhApi = {
   monitor: (days = 30, projectId?: string) => api.get('/enh/monitor', { params: { days, project_id: projectId || undefined } }).then(r => r.data),
   myStats: (days = 30) => api.get('/enh/stats/me', { params: { days } }).then(r => r.data),
   people: (projectId?: string) => api.get('/enh/people', { params: { project_id: projectId || undefined } }).then(r => r.data),
+  redoPlan: (body: { source_ids: string[]; extractor_ids: string[]; reviewer_ids?: string[]; seed?: number }) => api.post('/enh/redo/plan', body, { timeout: 120000 }).then(r => r.data),
+  redoApply: (body: { assignments: { source_id: string; extractor_id: string; reviewer_id: string | null }[]; start_over: boolean; note?: string }) => api.post('/enh/redo/apply', body, { timeout: 300000 }).then(r => r.data),
   bulkUndo: (snapshots: any[]) => api.post('/enh/sources/bulk/undo', { snapshots }).then(r => r.data),
   bulk: (body: { source_ids: string[]; action: string; user_id?: string | null; user_ids?: string[]; note?: string }) => api.post('/enh/sources/bulk', body).then(r => r.data),
   settings: () => api.get('/enh/me/settings').then(r => r.data),

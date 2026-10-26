@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Check, CheckCheck, ChevronUp, CornerUpLeft, UserMinus, UserPlus, Users, X } from 'lucide-react'
+import { Check, CheckCheck, ChevronUp, CornerUpLeft, Shuffle, UserMinus, UserPlus, Users, X } from 'lucide-react'
 import { enhApi } from '@/api/client'
 import { Avatar, Button, Modal, cn, toast } from '@/components/ui'
 import { useUndo } from '@/lib/undo'
+import { RedoModal } from '@/components/enh/RedoModal'
 
 interface Person { user_id: string; name: string; email: string; role: string }
 type Mode = 'extractor' | 'add_peers' | 'remove_peers' | 'send_back' | 'approve' | null
@@ -23,6 +24,7 @@ export function BulkBar({ ids, names, onClear, onDone }: Props) {
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState('')
   const [report, setReport] = useState<{ done: number; skipped: number; rows: { name: string; reason: string }[] } | null>(null)
+  const [redo, setRedo] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => { enhApi.people().then(r => setPeople(r.people)).catch(() => {}) }, [])
@@ -146,6 +148,7 @@ export function BulkBar({ ids, names, onClear, onDone }: Props) {
             <button type="button" onClick={() => { setMode(mode === 'remove_peers' ? null : 'remove_peers'); setPick(new Set()) }} className={cn(BTN, 'hover:bg-white/10', mode === 'remove_peers' && 'bg-white/15')}><UserMinus className="w-4 h-4" /> Remove peers</button>
             <button type="button" disabled={busy} onClick={() => run('unassign_extractor')} className={cn(BTN, 'hover:bg-white/10 text-white/80')}>Unassign</button>
             <span className="w-px h-6 bg-white/15 shrink-0" />
+            <button type="button" onClick={() => { setMode(null); setRedo(true) }} className={cn(BTN, 'hover:bg-white/10')} title="Give each selected source a new extractor and reviewer, shuffled evenly"><Shuffle className="w-4 h-4" /> Re-extract</button>
             <button type="button" onClick={() => { setMode(mode === 'send_back' ? null : 'send_back'); setPick(new Set()) }} className={cn(BTN, 'hover:bg-white/10', mode === 'send_back' && 'bg-white/15')}><CornerUpLeft className="w-4 h-4" /> Send back</button>
             <button type="button" onClick={() => { setMode(mode === 'approve' ? null : 'approve'); setPick(new Set()) }} className={cn(BTN, 'hover:bg-white/10', mode === 'approve' && 'bg-white/15')}><CheckCheck className="w-4 h-4" /> Approve</button>
           </div>
@@ -154,6 +157,7 @@ export function BulkBar({ ids, names, onClear, onDone }: Props) {
         </div>
       </div>
 
+      {redo && <RedoModal ids={ids} names={names} onClose={() => setRedo(false)} onDone={() => onDone()} />}
       <Modal open={!!report} onClose={() => { setReport(null); onClear() }} title="Some sources were skipped"
         description={report ? `${report.done} updated, ${report.skipped} skipped.` : undefined}>
         <ul className="m-0 p-0 list-none divide-y divide-gray-50 max-h-72 overflow-y-auto">
