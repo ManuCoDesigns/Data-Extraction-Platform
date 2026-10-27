@@ -1791,3 +1791,18 @@ def batch_report(batch: str, project_id: str | None = None, db: Session = Depend
     except Exception:
         sc = None
     return br.assemble(db, user, srcs, batch, sc)
+
+
+@router.get("/engagement-report")
+def engagement_report(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The full engagement summary across every batch, from live data."""
+    from app.services import batch_report as br
+    _need_lead(user)
+    srcs = _visible_sources(db, user, project_id).all()
+    if not srcs:
+        raise HTTPException(status_code=404, detail="No sources yet.")
+    try:
+        sc, _ = _scorecard_data(db, user, project_id, None, None, None)
+    except Exception:
+        sc = None
+    return br.engagement(db, user, srcs, sc)

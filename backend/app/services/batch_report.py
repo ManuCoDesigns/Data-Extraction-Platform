@@ -112,7 +112,8 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         end = s.approved_at if s.status == SourceStatus.APPROVED else now
         rows.append({
             "source_id": s.id, "project_id": s.project_id, "name": s.name, "item_no": s.external_ref_id, "url": s.website_url,
-            "type": s.type or (s.schema.name if s.schema else None), "stage": stage, "status": getattr(s.status, "value", s.status),
+            "type": s.type or (s.schema.name if s.schema else None), "sop": ((s.xtrium_sop or {}).get("meta") or {}).get("sop_code"),
+            "project": s.project.name if s.project else None, "stage": stage, "status": getattr(s.status, "value", s.status),
             "records": n, "approved": ok, "extractor": names.get(s.assigned_extractor_id), "reviewers": [names.get(p.user_id, "?") for p in s.peer_reviews],
             "days": _days(s.created_at, end), "submitted_to_xtrium": bool(s.xtrium_submitted_at),
             "fields": qr.get("fields"), "errors": qr.get("errors"), "errors_per_100": qr.get("errors_per_100"),
@@ -172,6 +173,23 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         lines.append(f"Delivered data is {round(quality['final_accuracy'], 1)}% accurate across {quality['fields']} checked fields.")
 
     pulled = [_aware(s.created_at) for s in mine if s.created_at]
+    peers_all = [pr for s in mine for pr in s.peer_reviews]
+    cards = []
+    full_types = [x["type"] for x in by_type.values() if x["total"] and x["delivered"] == x["total"]]
+    if total:
+        cards.append({"title": f"{pct}% delivered", "text": f"{delivered} of {total} sources are approved and delivered, with {recs_ok} approved records."})
+    if quality and quality["final_accuracy"] is not None:
+        cards.append({"title": f"{round(quality['final_accuracy'], 1)}% accurate", "text": f"Final accuracy across {quality['fields']} fields checked against the real sources."})
+    if len(by_type) > 1 and full_types:
+        cards.append({"title": f"{len(full_types)} {'type' if len(full_types) == 1 else 'types'} at 100%", "text": ", ".join(full_types[:3]) + (" are" if len(full_types) > 1 else " is") + " fully delivered."})
+    if delivered and any(r["submitted_to_xtrium"] for r in rows):
+        n_sub = sum(1 for r in rows if r["submitted_to_xtrium"])
+        cards.append({"title": f"{n_sub} sent to Xtrium", "text": f"{n_sub} of {delivered} delivered sources have been submitted back to Xtrium."})
+    if peers_all:
+        done = sum(1 for p in peers_all if p.status == "submitted")
+        cards.append({"title": f"{done} of {len(peers_all)} peer reviews", "text": "Every source gets independent peer reviews before sign-off." if done == len(peers_all) else "Peer reviews submitted so far across this batch."})
+    if done_days:
+        cards.append({"title": f"{round(sum(done_days) / len(done_days), 1)} days average", "text": "From the pull to delivery, for the sources already delivered."})
     return {
         "key": key, "label": label, "date": date, "generated_at": now,
         "totals": {"sources": total, "delivered": delivered, "percent": pct, "records": recs_total, "records_approved": recs_ok,
@@ -179,8 +197,78 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         "stages": [{"key": k, "label": l, "count": stages[k]} for k, l in STAGES],
         "by_type": sorted(by_type.values(), key=lambda t: -t["total"]),
         "blocked": blocked_groups, "sources": rows, "people": sorted(people.values(), key=lambda p: -(p["extracting"] + p["reviewing"])),
-        "quality": quality, "highlights": lines,
+        "quality": quality, "highlights": lines, "cards": cards[:4], "projects": sorted({r["project"] for r in rows if r["project"]}),
+        "sops": sorted({r["sop"] for r in rows if r["sop"]}),
         "timing": {"avg_days_delivered": round(sum(done_days) / len(done_days), 1) if done_days else None,
                    "longest_waiting_days": max((r["days"] for r in waiting), default=None),
                    "pulled_at": min(pulled).isoformat() if pulled else None},
+    }
+
+
+def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
+    """The whole engagement across every batch: one phase per pull, SOP coverage, recurring problems, the platform in numbers
+    and the latest batch in detail. Everything is read from the platform when the report is opened."""
+    batches = list_batches(srcs)
+    reps = [assemble(db, user, srcs, b["key"], sc) for b in batches]
+    pulled = [r for r in reps if r["key"] != "other"]
+    phases = []
+    for r in reps:
+        tp = sorted(r["by_type"], key=lambda x: -x["total"])
+        phases.append({"key": r["key"], "label": r["label"], "date": r["date"], "sources": r["totals"]["sources"], "delivered": r["totals"]["delivered"],
+                       "records": r["totals"]["records_approved"], "percent": r["totals"]["percent"], "blocked": r["totals"]["blocked"],
+                       "status": "covered" if r["totals"]["sources"] == r["totals"]["delivered"] else "in_progress",
+                       "types": [x["type"] for x in tp[:3]], "accuracy": (r["quality"] or {}).get("final_accuracy")})
+    ids = [s.id for s in srcs]
+    sop_total: dict = {}
+    latest = pulled[-1] if pulled else (reps[-1] if reps else None)
+    latest_ids = {x["source_id"] for x in latest["sources"]} if latest else set()
+    earlier_sops = {x["sop"] for r in pulled[:-1] for x in r["sources"] if x["sop"]}
+    for r in reps:
+        for x in r["sources"]:
+            code = x["sop"] or "No SOP saved"
+            d = sop_total.setdefault(code, {"code": code, "total": 0, "delivered": 0, "new": False})
+            d["total"] += 1
+            d["delivered"] += 1 if x["stage"] == "delivered" else 0
+    for code, d in sop_total.items():
+        d["new"] = bool(latest and len(pulled) > 1 and code not in earlier_sops and code != "No SOP saved")
+    by_sop = sorted(sop_total.values(), key=lambda d: (d["code"] == "No SOP saved", d["code"]))
+
+    kinds: dict = {}
+    merged: dict = {}
+    for r in reps:
+        for g in r["blocked"]:
+            k = kinds.setdefault(g["kind"], {"kind": g["kind"], "count": 0, "examples": [], "reasons": {}})
+            k["count"] += len(g["items"])
+            k["reasons"][g["title"]] = k["reasons"].get(g["title"], 0) + len(g["items"])
+            k["examples"] += [i["name"] for i in g["items"]][: max(0, 3 - len(k["examples"]))]
+            m = merged.setdefault((g["kind"], g["title"]), {"kind": g["kind"], "title": g["title"], "need": g["need"], "items": []})
+            m["items"] += [{**i, "batch": r["label"]} for i in g["items"]]
+
+    qs = db.query(ClientQuestion).filter(ClientQuestion.source_id.in_(ids)).all() if ids else []
+    peers = [p for s in srcs for p in s.peer_reviews]
+    cum = (sc or {}).get("cumulative") or {}
+    tot_sources = sum(p["sources"] for p in phases)
+    tot_deliv = sum(p["delivered"] for p in phases)
+    totals = {
+        "sources": tot_sources, "delivered": tot_deliv, "batches": len(pulled), "batches_covered": sum(1 for p in phases if p["status"] == "covered" and p["key"] != "other"),
+        "batches_open": sum(1 for p in phases if p["status"] != "covered" and p["key"] != "other"), "sops": len([c for c in sop_total if c != "No SOP saved"]),
+        "records_approved": sum(p["records"] for p in phases), "submitted": sum(r["totals"]["submitted_to_xtrium"] for r in reps),
+        "blocked": sum(p["blocked"] for p in phases), "peer_done": sum(1 for p in peers if p.status == "submitted"), "peer_total": len(peers),
+        "questions_asked": len(qs), "questions_answered": sum(1 for x in qs if x.status == "answered"),
+        "fields": cum.get("fields"), "errors": cum.get("errors"), "final_accuracy": cum.get("final_accuracy"), "first_pass_accuracy": cum.get("first_pass_accuracy"),
+    }
+    firsts = [r["timing"]["pulled_at"] for r in pulled if r["timing"]["pulled_at"]]
+    nxt = []
+    open_sources = tot_sources - tot_deliv
+    if latest and latest["totals"]["sources"] != latest["totals"]["delivered"]:
+        nxt.append({"title": "Complete the current batch", "text": f"Finish the {latest['totals']['sources'] - latest['totals']['delivered']} remaining sources in {latest['label']}."})
+    if totals["blocked"]:
+        nxt.append({"title": "Clear what is blocked", "text": f"{totals['blocked']} sources need a decision from the client or the team: a corrected link, an answer, or confirmation to skip."})
+    if totals["submitted"] < tot_deliv:
+        nxt.append({"title": "Send delivered work to Xtrium", "text": f"{tot_deliv - totals['submitted']} approved sources have not been submitted back to Xtrium yet."})
+    nxt.append({"title": "Keep the peer-review structure", "text": "Continue independent peer review and the sign-off step for every new assignment."})
+    return {
+        "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,
+        "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
+        "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:3], "open_sources": open_sources,
     }
