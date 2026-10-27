@@ -1431,6 +1431,126 @@ def rounds_report(project_id: str = "", source_id: str = "", ignore: str = "retr
     return result
 
 
+@router.post("/answer-key/submit")
+async def submit_final_records(
+    file: UploadFile = File(...), apply: bool = Form(False), approve: bool = Form(False), project_id: str = Form(""), source_id: str = Form(""),
+    ignore: str = Form("retrieved_at"),
+    db: Session = Depends(get_db), user: User = Depends(get_current_user),
+):
+    """Put the admin's final records on the platform. Matched records take the final values, a final record with no match is added, and a delivered record
+    that the final one replaced is removed. With approve, the records and the sources are approved too. Without apply this only says what would change.
+    Everything is logged as an admin override, and the earlier values are kept in the audit trail."""
+    if not (_lead(user) and ({r.role.value for r in user.roles} & {"org_admin", "project_admin"})):
+        raise HTTPException(status_code=403, detail="Only admins can submit final records.")
+    from datetime import datetime, timezone
+    from app.models.all_models import AuditAction, AuditLog, ExtractionConfidence, JobStatus, ReviewStatus, SourceType
+    from app.services import answer_key as ak
+    content = await file.read()
+    if len(content) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="That file is too large.")
+    only = _source(db, user, source_id).name if source_id else None
+    try:
+        key = ak.load_key(file.filename or "", content, only)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception:
+        raise HTTPException(status_code=422, detail="Could not read that file. Upload the zip, or the all-records JSON file.")
+    by_norm: dict = {}
+    for s in _visible_sources(db, user, project_id or None).all():
+        by_norm.setdefault(ak.norm(s.name), []).append(s)
+    ign = {x.strip() for x in (ignore or "").split(",") if x.strip()}
+    now = datetime.now(timezone.utc)
+    out, unmatched = [], []
+    for name, final_recs in key.items():
+        cands = by_norm.get(ak.norm(name), [])
+        if not cands:
+            unmatched.append(name)
+            continue
+        s = sorted(cands, key=lambda x: -len(_records(db, x.id)))[0]
+        recs = _records(db, s.id)
+        pairs, miss_final, miss_ext = ak.match_records(final_recs, recs, lambda r: ak.record_name(r.extracted_fields or {}, r.canonical_name))
+        row = {"source_id": s.id, "name": s.name, "status": s.status.value, "records_updated": 0, "fields_changed": 0, "records_unchanged": 0, "records_added": [], "records_removed": [],
+               "records_left": [], "approved": False, "changed": []}
+        for i, j in pairs:
+            r, fr = recs[j], final_recs[i]
+            diff = [d["field"] for d in ak.compare(r.extracted_fields or {}, fr, ign) if d["verdict"] == "wrong" or d["cosmetic"]]
+            new_fields = dict(fr)
+            for k in ign:                       # a timestamp is not a correction: keep the one the record has
+                if k in (r.extracted_fields or {}):
+                    new_fields[k] = r.extracted_fields[k]
+                else:
+                    new_fields.pop(k, None)
+            if not diff and set(new_fields) == set(r.extracted_fields or {}):
+                row["records_unchanged"] += 1
+            else:
+                row["records_updated"] += 1
+                row["fields_changed"] += len(diff)
+                row["changed"].append({"record": ak.record_name(fr) or r.canonical_name, "fields": diff})
+                if apply:
+                    before = dict(r.extracted_fields or {})
+                    r.extracted_fields = new_fields
+                    from sqlalchemy.orm.attributes import flag_modified
+                    flag_modified(r, "extracted_fields")
+                    r.canonical_name = ak.record_name(new_fields) or r.canonical_name
+                    db.add(AuditLog(user_id=user.id, project_id=s.project_id, source_id=s.id, record_id=r.id, action=AuditAction.SOURCE_RECORD_FIXED,
+                                    before_value={"extracted_fields": before}, after_value={"extracted_fields": new_fields, "final_records_submit": True, "lock_override": True, "fields": diff}))
+        replaced = bool(miss_final)
+        for i in miss_final:
+            nm = ak.record_name(final_recs[i]) or f"record {i + 1}"
+            row["records_added"].append(nm)
+            if apply:
+                job = db.query(ExtractionJob).filter(ExtractionJob.source_id == s.id).order_by(ExtractionJob.created_at.desc()).first()
+                if not job:
+                    job = ExtractionJob(project_id=s.project_id, source_id=s.id, name="Final records", source_type=SourceType.CSV, created_by=user.id)
+                    db.add(job)
+                    db.flush()
+                nr = ExtractedRecord(job_id=job.id, extracted_fields=dict(final_recs[i]), raw_text="", extraction_confidence=ExtractionConfidence.HIGH, canonical_name=nm)
+                db.add(nr)
+                db.flush()
+                recs.append(nr)
+                db.add(AuditLog(user_id=user.id, project_id=s.project_id, source_id=s.id, record_id=nr.id, action=AuditAction.SOURCE_RECORD_FIXED,
+                                after_value={"extracted_fields": final_recs[i], "final_records_submit": True, "lock_override": True, "added": True}))
+        for j in miss_ext:
+            nm = ak.record_name(recs[j].extracted_fields or {}, recs[j].canonical_name) or f"record {j + 1}"
+            if replaced:                         # the final record replaces it
+                row["records_removed"].append(nm)
+                if apply:
+                    r = recs[j]
+                    db.add(AuditLog(user_id=user.id, project_id=s.project_id, source_id=s.id, action=AuditAction.SOURCE_RECORD_FIXED,
+                                    before_value={"extracted_fields": r.extracted_fields, "name": nm}, after_value={"deleted": True, "final_records_submit": True, "lock_override": True}))
+                    db.query(FieldAudit).filter(FieldAudit.record_id == r.id).delete(synchronize_session=False)
+                    db.query(QualityFinding).filter(QualityFinding.record_id == r.id).delete(synchronize_session=False)
+                    db.delete(r)
+            else:
+                row["records_left"].append(nm)    # no final record replaces it, so it is not removed
+        if apply:
+            db.flush()
+            live = _records(db, s.id)
+            s.total_records = len(live)
+            if approve:
+                for r in live:
+                    r.review_status = ReviewStatus.APPROVED
+                    r.reviewed_by, r.reviewed_at = user.id, now
+                    r.review_note = r.review_note or "Approved with the admin's final records"
+                s.approved_records = len(live)
+                s.valid_records = len(live)
+                s.invalid_records = 0
+                s.status = SourceStatus.APPROVED
+                s.approved_at = now
+                s.review_completed_at = s.review_completed_at or now
+                for job in db.query(ExtractionJob).filter(ExtractionJob.source_id == s.id).all():
+                    job.status = JobStatus.VALIDATED
+                    job.total_approved = len(live)
+                db.add(AuditLog(user_id=user.id, project_id=s.project_id, source_id=s.id, action=AuditAction.SOURCE_APPROVED,
+                                after_value={"source_id": s.id, "final_records_submit": True, "lock_override": True}))
+                row["approved"] = True
+        out.append(row)
+    if apply:
+        db.commit()
+    tot = {k: sum((len(x[k]) if isinstance(x[k], list) else x[k]) for x in out) for k in ("records_updated", "fields_changed", "records_unchanged", "records_added", "records_removed", "records_left")}
+    return {"mode": "applied" if apply else "preview", "approve": approve, "sources": sorted(out, key=lambda x: x["name"].lower()), "unmatched_sources": unmatched, "totals": tot}
+
+
 # ─── Download of peer-reviewed sources ─────────────────────────────────────────
 
 @router.get("/export")

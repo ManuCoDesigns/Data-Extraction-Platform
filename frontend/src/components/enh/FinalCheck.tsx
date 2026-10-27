@@ -37,6 +37,8 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [dec, setDec] = useState<Record<string, 'wrong' | 'right'>>({})
   const first = useRef(true)
+  const [sub, setSub] = useState<any>(null)
+  const [approve, setApprove] = useState(true)
   const [q, setQ] = useState('')
   const [view, setView] = useState<'all' | 'confirm' | 'errors' | 'clean'>('all')
   const [sort, setSort] = useState<'name' | 'accuracy' | 'errors'>('name')
@@ -68,6 +70,16 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
     return () => clearTimeout(h)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dec])
+  const submit = async (apply: boolean) => {
+    if (!file) return
+    if (apply && !window.confirm(`Submit the final records?\n\nEach matched record takes your final values. A final record with no match is added, and a delivered record it replaces is removed.${approve ? '\nThe records and the sources are approved.' : ''}\n\nThe earlier values are kept in the audit trail. Run Record as audits first if you have not: the scores keep the first-pass errors, but this Check will then show the records as matching.`)) return
+    setBusy(apply ? 'apply' : 'check')
+    try {
+      const r = await qualityApi.submitFinal(file, { apply, approve, projectId, sourceId })
+      setSub(r)
+      if (apply) toast.success(`Submitted: ${r.totals.records_updated} updated, ${r.totals.records_added} added, ${r.totals.records_removed} removed`)
+    } catch (e) { toast.error(err(e, "Couldn't submit the final records")) } finally { setBusy('') }
+  }
   const decide = (keys: string[], v: 'wrong' | 'right' | null) => setDec(d => { const n = { ...d }; keys.forEach(k => { if (v) n[k] = v; else delete n[k] }); return n })
   const t = res?.totals
   const rows: any[] = useMemo(() => {
@@ -86,7 +98,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
     <div className="space-y-5">
       <Panel title="Check the final records" subtitle="Upload the zip or the all-records file. Sources and records are matched by name, and every field is compared with what the extractor delivered. Nothing is edited.">
         <div className="flex items-center gap-3 flex-wrap">
-          <input type="file" accept=".zip,.json" onChange={e => { setFile(e.target.files?.[0] ?? null); setRes(null); setDec({}) }} aria-label="Final records file"
+          <input type="file" accept=".zip,.json" onChange={e => { setFile(e.target.files?.[0] ?? null); setRes(null); setDec({}); setSub(null) }} aria-label="Final records file"
             className="text-sm text-gray-700 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:text-white file:px-3 file:py-1.5 file:text-sm file:font-semibold" />
           <Button onClick={() => run(false)} disabled={!file || !!busy}>{busy === 'check' ? 'Checking…' : 'Check'}</Button>
           <span className="flex-1" />
@@ -271,6 +283,35 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
               <p className="m-0 mt-3 text-[11px] text-gray-500">Missed counts every error on their sources they did not flag, including where they passed it as fine. "No flags" means they raised nothing on a specific field, so the rate is not scored.</p>
             </Panel>
           </div>
+
+          <Panel title="Submit the final records" subtitle="Put your final records on the platform and clear the sources. Do this after Record as audits, so the scores are saved first.">
+            <div className="flex items-center gap-3 flex-wrap">
+              <label className="flex items-center gap-2 text-sm text-gray-800 cursor-pointer"><input type="checkbox" checked={approve} onChange={e => { setApprove(e.target.checked); setSub(null) }} /> Also approve the records and the sources</label>
+              <span className="flex-1" />
+              <Button variant="secondary" onClick={() => submit(false)} disabled={!!busy}>See what will change</Button>
+              <Button onClick={() => submit(true)} disabled={!!busy || !sub || sub.mode === 'applied'}>{sub?.mode === 'applied' ? 'Submitted' : 'Submit final records'}</Button>
+            </div>
+            {sub && (
+              <div className="mt-3 space-y-2">
+                <p className="m-0 text-sm text-gray-800">{sub.mode === 'applied' ? <b>Submitted. </b> : <b>This would change: </b>}{sub.totals.records_updated} record{sub.totals.records_updated === 1 ? '' : 's'} updated ({sub.totals.fields_changed} fields), {sub.totals.records_added} added, {sub.totals.records_removed} removed, {sub.totals.records_unchanged} already match{sub.approve ? `, ${sub.sources.length} source${sub.sources.length === 1 ? '' : 's'} approved` : ''}.</p>
+                <ul className="m-0 p-0 list-none divide-y divide-gray-50 text-[13px]">
+                  {sub.sources.map((x: any) => (
+                    <li key={x.source_id} className="py-1.5 flex items-start gap-3 flex-wrap">
+                      <span className="font-semibold text-gray-900 min-w-[200px]">{x.name}</span>
+                      <span className="text-gray-600 flex-1 min-w-[220px]">
+                        {x.records_updated + x.records_added.length + x.records_removed.length === 0 ? 'Already matches.' : <>
+                          {x.records_updated > 0 && <>{x.records_updated} updated ({x.fields_changed} fields). </>}
+                          {x.records_added.length > 0 && <>Added: {x.records_added.join(', ')}. </>}
+                          {x.records_removed.length > 0 && <>Removed: {x.records_removed.join(', ')}. </>}</>}
+                        {x.records_left.length > 0 && <span className="text-amber-700"> Left in place (no final record replaces them): {x.records_left.join(', ')}.</span>}
+                      </span>
+                      {x.approved && <Chip tone="green">Approved</Chip>}
+                    </li>))}
+                </ul>
+                {sub.unmatched_sources.length > 0 && <p className="m-0 text-xs text-amber-800">Not matched to a source, so not submitted: {sub.unmatched_sources.join(', ')}</p>}
+              </div>
+            )}
+          </Panel>
 
           {(res.unmatched_sources.length > 0 || res.notes.length > 0) && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 px-4 py-3 text-sm space-y-1">
