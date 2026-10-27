@@ -28,6 +28,7 @@ import { Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState, Spinne
 import { useAuthStore } from '@/store/auth'
 import { format, formatDistanceToNow } from 'date-fns'
 import { fmtDateTime } from '@/lib/prefs'
+import { ask } from '@/lib/confirm'
 
 const STATUS_META: Record<SourceStatus, { label: string; color: 'gray'|'amber'|'red'|'blue'|'purple'|'green'|'indigo' }> = {
   not_started:       { label: 'Not Started',      color: 'gray' },
@@ -267,7 +268,7 @@ function SourceDetailInner() {
       const detail = err?.response?.data?.detail
       if (err?.response?.status === 409) {
         const incomplete = String(detail).startsWith('Incomplete')
-        if (window.confirm(incomplete ? String(detail) : `${detail}\n\nSubmit again anyway?`)) {
+        if (await ask(incomplete ? String(detail) : `${detail}\n\nSubmit again anyway?`, { confirmLabel: 'Submit anyway', tone: 'warning' })) {
           retry = incomplete ? [confirmResubmit, true] : [true, confirmIncomplete]
         }
       } else {
@@ -1033,7 +1034,7 @@ function SourceDetailInner() {
             { key: 'clear', label: 'Clear Records', icon: <Trash2 className="w-3.5 h-3.5" />, tone: 'warn', divider: true,
               hidden: !(isAdmin && records.length > 0),
               onClick: async () => {
-                if (!window.confirm(`Clear all ${records.length} records from "${source.name}"? This cannot be undone.`)) return
+                if (!await ask(`Clear all ${records.length} records from "${source.name}"?\n\nThis cannot be undone.`, { confirmLabel: 'Clear records', tone: 'danger' })) return
                 try {
                   const r = await sourcesApi.clearRecords(sourceId!)
                   toast.success(r.message || 'Records cleared')
@@ -1045,7 +1046,7 @@ function SourceDetailInner() {
             { key: 'unlock', label: 'Unlock Records', icon: <RotateCcw className="w-3.5 h-3.5" />, tone: 'warn',
               hidden: !(source.status === 'approved' && isAdmin),
               onClick: async () => {
-                if (!window.confirm(`Unlock all submitted records in "${source.name}"?\n\nThis resets their submitted status so they can be corrected and re-submitted.`)) return
+                if (!await ask(`Unlock all submitted records in "${source.name}"?\n\nThis resets their submitted status so they can be corrected and re-submitted.`, { confirmLabel: 'Unlock', tone: 'warning' })) return
                 try {
                   const r = await sourcesApi.unlockRecords(sourceId!)
                   toast.success(r.message || 'Records unlocked — source moved back to In Review')

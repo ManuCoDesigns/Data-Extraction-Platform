@@ -23,6 +23,7 @@ import { ErrorBoundary } from '@/components/enh/ErrorBoundary'
 import { useTheme } from '@/lib/theme'
 import { recordVisit } from '@/lib/recent'
 import { ShortcutsHelp } from '@/components/enh/ShortcutsHelp'
+import { ConfirmHost } from '@/components/enh/ConfirmHost'
 
 export function AppLayout() {
   const { user, logout, fetchMe } = useAuthStore()
@@ -472,6 +473,7 @@ export function AppLayout() {
 
       <ToastContainer />
       <UndoBanner />
+      <ConfirmHost />
       <IdleGuard onTimeout={() => { logout() }} />
       <CommandPalette pages={[...mainNav, ...adminNav].map(n => ({ to: n.to, label: n.label }))} open={paletteOpen} onClose={() => setPaletteOpen(false)}
         actions={[

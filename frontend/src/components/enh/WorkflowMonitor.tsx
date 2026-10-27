@@ -5,6 +5,7 @@ import { enhApi } from '@/api/client'
 import { Avatar, Button, cn, toast } from '@/components/ui'
 import { buildSummary, copyText } from '@/components/enh/summaryText'
 import { Blank, Chip, Panel, Skeletons, Tile, type Tone, shortAgo } from '@/components/enh/kit'
+import { ask } from '@/lib/confirm'
 
 type Stage = 'not_started' | 'extracting' | 'needs_fixes' | 'peer_review' | 'signoff' | 'delivered'
 const STAGES: { key: Stage; label: string; hint: string; tone: Tone; bar: string }[] = [
@@ -263,7 +264,7 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
           <label className="relative"><Search className="w-3.5 h-3.5 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
             <input value={q} onChange={e => { setQ(e.target.value); setLimit(30) }} placeholder="Search" aria-label="Search sources"
               className="text-sm border border-gray-200 rounded-xl pl-8 pr-3 py-1.5 w-40 focus:outline-none focus:ring-2 focus:ring-brand-200" /></label>
-          {stuck.length > 0 && <Button variant="secondary" size="sm" loading={nudging} onClick={() => { if (window.confirm(`Send a reminder for ${stuck.length} ${stuck.length === 1 ? 'source' : 'sources'} that have waited 7+ days? People are only reminded once a day.`)) remind(stuck.map(r => r.source_id)) }}><Bell className="w-4 h-4" /> Remind {stuck.length} stuck</Button>}
+          {stuck.length > 0 && <Button variant="secondary" size="sm" loading={nudging} onClick={async () => { if (await ask(`Send a reminder for ${stuck.length} ${stuck.length === 1 ? 'source' : 'sources'}?\n\nThey have waited 7+ days. People are only reminded once a day.`, { confirmLabel: 'Send reminders' })) remind(stuck.map(r => r.source_id)) }}><Bell className="w-4 h-4" /> Remind {stuck.length} stuck</Button>}
           <Button variant="secondary" size="sm" onClick={exportCsv} disabled={!rows.length}><Download className="w-4 h-4" /> CSV</Button>
         </div>}>
         {rows.length === 0 ? <Blank title="No sources match" text="Clear the stage filter or the search." /> : (

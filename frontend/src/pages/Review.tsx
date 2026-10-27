@@ -8,6 +8,7 @@ import {
 import { recordsApi, jobsApi } from '@/api/client'
 import type { ExtractedRecord, Job, LLMFieldFlag } from '@/types'
 import { Button, Badge, ConfidenceBadge, LLMVerdictBadge, cn, Spinner, EmptyState, toast } from '@/components/ui'
+import { ask } from '@/lib/confirm'
 
 type Mode = 'single' | 'bulk'
 
@@ -100,7 +101,7 @@ export function ReviewPage() {
   const doBulkAction = async (action: 'approve' | 'reject') => {
     const ids = Array.from(selected)
     if (!ids.length) return
-    if (!confirm(`${action} ${ids.length} records?`)) return
+    if (!await ask(`${action === 'approve' ? 'Approve' : 'Reject'} ${ids.length} record${ids.length === 1 ? '' : 's'}?`, { confirmLabel: action === 'approve' ? 'Approve' : 'Reject', tone: action === 'approve' ? 'brand' : 'danger' })) return
     setSaving(true)
     try {
       await recordsApi.bulkReview(ids, action)

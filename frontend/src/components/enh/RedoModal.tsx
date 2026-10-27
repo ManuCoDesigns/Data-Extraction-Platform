@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Check, Shuffle, X } from 'lucide-react'
 import { enhApi } from '@/api/client'
 import { Avatar, Button, cn, toast } from '@/components/ui'
+import { ask } from '@/lib/confirm'
 
 interface Person { user_id: string; name: string; email: string; role: string }
 
@@ -50,7 +51,7 @@ export function RedoModal({ ids, names, sources, onClose, onDone }: { ids: strin
     if (!plan) return
     const n = plan.assignments.length
     const warn = startOver && plan.with_records > 0 ? `\n\n${plan.with_records} of them have earlier records. Those are cleared and kept as v1, so you can compare the two rounds later in Quality, v1 vs v2.` : ''
-    if (!window.confirm(`Assign ${n} source${n === 1 ? '' : 's'} now?${warn}\n\nEach extractor and reviewer is told what they have been given.`)) return
+    if (!await ask(`Assign ${n} source${n === 1 ? '' : 's'} now?${warn}\n\nEach extractor and reviewer is told what they have been given.`, { confirmLabel: `Assign ${n}`, tone: startOver && plan.with_records > 0 ? 'warning' : 'brand' })) return
     setBusy('apply')
     try {
       const r = await enhApi.redoApply({ assignments: plan.assignments.map((a: any) => ({ source_id: a.source_id, extractor_id: a.extractor_id, reviewer_id: a.reviewer_id })), start_over: startOver, note: 'Re-extraction round' })

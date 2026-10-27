@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { qualityApi } from '@/api/client'
 import { Blank, Chip, Panel, Tile, type Tone } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
+import { ask } from '@/lib/confirm'
 
 /**
  * Upload the final records, see them against what the extractor delivered and what the reviewers flagged, with error % and accuracy %
@@ -53,7 +54,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
   const run = async (apply: boolean) => {
     if (!file) return toast.error('Choose the file first')
     const held = res?.totals?.pending ?? 0
-    if (apply && !window.confirm(`Record these results as audits?\n\nThis saves a correct or wrong verdict for every field you have decided, and settles the reviewers' comments on them.${held ? `\n\n${held} field${held === 1 ? ' is' : 's are'} still to confirm and will NOT be recorded.` : ''}\nNo record is edited.`)) return
+    if (apply && !await ask(`Record these results as audits?\n\nThis saves a correct or wrong verdict for every field you have decided, and settles the reviewers' comments on them. No record is edited.${held ? `\n\n${held} field${held === 1 ? ' is' : 's are'} still to confirm and will not be recorded.` : ''}`, { confirmLabel: 'Record audits' })) return
     setBusy(apply ? 'apply' : 'check')
     try {
       const r = await qualityApi.answerKey(file, { apply, projectId, sourceId, decisions: dec })
@@ -72,7 +73,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
   }, [dec])
   const submit = async (apply: boolean) => {
     if (!file) return
-    if (apply && !window.confirm(`Submit the final records?\n\nEach matched record takes your final values. A final record with no match is added, and a delivered record it replaces is removed.${approve ? '\nThe records and the sources are approved.' : ''}\n\nThe earlier values are kept in the audit trail. Run Record as audits first if you have not: the scores keep the first-pass errors, but this Check will then show the records as matching.`)) return
+    if (apply && !await ask(`Submit the final records?\n\n• Each matched record takes your final values\n• A final record with no match is added\n• A delivered record it replaces is removed${approve ? '\n• The records and the sources are approved' : ''}\n\nThe earlier values are kept in the audit trail. Run Record as audits first if you have not: the scores keep the first-pass errors, but this Check will then show the records as matching.`, { confirmLabel: approve ? 'Submit and approve' : 'Submit', tone: 'warning' })) return
     setBusy(apply ? 'apply' : 'check')
     try {
       const r = await qualityApi.submitFinal(file, { apply, approve, projectId, sourceId })

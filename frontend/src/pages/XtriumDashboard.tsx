@@ -8,6 +8,7 @@ import {
 import { xtriumApi } from '@/api/client'
 import { cn, toast } from '@/components/ui'
 import { fmtDateTime, fmtTime } from '@/lib/prefs'
+import { ask } from '@/lib/confirm'
 
 // ── Our own internal statuses ────────────────────────────────────────────────
 const STATUS_META: Record<string, { label: string; color: string }> = {
@@ -773,7 +774,7 @@ function DetailDrawer({ source, onClose, onChanged, onMissing, onFound, onSync, 
       const detail = err?.response?.data?.detail
       if (status === 409) {
         const incomplete = String(detail).startsWith('Incomplete')
-        if (window.confirm(incomplete ? String(detail) : `${detail}\n\nSubmit again anyway?`)) {
+        if (await ask(incomplete ? String(detail) : `${detail}\n\nSubmit again anyway?`, { confirmLabel: 'Submit anyway', tone: 'warning' })) {
           retry = incomplete ? [confirmResubmit, true] : [true, confirmIncomplete]
         }
       } else {
@@ -1325,11 +1326,12 @@ export function XtriumDashboardPage() {
     const ready = sources.filter(isReady).slice(0, 10)
     if (ready.length === 0) return
     const more = sources.filter(isReady).length - ready.length
-    if (!window.confirm(
+    if (!await ask(
       `Submit ${ready.length} approved source${ready.length !== 1 ? 's' : ''} to Xtrium now?\n\n` +
       ready.map(x => `• #${x.external_ref_id} ${x.name}`).join('\n') +
       (more > 0 ? `\n\n${more} more will wait for the next round.` : '') +
       `\n\nSources missing fields the SOP requires are skipped.`,
+      { confirmLabel: 'Submit to Xtrium' },
     )) return
     setBulkSubmitting(true)
     try {

@@ -4,6 +4,7 @@ import { enhApi } from '@/api/client'
 import { Avatar, Button, cn, toast } from '@/components/ui'
 import { Panel } from '@/components/enh/kit'
 import { useAuthStore } from '@/store/auth'
+import { ask } from '@/lib/confirm'
 
 type Msg = { id: string; who: string; role: string; body: string; at: string; mine: boolean; new: boolean; thread: string }
 type Thread = { items: Msg[]; can_post: boolean; closed: boolean; scope: 'all' | 'private'; owners: { user_id: string; name: string }[]; extractor?: string | null; is_extractor: boolean }
@@ -64,7 +65,7 @@ export function SourceChat({ sourceId, onUnread }: { sourceId: string; onUnread?
     finally { setSending(false) }
   }
   const remove = async (id: string) => {
-    if (!window.confirm('Delete this message for everyone?')) return
+    if (!await ask('Delete this message for everyone?', { confirmLabel: 'Delete', tone: 'danger' })) return
     try { await enhApi.deleteMessage(id); await load() } catch (e: any) { toast.error(e?.response?.data?.detail || "Couldn't delete it") }
   }
 

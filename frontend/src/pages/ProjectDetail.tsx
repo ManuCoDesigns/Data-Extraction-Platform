@@ -9,6 +9,7 @@ import { projectsApi, resourcesApi, workSubmissionsApi, usersApi, jobsApi, schem
 import type { Project, ProjectMember, ProjectResource, ProjectSubmission, ResourceType, User, Job, Schema } from '@/types'
 import { useAuthStore } from '@/store/auth'
 import { isProjectAdmin, canReviewProject, getRoleLabel } from '@/lib/permissions'
+import { ask } from '@/lib/confirm'
 import {
   Button, Card, Badge, Modal, Input, Select, Textarea, EmptyState,
   Spinner, Avatar, cn, toast, JobStatusBadge, safeFromNow, safeFormat,
@@ -276,7 +277,7 @@ function ResourcesTab({ projectId, resources, isAdmin, onChange }: {
   }
 
   const handleDelete = async (resourceId: string) => {
-    if (!confirm('Delete this resource?')) return
+    if (!await ask('Delete this resource?', { confirmLabel: 'Delete', tone: 'danger' })) return
     try {
       await resourcesApi.delete(projectId, resourceId)
       toast.success('Resource deleted')
@@ -614,7 +615,7 @@ function MembersTab({ projectId, members, onChange }: {
   }
 
   const removeMember = async (memberId: string) => {
-    if (!confirm('Remove this member from the project?')) return
+    if (!await ask('Remove this member from the project?', { confirmLabel: 'Remove', tone: 'danger' })) return
     try {
       await projectsApi.removeMember(projectId, memberId)
       toast.success('Member removed')

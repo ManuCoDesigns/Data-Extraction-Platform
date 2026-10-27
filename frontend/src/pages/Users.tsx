@@ -5,6 +5,7 @@ import { Modal, Input, Select, ConfirmDialog, toast, cn } from '@/components/ui'
 import { useCapability } from '@/lib/permissions'
 import type { User } from '@/types'
 import { fmtDate } from '@/lib/prefs'
+import { ask } from '@/lib/confirm'
 
 const ROLE_META: Record<string, { label: string; color: string; bg: string; grad: string }> = {
   org_admin:         { label: 'Org Admin',     color: 'var(--tx-dc2626)', bg: 'var(--bg-fef2f2)', grad: 'linear-gradient(135deg,#ef4444,#b91c1c)' },
@@ -107,7 +108,7 @@ export function UsersPage() {
 
   // ── Unlock / reset two-step sign-in ───────────────────────────────────────
   const unlockUser = async (u: User) => {
-    if (!confirm(`Unlock ${u.full_name} and turn off their two-step sign-in? Use this when they lost their phone or are locked out.`)) return
+    if (!await ask(`Unlock ${u.full_name}?\n\nTheir two-step sign-in is turned off. Use this when they lost their phone or are locked out.`, { confirmLabel: 'Unlock', tone: 'warning' })) return
     try {
       await enhApi.totpReset(u.id)
       toast.success(`${u.full_name} can sign in again`)
@@ -120,7 +121,7 @@ export function UsersPage() {
   const [togglingId, setTogglingId] = useState<string | null>(null)
 
   const deactivate = async (userId: string) => {
-    if (!confirm('Deactivate this user? They will lose access immediately.')) return
+    if (!await ask('Deactivate this user?\n\nThey lose access immediately.', { confirmLabel: 'Deactivate', tone: 'danger' })) return
     setTogglingId(userId)
     try {
       await usersApi.update(userId, { is_active: false })
