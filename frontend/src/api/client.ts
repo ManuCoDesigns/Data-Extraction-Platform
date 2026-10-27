@@ -580,3 +580,20 @@ export const qualityApi = {
   sopOverview: (projectId?: string) => api.get('/quality/sop-overview', { params: { project_id: projectId || undefined } }).then(r => r.data),
   summary: (params: { project_id?: string; source_id?: string; days?: number; date_from?: string; date_to?: string }) => api.get('/quality/summary', { params }).then(r => r.data),
 }
+
+
+export const observationsApi = {
+  forSource: (sourceId: string) => api.get(`/observations/sources/${sourceId}`).then(r => r.data),
+  saveMine: (sourceId: string, body: { none: boolean; items: { kind: string; note?: string; record_id?: string }[] }) => api.put(`/observations/sources/${sourceId}/mine`, body).then(r => r.data),
+  pending: () => api.get('/observations/pending').then(r => r.data as { count: number; items: any[] }),
+  summary: (params: { project_id?: string; kind?: string; source_id?: string }) => api.get('/observations', { params }).then(r => r.data),
+  download: async (params: { project_id?: string; kind?: string }) => {
+    const r = await api.get('/observations', { params: { ...params, export: 'xlsx' }, responseType: 'blob', timeout: 120000 })
+    const url = URL.createObjectURL(new Blob([r.data]))
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `observations_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 2000)
+  },
+}

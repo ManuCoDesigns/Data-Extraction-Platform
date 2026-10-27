@@ -8,6 +8,8 @@ import { SopPanel } from '@/components/SopPanel'
 import { XtriumNoticesBanner } from '@/components/XtriumNoticesBanner'
 import { PeerReviewPanel } from '@/components/PeerReviewPanel'
 import { isPeerOf } from '@/lib/peers'
+import { ObservationsPanel } from '@/components/enh/ObservationsPanel'
+import { observationsApi } from '@/api/client'
 import { AskClientModal } from '@/components/enh/AskClient'
 import { SourceActivity } from '@/components/enh/SourceActivity'
 import { SourceChat } from '@/components/enh/SourceChat'
@@ -41,7 +43,7 @@ const STATUS_META: Record<SourceStatus, { label: string; color: 'gray'|'amber'|'
   approved:          { label: 'Approved',          color: 'green' },
 }
 
-type Tab = 'records' | 'files' | 'details' | 'sop'
+type Tab = 'records' | 'files' | 'details' | 'sop' | 'observations'
 
 // A fresh page for every source, so stepping from one source to the next never carries over
 // the previous one's open tabs or half-finished edits.
@@ -477,6 +479,9 @@ function SourceDetailInner() {
   useEffect(() => {
     if (tab === 'files' && !rawFilesLoaded) loadRawFiles()
   }, [tab, rawFilesLoaded])
+
+  const [obsOwe, setObsOwe] = useState(false)
+  useEffect(() => { if (sourceId) observationsApi.forSource(sourceId).then(r => setObsOwe(!!r.i_owe)).catch(() => {}) }, [sourceId])
 
   const userRoles = user?.roles ?? []
   const isAdmin = userRoles.includes('org_admin') || userRoles.includes('project_admin')
@@ -1137,8 +1142,15 @@ function SourceDetailInner() {
 
       <SourceActivity sourceId={source.id} refreshKey={source.updated_at} />
 
+      {obsOwe && tab !== 'observations' && (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex items-center justify-between gap-3 flex-wrap">
+          <span><b>Record your observations.</b> List any issues you ran into on this source, or confirm you found none. It is required.</span>
+          <button onClick={() => setTab('observations')} className="px-3 py-1.5 rounded-lg bg-red-600 text-white text-sm font-semibold">Record now</button>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 4, padding: '4px', background: 'var(--bg-f1f5f9)', borderRadius: 12, alignSelf: 'flex-start' }}>
-        {((isFromXtrium ? ['records', 'files', 'details', 'sop'] : ['records', 'files', 'details']) as Tab[]).map(t => (
+        {((isFromXtrium ? ['records', 'files', 'details', 'sop', 'observations'] : ['records', 'files', 'details', 'observations']) as Tab[]).map(t => (
           <button key={t} onClick={() => setTab(t)} style={{
             padding: '7px 18px', borderRadius: 9, border: 'none', cursor: 'pointer',
             fontSize: 13, fontWeight: 600, transition: 'all 0.15s',
@@ -1146,7 +1158,7 @@ function SourceDetailInner() {
             color: tab === t ? 'var(--tx-1d4ed8)' : 'var(--tx-64748b)',
             boxShadow: tab === t ? '0 1px 4px rgba(0,0,0,0.1)' : 'none',
           }}>
-            {t === 'records' ? `Records (${records.length})` : t === 'files' ? 'Files' : t === 'sop' ? 'SOP' : 'Details & Notes'}
+            {t === 'records' ? `Records (${records.length})` : t === 'files' ? 'Files' : t === 'sop' ? 'SOP' : t === 'observations' ? <>Observations{obsOwe && <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 8, background: '#dc2626', marginLeft: 6 }} />}</> : 'Details & Notes'}
           </button>
         ))}
       </div>
@@ -1697,6 +1709,8 @@ function SourceDetailInner() {
           )}
         </div>
       )}
+
+      {tab === 'observations' && <ObservationsPanel sourceId={source.id} onChange={setObsOwe} />}
 
       {tab === 'sop' && isFromXtrium && (
         <SopPanel sourceId={source.id} fullPageHref={`/projects/${source.project_id}/sources/${source.id}/sop`} />

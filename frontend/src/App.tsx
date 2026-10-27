@@ -25,6 +25,7 @@ import { ClientQuestionsPage } from '@/pages/ClientQuestions'
 import { DigestPage } from '@/pages/Digest'
 import { AuditTrailPage } from '@/pages/AuditTrail'
 import { DeliveryPage } from '@/pages/Delivery'
+import { ObservationsPage } from '@/pages/Observations'
 import { InsightsPage } from '@/pages/Insights'
 import { MessagesPage } from '@/pages/Messages'
 import { QualityPage } from '@/pages/Quality'
@@ -158,6 +159,7 @@ export function App() {
           <Route path="quality" element={<RequireTeamLead><QualityPage /></RequireTeamLead>} />
           <Route path="digest" element={<RequireTeamLead><DigestPage /></RequireTeamLead>} />
           <Route path="delivery" element={<RequireTeamLead><DeliveryPage /></RequireTeamLead>} />
+          <Route path="observations" element={<RequireTeamLead><ObservationsPage /></RequireTeamLead>} />
           <Route path="audit" element={<RequireTeamLead><AuditTrailPage /></RequireTeamLead>} />
 
           <Route

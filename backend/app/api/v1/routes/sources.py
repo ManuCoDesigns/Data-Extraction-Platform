@@ -2099,6 +2099,8 @@ def submit_peer_review(
     comment = (payload.comment or "").strip()
     if not comment:
         raise HTTPException(status_code=422, detail="Add a comment before you finish your review.")
+    from app.services import observations as _obs
+    _obs.require_before_review(db, source, current_user)
 
     now = datetime.now(timezone.utc)
     row.status = "submitted"

@@ -819,3 +819,18 @@ class SourceRound(Base):
     records = Column(JSON, nullable=True)            # [{id, name, fields, review_status}]
     audits = Column(JSON, nullable=True)             # [{record_id, field, verdict, first_verdict, extracted_value, truth_value}]
     findings = Column(JSON, nullable=True)           # [{record_id, field, origin, status, raised_by, fixed_before_final}]
+
+
+class SourceObservation(Base):
+    """What an extractor or reviewer saw while working a source: a page that would not open, a login wall, no data.
+    A person's check is done once they have at least one row ('none' means they looked and found no issue)."""
+    __tablename__ = "source_observations"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    role = Column(String(12), nullable=False, default="extractor")      # extractor | reviewer | admin
+    kind = Column(String(24), nullable=False)                           # see services/observations.KINDS, or 'none'
+    note = Column(Text, nullable=True)
+    record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_utc, index=True)

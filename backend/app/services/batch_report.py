@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.models.all_models import (
     ClientQuestion, ExtractedRecord, ExtractionJob, ReviewStatus, Source, SourceLinkCheck, SourceStatus, User,
 )
-from app.services import enh, quality as q
+from app.services import enh, observations as obs, quality as q
 
 STAGES = [
     ("delivered", "Delivered"), ("signoff", "Ready for sign-off"), ("peer_review", "In peer review"),
@@ -100,6 +100,20 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         if s.id in asks and s.id not in blocked and s.status != SourceStatus.APPROVED:
             blocked[s.id] = {"kind": "question", "reason": "Waiting on the client", "detail": " / ".join(asks[s.id])[:200]}
 
+    # what extractors and reviewers recorded: issues that block a source join the blocked list too
+    obs_rows = obs.rows_for(db, ids)
+    by_src: dict = {}
+    for o in obs_rows:
+        if o.kind != "none":
+            by_src.setdefault(o.source_id, []).append(o)
+    for s in mine:
+        if s.status == SourceStatus.APPROVED or s.id in blocked:
+            continue
+        hard = [o for o in by_src.get(s.id, []) if obs.KINDS.get(o.kind, ("", "", False))[2]]
+        if hard:
+            top = hard[0]
+            blocked[s.id] = {"kind": "observed", "reason": obs.LABEL.get(top.kind, top.kind), "detail": (top.note or "")[:120] or None, "group": obs.KINDS[top.kind][1]}
+
     names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_({s.assigned_extractor_id for s in mine} | {p.user_id for s in mine for p in s.peer_reviews} | {s.assigned_reviewer_id for s in mine if s.assigned_reviewer_id})).all()}
     qrow = {r["source_id"]: r for r in (sc or {}).get("batches", [])}
 
@@ -133,7 +147,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     for s in mine:
         b = blocked.get(s.id)
         if b:
-            need = {"link": "A corrected link, or OK to skip", "question": "An answer to the open questions"}.get(b["kind"], "Confirm there is nothing to extract, or a different source")
+            need = {"link": "A corrected link, or OK to skip", "question": "An answer to the open questions", "observed": obs.NEED.get(b.get("group"), "A decision on this source")}.get(b["kind"], "Confirm there is nothing to extract, or a different source")
             g = groups.setdefault((b["kind"], b["reason"]), {"kind": b["kind"], "title": b["reason"], "need": need, "items": []})
             g["items"].append({"source_id": s.id, "project_id": s.project_id, "name": s.name, "item_no": s.external_ref_id, "detail": b["detail"]})
     blocked_groups = sorted(groups.values(), key=lambda g: -len(g["items"]))
@@ -197,6 +211,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         "stages": [{"key": k, "label": l, "count": stages[k]} for k, l in STAGES],
         "by_type": sorted(by_type.values(), key=lambda t: -t["total"]),
         "blocked": blocked_groups, "sources": rows, "people": sorted(people.values(), key=lambda p: -(p["extracting"] + p["reviewing"])),
+        "observations": obs.counts(obs_rows), "observation_checks": {"done": sum(1 for s in mine for o in obs.who_owes(s, obs_rows) if o["done"]), "total": sum(len(obs.who_owes(s, obs_rows)) for s in mine)},
         "quality": quality, "highlights": lines, "cards": cards[:4], "projects": sorted({r["project"] for r in rows if r["project"]}),
         "sops": sorted({r["sop"] for r in rows if r["sop"]}),
         "timing": {"avg_days_delivered": round(sum(done_days) / len(done_days), 1) if done_days else None,
@@ -233,6 +248,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
         d["new"] = bool(latest and len(pulled) > 1 and code not in earlier_sops and code != "No SOP saved")
     by_sop = sorted(sop_total.values(), key=lambda d: (d["code"] == "No SOP saved", d["code"]))
 
+    all_obs = obs.rows_for(db, ids)
     kinds: dict = {}
     merged: dict = {}
     for r in reps:
@@ -269,6 +285,6 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
     nxt.append({"title": "Keep the peer-review structure", "text": "Continue independent peer review and the sign-off step for every new assignment."})
     return {
         "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,
-        "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
+        "observations": obs.counts(all_obs), "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
         "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:3], "open_sources": open_sources,
     }

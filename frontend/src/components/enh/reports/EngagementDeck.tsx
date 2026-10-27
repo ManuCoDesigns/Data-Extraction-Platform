@@ -148,6 +148,9 @@ export function EngagementDeck({ e }: { e: any }) {
             </Card>
           ))}
         </div>
+        {e.observations && e.observations.length > 0 && (
+          <div style={{ marginTop: 18, fontSize: 15.5, color: DARK, lineHeight: 1.7 }}><b>Recorded by extractors and reviewers:</b> {e.observations.slice(0, 6).map((o: any) => `${o.label} (${o.count})`).join(', ')}.</div>
+        )}
         <p style={{ margin: '20px 0 0', fontSize: 18, fontStyle: 'italic', color: GREY, lineHeight: 1.6 }}>The response is the same every time: escalate rather than guess, and stay in close contact with the client-side team to confirm entity names, resolve schema classification and verify corrected URLs.</p>
       </Slide>
 

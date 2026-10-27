@@ -175,6 +175,18 @@ export function BatchReport({ projectId }: { projectId: string }) {
               <p className="text-xs mt-3 mb-0" style={{ color: '#6b7280' }}>* This list updates as we find more.</p>
             </section>
 
+            {d.observations?.length > 0 && (
+              <section className="avoid-break">
+                <h3 className="m-0 text-xl font-bold">What extractors and reviewers ran into</h3>
+                <p className="mt-1 mb-2 text-xs" style={{ color: '#6b7280' }}>{d.observation_checks.done} of {d.observation_checks.total} required observation checks recorded for this batch.</p>
+                <div className="grid gap-x-8 gap-y-2 md:grid-cols-2">
+                  {d.observations.map((o: any) => (
+                    <div key={o.kind} className="flex justify-between text-sm"><span>{o.label}</span><span className="tabular-nums" style={{ color: '#6b7280' }}>{o.count} on {o.sources} {o.sources === 1 ? 'source' : 'sources'}</span></div>
+                  ))}
+                </div>
+              </section>
+            )}
+
             <section className="avoid-break">
               <h3 className="m-0 text-xl font-bold">Summary</h3>
               <ul className="mt-2 mb-0 pl-5 text-sm space-y-1" style={{ color: '#374151' }}>{d.highlights.map((l: string, i: number) => <li key={i}>{l}</li>)}</ul>
