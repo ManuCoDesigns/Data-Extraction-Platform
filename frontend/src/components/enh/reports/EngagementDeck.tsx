@@ -154,6 +154,24 @@ export function EngagementDeck({ e }: { e: any }) {
         <p style={{ margin: '20px 0 0', fontSize: 18, fontStyle: 'italic', color: GREY, lineHeight: 1.6 }}>The response is the same every time: escalate rather than guess, and stay in close contact with the client-side team to confirm entity names, resolve schema classification and verify corrected URLs.</p>
       </Slide>
 
+      {e.qa && e.qa.items.some((x: any) => x.status === 'answered') && (
+        <Slide n={next()} kicker="Questions raised" title={`${e.qa.answered} questions answered by Xtrium${e.qa.open ? `, ${e.qa.open} still open` : ''}`}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 14 }}>
+            {e.qa.topics.map((x: any) => <span key={x.topic} style={{ background: SOFT, borderRadius: 20, padding: '6px 14px', fontSize: 14, fontWeight: 600 }}>{x.topic} <span style={{ color: BLUE }}>{x.answered}/{x.asked}</span></span>)}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {e.qa.items.filter((x: any) => x.status === 'answered').slice(0, 6).map((x: any, i: number) => (
+              <Card key={i} style={{ padding: '14px 18px', height: 150, overflow: 'hidden' }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: BLUE, textTransform: 'uppercase', letterSpacing: 1 }}>{x.topic}</div>
+                <div style={{ fontSize: 14.5, fontWeight: 700, margin: '4px 0', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{x.question}</div>
+                <div style={{ fontSize: 13.5, color: GREY, lineHeight: 1.45, display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{x.answer}</div>
+              </Card>
+            ))}
+          </div>
+          {e.qa.answered > 6 && <div style={{ fontSize: 13, color: GREY, marginTop: 8 }}>and {e.qa.answered - 6} more, listed on the Client questions page.</div>}
+        </Slide>
+      )}
+
       <Slide dark>
         <div style={{ position: 'absolute', left: 0, right: 40, top: 80 }}>
           <div style={{ fontFamily: SERIF, fontSize: 90, lineHeight: .6 }}>&ldquo;</div>

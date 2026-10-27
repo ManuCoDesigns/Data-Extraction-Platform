@@ -447,6 +447,7 @@ export const enhApi = {
   answer: (id: string, answer: string) => api.patch(`/enh/questions/${id}`, { answer }).then(r => r.data),
   reopen: (id: string) => api.post(`/enh/questions/${id}/reopen`).then(r => r.data),
   markSent: (ids: string[]) => api.post('/enh/questions/mark-sent', { ids }).then(r => r.data),
+  importQuestions: (body: { project_id: string; items: any[] }) => api.post('/enh/questions/import', body).then(r => r.data as { added: number; updated: number; total: number }),
   removeQuestion: (id: string) => api.delete(`/enh/questions/${id}`).then(r => r.data),
   digest: (projectId?: string) => api.get('/enh/digest', { params: { project_id: projectId || undefined } }).then(r => r.data),
   emailDigest: () => api.post('/enh/digest/email-me').then(r => r.data),
@@ -580,7 +581,6 @@ export const qualityApi = {
   sopOverview: (projectId?: string) => api.get('/quality/sop-overview', { params: { project_id: projectId || undefined } }).then(r => r.data),
   summary: (params: { project_id?: string; source_id?: string; days?: number; date_from?: string; date_to?: string }) => api.get('/quality/summary', { params }).then(r => r.data),
 }
-
 
 export const observationsApi = {
   forSource: (sourceId: string) => api.get(`/observations/sources/${sourceId}`).then(r => r.data),

@@ -351,7 +351,7 @@ def _q_out(q: ClientQuestion) -> dict:
         "id": q.id, "project_id": q.project_id, "source_id": q.source_id, "source_name": q.source.name if q.source else None,
         "question": q.question, "answer": q.answer, "status": q.status,
         "asked_by": q.asker.full_name if q.asker else None, "asked_by_id": q.asked_by,
-        "answered_by": q.answerer.full_name if q.answerer else None,
+        "answered_by": q.answerer.full_name if q.answerer else None, "answered_by_name": q.answered_by_name, "topic": q.topic,
         "sent_to_client_at": q.sent_to_client_at, "created_at": q.created_at, "answered_at": q.answered_at,
     }
 
@@ -429,6 +429,56 @@ def answer_question(qid: str, body: AnswerIn, db: Session = Depends(get_db), use
     db.commit()
     db.refresh(q)
     return _q_out(q)
+
+
+class QAItem(BaseModel):
+    question: str
+    answer: str | None = None
+    topic: str | None = None
+    item_no: str | None = None
+    answered_by: str | None = None
+    sent: bool = True
+
+
+class QAImport(BaseModel):
+    project_id: str
+    items: list[QAItem]
+
+
+@router.post("/questions/import")
+def import_questions(body: QAImport, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Bring in questions and answers that were settled elsewhere (for example in the client's chat), so they can be reported on.
+    Safe to repeat: a question already on the project is filled in, never duplicated."""
+    _need_lead(user)
+    if body.project_id not in _project_ids_for(db, user):
+        raise HTTPException(status_code=403, detail="You are not on this project.")
+    existing = {q.question.strip().lower(): q for q in db.query(ClientQuestion).filter(ClientQuestion.project_id == body.project_id).all()}
+    by_item = {s.external_ref_id: s for s in db.query(Source).filter(Source.project_id == body.project_id, Source.external_ref_id.isnot(None)).all()}
+    now = enh.now_utc()
+    added = updated = 0
+    for it in body.items:
+        text = (it.question or "").strip()
+        if len(text) < 5:
+            continue
+        ans = (it.answer or "").strip() or None
+        src = by_item.get((it.item_no or "").lstrip("#")) if it.item_no else None
+        q = existing.get(text.lower())
+        if q is None:
+            q = ClientQuestion(project_id=body.project_id, source_id=src.id if src else None, question=text, asked_by=user.id, status="open", created_at=now)
+            db.add(q)
+            existing[text.lower()] = q
+            added += 1
+        elif (ans and q.status != "answered") or (it.topic and not q.topic):
+            updated += 1
+        else:
+            continue
+        q.topic = q.topic or (it.topic or None)
+        if it.sent and not q.sent_to_client_at:
+            q.sent_to_client_at = now
+        if ans and q.status != "answered":
+            q.answer, q.status, q.answered_at, q.answered_by_name, q.answered_by = ans, "answered", now, (it.answered_by or None), user.id
+    db.commit()
+    return {"added": added, "updated": updated, "total": len(body.items)}
 
 
 @router.post("/questions/{qid}/reopen")

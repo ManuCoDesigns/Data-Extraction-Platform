@@ -260,7 +260,16 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
             m = merged.setdefault((g["kind"], g["title"]), {"kind": g["kind"], "title": g["title"], "need": g["need"], "items": []})
             m["items"] += [{**i, "batch": r["label"]} for i in g["items"]]
 
-    qs = db.query(ClientQuestion).filter(ClientQuestion.source_id.in_(ids)).all() if ids else []
+    pids = {s.project_id for s in srcs}
+    qs = db.query(ClientQuestion).filter(ClientQuestion.project_id.in_(pids)).order_by(ClientQuestion.created_at).all() if pids else []
+    topics: dict = {}
+    for x in qs:
+        tp = topics.setdefault(x.topic or "General", {"topic": x.topic or "General", "asked": 0, "answered": 0})
+        tp["asked"] += 1
+        tp["answered"] += 1 if x.status == "answered" else 0
+    qa = {"topics": sorted(topics.values(), key=lambda z: -z["asked"]),
+          "items": [{"topic": x.topic or "General", "question": x.question, "answer": x.answer, "answered_by": x.answered_by_name or (x.answerer.full_name if x.answerer else None), "status": x.status} for x in qs],
+          "open": sum(1 for x in qs if x.status == "open"), "answered": sum(1 for x in qs if x.status == "answered")}
     peers = [p for s in srcs for p in s.peer_reviews]
     cum = (sc or {}).get("cumulative") or {}
     tot_sources = sum(p["sources"] for p in phases)
@@ -285,6 +294,6 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
     nxt.append({"title": "Keep the peer-review structure", "text": "Continue independent peer review and the sign-off step for every new assignment."})
     return {
         "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,
-        "observations": obs.counts(all_obs), "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
+        "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
         "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:3], "open_sources": open_sources,
     }

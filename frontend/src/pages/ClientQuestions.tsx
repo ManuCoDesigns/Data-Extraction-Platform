@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { CheckCircle2, ClipboardCopy, HelpCircle, MessageSquarePlus, RotateCcw, Send, Trash2 } from 'lucide-react'
+import { CheckCircle2, ClipboardCopy, HelpCircle, MessageSquarePlus, RotateCcw, Send, Trash2, Upload } from 'lucide-react'
 import { enhApi, projectsApi } from '@/api/client'
 import { Avatar, Button, ConfirmDialog, cn, safeFromNow, toast } from '@/components/ui'
 import { Blank, Chip, PageHeader, Panel, SelectBox, Skeletons, Tabs, PAGE, shortAgo } from '@/components/enh/kit'
@@ -10,7 +10,7 @@ import { useAuthStore } from '@/store/auth'
 interface Q {
   id: string; project_id: string; source_id?: string | null; source_name?: string | null; question: string; answer?: string | null
   status: 'open' | 'answered'; asked_by?: string | null; asked_by_id?: string | null; answered_by?: string | null
-  sent_to_client_at?: string | null; created_at: string; answered_at?: string | null
+  sent_to_client_at?: string | null; created_at: string; answered_at?: string | null; topic?: string | null; answered_by_name?: string | null
 }
 
 export function ClientQuestionsPage() {
@@ -27,6 +27,19 @@ export function ClientQuestionsPage() {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [toDelete, setToDelete] = useState<Q | null>(null)
+  const importQa = async (file: File | undefined) => {
+    if (!file) return
+    const pid = project || (projects.length === 1 ? projects[0].id : '')
+    if (!pid) { toast.error('Pick a project first, then import'); return }
+    try {
+      const raw = JSON.parse(await file.text())
+      const items = Array.isArray(raw) ? raw : raw.items
+      if (!Array.isArray(items) || !items.length) throw new Error('empty')
+      const r = await enhApi.importQuestions({ project_id: pid, items })
+      toast.success(`${r.added} added, ${r.updated} filled in`)
+      load()
+    } catch (e: any) { toast.error(e?.response?.data?.detail || 'That file is not a list of questions and answers') }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -79,6 +92,12 @@ export function ClientQuestionsPage() {
               {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
             </SelectBox>
           )}
+          {isLead && (
+            <label className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-gray-200 bg-white text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-50">
+              <Upload className="w-4 h-4" /> Import Q&A
+              <input type="file" accept=".json,application/json" className="hidden" onChange={e => { importQa(e.target.files?.[0]); e.target.value = '' }} />
+            </label>
+          )}
           <Button onClick={() => setAsk(true)}><MessageSquarePlus className="w-4 h-4" /> Ask a question</Button>
         </>} />
 
@@ -120,6 +139,7 @@ export function ClientQuestionsPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap mb-1.5">
                         <Chip tone={open ? 'amber' : 'green'}>{open ? 'Open' : 'Answered'}</Chip>
+                        {q.topic && <Chip tone="purple">{q.topic}</Chip>}
                         {q.sent_to_client_at && open && <Chip tone="indigo" title="Copied for the client"><Send className="w-3 h-3" /> Sent {shortAgo(q.sent_to_client_at)} ago</Chip>}
                         {q.source_id && q.source_name && (
                           <Link to={`/projects/${q.project_id}/sources/${q.source_id}`} className="text-xs font-medium text-brand-600 hover:underline truncate max-w-[260px]">{q.source_name}</Link>
@@ -140,7 +160,7 @@ export function ClientQuestionsPage() {
 
                   {!open && q.answer && (
                     <div className="mt-4 rounded-xl bg-emerald-50 px-4 py-3">
-                      <p className="text-xs font-semibold text-emerald-700 m-0 mb-1 flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5" /> Client's answer{q.answered_by ? `, recorded by ${q.answered_by}` : ''}{q.answered_at ? ` ${safeFromNow(q.answered_at)}` : ''}</p>
+                      <p className="text-xs font-semibold text-emerald-700 m-0 mb-1 flex items-center gap-1.5"><CheckCircle2 className="w-3.5 h-3.5" /> Client's answer{q.answered_by_name ? ` from ${q.answered_by_name}` : ''}{q.answered_by ? `, recorded by ${q.answered_by}` : ''}{q.answered_at ? ` ${safeFromNow(q.answered_at)}` : ''}</p>
                       <p className="text-sm text-emerald-950 m-0 whitespace-pre-wrap leading-relaxed">{q.answer}</p>
                       {isLead && <button type="button" onClick={() => reopen(q)} className="mt-2 text-xs font-semibold text-emerald-700 hover:underline inline-flex items-center gap-1"><RotateCcw className="w-3 h-3" /> Reopen</button>}
                     </div>

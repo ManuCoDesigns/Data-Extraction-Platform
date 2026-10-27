@@ -695,6 +695,8 @@ class ClientQuestion(Base):
     sent_to_client_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_utc)
     answered_at = Column(DateTime(timezone=True), nullable=True)
+    topic = Column(String(40), nullable=True)                 # SOP and schema | Classification | Submission | Access | Process
+    answered_by_name = Column(String(160), nullable=True)     # who on the client side gave the answer, when it was brought in from their chat
 
     asker = relationship("User", foreign_keys=[asked_by])
     answerer = relationship("User", foreign_keys=[answered_by])
