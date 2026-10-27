@@ -1794,7 +1794,7 @@ def admin_review_record(
     now = datetime.now(timezone.utc)
 
     if action == "approve":
-        _assert_peers_done(source)
+        _assert_peers_done(source, current_user)
         record.review_status = ReviewStatus.APPROVED
         record.admin_reviewed_by = current_user.id
         record.admin_reviewed_at = now
@@ -1905,7 +1905,7 @@ def approve_source(
     if not _is_assigned_reviewer(current_user, source):
         raise HTTPException(status_code=403, detail="Only reviewers, QA leads, project admins, or org admins can approve a source")
 
-    _assert_peers_done(source)
+    _assert_peers_done(source, current_user)
 
     user_roles = _user_roles(current_user)
     is_admin = "org_admin" in user_roles or "project_admin" in user_roles
@@ -1983,7 +1983,10 @@ def _reset_peer_reviews(source: Source):
             r.status = "pending"
 
 
-def _assert_peers_done(source: Source):
+def _assert_peers_done(source: Source, user: User | None = None):
+    # Admins decide on their own: a pending peer review never blocks them.
+    if user is not None and (_user_roles(user) & {"org_admin", "project_admin"}):
+        return
     waiting = [r for r in source.peer_reviews if r.status != "submitted"]
     if waiting:
         names = ", ".join((r.user.full_name if r.user else "a peer reviewer") for r in waiting)
