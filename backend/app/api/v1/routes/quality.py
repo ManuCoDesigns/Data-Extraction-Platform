@@ -1769,3 +1769,25 @@ async def sop_requirements_export(project_id: str | None = None, refresh: bool =
     stamp = enh.now_utc().strftime("%Y%m%d")
     body = qx.sop_requirements_xlsx(items, {"generated": stamp})
     return Response(content=body, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="sop_requirements_{stamp}.xlsx"'})
+
+
+# ─── Batch report: one page per Xtrium pull, built from live data ────────────
+
+@router.get("/batch-report/list")
+def batch_report_list(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    from app.services import batch_report as br
+    _need_lead(user)
+    return {"batches": br.list_batches(_visible_sources(db, user, project_id).all())}
+
+
+@router.get("/batch-report")
+def batch_report(batch: str, project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Everything about the sources Xtrium gave on one day: progress, what is blocked and what we need, people, and accuracy."""
+    from app.services import batch_report as br
+    _need_lead(user)
+    srcs = _visible_sources(db, user, project_id).all()
+    try:
+        sc, _ = _scorecard_data(db, user, project_id, None, None, None)
+    except Exception:
+        sc = None
+    return br.assemble(db, user, srcs, batch, sc)

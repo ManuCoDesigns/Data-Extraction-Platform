@@ -553,6 +553,8 @@ export const qualityApi = {
   },
   feedback: (sourceId: string) => api.get(`/quality/sources/${sourceId}/feedback`).then(r => r.data),
   extractorReport: (params: { project_id?: string; source_id?: string; user_id?: string; days?: number; date_from?: string; date_to?: string }) => api.get('/quality/extractor-report', { params }).then(r => r.data),
+  batchList: (project_id?: string) => api.get('/quality/batch-report/list', { params: { project_id } }).then(r => r.data),
+  batchReport: (batch: string, project_id?: string) => api.get('/quality/batch-report', { params: { batch, project_id } }).then(r => r.data),
   processReport: (params: { project_id?: string; source_id?: string; date_from?: string; date_to?: string }) => api.get('/quality/process-report', { params }).then(r => r.data),
   exportProcessReport: async (params: { project_id?: string; source_id?: string; date_from?: string; date_to?: string }) => {
     const r = await api.get('/quality/process-report/export', { params, responseType: 'blob' })
