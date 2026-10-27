@@ -226,7 +226,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
               <div className="overflow-x-auto mt-2">
                 <table className="w-full text-sm">
                   <thead><tr className="text-left text-xs" style={{ background: '#1473f0', color: '#fff' }}>
-                    {['Source', 'Stage', 'Records', 'Extractor', 'Reviewers', 'Days', 'Accuracy'].map(h => <th key={h} className="py-2 px-2.5 font-semibold">{h}</th>)}
+                    {['Source', 'Stage', 'Records', 'Peer reviews', 'Days', 'Accuracy'].map(h => <th key={h} className="py-2 px-2.5 font-semibold">{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {shown.map((s: any, i: number) => (
@@ -234,8 +234,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
                         <td className="py-1.5 px-2.5"><Link to={`/projects/${s.project_id}/sources/${s.source_id}`} className="no-underline font-medium" style={{ color: '#111827' }}>{s.name}</Link>{s.item_no ? <span style={{ color: '#9ca3af' }}> #{s.item_no}</span> : null}</td>
                         <td className="px-2.5 whitespace-nowrap"><span className="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style={{ background: STAGE_COLOR[s.stage] }} />{d.stages.find((x: any) => x.key === s.stage)?.label}</td>
                         <td className="px-2.5 tabular-nums">{s.approved}/{s.records}</td>
-                        <td className="px-2.5">{s.extractor || '–'}</td>
-                        <td className="px-2.5">{s.reviewers.length ? s.reviewers.join(', ') : '–'}</td>
+                        <td className="px-2.5 tabular-nums">{s.peers_done}/{s.peers_total}</td>
                         <td className="px-2.5 tabular-nums">{s.days ?? '–'}</td>
                         <td className="px-2.5 tabular-nums">{pct(s.final_accuracy)}</td>
                       </tr>
@@ -245,20 +244,10 @@ export function BatchReport({ projectId }: { projectId: string }) {
               </div>
             </section>
 
-            {d.people.length > 0 && (
-              <section className="avoid-break">
-                <h3 className="m-0 text-xl font-bold">Who did what</h3>
-                <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  {d.people.map((p: any) => (
-                    <div key={p.name} className="rounded-xl p-4" style={{ background: '#f4f7ff' }}>
-                      <div className="font-semibold">{p.name}</div>
-                      <div className="text-xs mt-1" style={{ color: '#4b5563' }}>Extracted {p.extracting_done} of {p.extracting}</div>
-                      <div className="text-xs" style={{ color: '#4b5563' }}>Peer reviews done {p.reviewing_done} of {p.reviewing}</div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            )}
+            <section className="avoid-break">
+              <h3 className="m-0 text-xl font-bold">Team</h3>
+              <p className="mt-2 mb-0 text-sm" style={{ color: '#374151' }}>{d.team.extractors} {d.team.extractors === 1 ? 'extractor' : 'extractors'} and {d.team.reviewers} peer {d.team.reviewers === 1 ? 'reviewer' : 'reviewers'} worked this batch. {d.team.peer_done} of {d.team.peer_total} peer reviews are submitted.</p>
+            </section>
             <p className="text-xs m-0" style={{ color: '#9ca3af' }}>Built from live platform data on {date}. Nothing here is typed by hand.</p>
           </div>
         </div>

@@ -128,7 +128,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
             "source_id": s.id, "project_id": s.project_id, "name": s.name, "item_no": s.external_ref_id, "url": s.website_url,
             "type": s.type or (s.schema.name if s.schema else None), "sop": ((s.xtrium_sop or {}).get("meta") or {}).get("sop_code"),
             "project": s.project.name if s.project else None, "stage": stage, "status": getattr(s.status, "value", s.status),
-            "records": n, "approved": ok, "extractor": names.get(s.assigned_extractor_id), "reviewers": [names.get(p.user_id, "?") for p in s.peer_reviews],
+            "records": n, "approved": ok, "peers_done": sum(1 for p in s.peer_reviews if p.status == "submitted"), "peers_total": len(s.peer_reviews),
             "days": _days(s.created_at, end), "submitted_to_xtrium": bool(s.xtrium_submitted_at),
             "fields": qr.get("fields"), "errors": qr.get("errors"), "errors_per_100": qr.get("errors_per_100"),
             "first_pass_accuracy": qr.get("first_pass_accuracy"), "final_accuracy": qr.get("final_accuracy"),
@@ -158,16 +158,10 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         t["total"] += 1
         t["delivered"] += 1 if r["stage"] == "delivered" else 0
 
-    people: dict = {}
-    for r, s in zip(rows, [next(x for x in mine if x.id == r["source_id"]) for r in rows]):
-        if s.assigned_extractor_id:
-            p = people.setdefault(s.assigned_extractor_id, {"name": names.get(s.assigned_extractor_id), "extracting": 0, "extracting_done": 0, "reviewing": 0, "reviewing_done": 0})
-            p["extracting"] += 1
-            p["extracting_done"] += 1 if r["stage"] == "delivered" else 0
-        for pr in s.peer_reviews:
-            p = people.setdefault(pr.user_id, {"name": names.get(pr.user_id), "extracting": 0, "extracting_done": 0, "reviewing": 0, "reviewing_done": 0})
-            p["reviewing"] += 1
-            p["reviewing_done"] += 1 if pr.status == "submitted" else 0
+    team = {"extractors": len({s.assigned_extractor_id for s in mine if s.assigned_extractor_id}),
+            "reviewers": len({pr.user_id for s in mine for pr in s.peer_reviews}),
+            "peer_done": sum(1 for s in mine for pr in s.peer_reviews if pr.status == "submitted"),
+            "peer_total": sum(len(s.peer_reviews) for s in mine)}
 
     pull = next((p for p in (sc or {}).get("pulls", []) if p["key"] == key), None)
     quality = None
@@ -210,7 +204,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
                    "blocked": stages["blocked"], "in_progress": inflight, "submitted_to_xtrium": sum(1 for r in rows if r["submitted_to_xtrium"])},
         "stages": [{"key": k, "label": l, "count": stages[k]} for k, l in STAGES],
         "by_type": sorted(by_type.values(), key=lambda t: -t["total"]),
-        "blocked": blocked_groups, "sources": rows, "people": sorted(people.values(), key=lambda p: -(p["extracting"] + p["reviewing"])),
+        "blocked": blocked_groups, "sources": rows, "team": team,
         "observations": obs.counts(obs_rows), "observation_checks": {"done": sum(1 for s in mine for o in obs.who_owes(s, obs_rows) if o["done"]), "total": sum(len(obs.who_owes(s, obs_rows)) for s in mine)},
         "quality": quality, "highlights": lines, "cards": cards[:4], "projects": sorted({r["project"] for r in rows if r["project"]}),
         "sops": sorted({r["sop"] for r in rows if r["sop"]}),
@@ -249,6 +243,11 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
     by_sop = sorted(sop_total.values(), key=lambda d: (d["code"] == "No SOP saved", d["code"]))
 
     all_obs = obs.rows_for(db, ids)
+    stage_tot: dict = {}
+    for r in reps:
+        for st in r["stages"]:
+            stage_tot[st["key"]] = stage_tot.get(st["key"], 0) + st["count"]
+    stages_all = [{"key": k, "label": l, "count": stage_tot.get(k, 0)} for k, l in STAGES]
     kinds: dict = {}
     merged: dict = {}
     for r in reps:
@@ -268,7 +267,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
         tp["asked"] += 1
         tp["answered"] += 1 if x.status == "answered" else 0
     qa = {"topics": sorted(topics.values(), key=lambda z: -z["asked"]),
-          "items": [{"topic": x.topic or "General", "question": x.question, "answer": x.answer, "answered_by": x.answered_by_name or (x.answerer.full_name if x.answerer else None), "status": x.status} for x in qs],
+          "items": [{"topic": x.topic or "General", "question": x.question, "answer": x.answer, "status": x.status} for x in qs],
           "open": sum(1 for x in qs if x.status == "open"), "answered": sum(1 for x in qs if x.status == "answered")}
     peers = [p for s in srcs for p in s.peer_reviews]
     cum = (sc or {}).get("cumulative") or {}
@@ -281,6 +280,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
         "blocked": sum(p["blocked"] for p in phases), "peer_done": sum(1 for p in peers if p.status == "submitted"), "peer_total": len(peers),
         "questions_asked": len(qs), "questions_answered": sum(1 for x in qs if x.status == "answered"),
         "fields": cum.get("fields"), "errors": cum.get("errors"), "final_accuracy": cum.get("final_accuracy"), "first_pass_accuracy": cum.get("first_pass_accuracy"),
+        "errors_per_100": cum.get("errors_per_100"), "caught_rate": cum.get("caught_rate"),
     }
     firsts = [r["timing"]["pulled_at"] for r in pulled if r["timing"]["pulled_at"]]
     nxt = []
@@ -294,6 +294,6 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
     nxt.append({"title": "Keep the peer-review structure", "text": "Continue independent peer review and the sign-off step for every new assignment."})
     return {
         "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,
-        "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
+        "stages": stages_all, "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
         "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:3], "open_sources": open_sources,
     }
