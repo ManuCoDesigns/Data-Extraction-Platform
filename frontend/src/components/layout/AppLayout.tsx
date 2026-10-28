@@ -184,33 +184,70 @@ export function AppLayout() {
     || /^\/projects\/[^/]+\/sources(\/|$)/.test(location.pathname)
   const isProjectsPath = location.pathname.startsWith('/projects') && !isSourcesPath
 
+  // Related pages are grouped: one sidebar entry opens the group, and a tab bar above the page switches between its pages.
+  type Item = { to: string; icon: any; label: string; show: boolean; badge?: number; badgeColor?: string }
+  const here = (to: string) => location.pathname === to || location.pathname.startsWith(to + '/')
+  const GROUPS: { key: string; label: string; icon: any; items: Item[] }[] = [
+    { key: 'issues', label: 'Issues', icon: AlertTriangle, items: [
+      { to: '/triage', icon: Link2Off, label: 'Link triage', show: true },
+      { to: '/escalations', icon: AlertTriangle, label: 'Escalations', show: true, badge: escalationCount },
+      { to: '/client-questions', icon: CircleHelp, label: 'Client questions', show: true, badge: counts.open_questions, badgeColor: '#d97706' },
+      { to: '/data-health', icon: HeartPulse, label: 'Data health', show: true, badge: counts.link_problems, badgeColor: '#d97706' },
+      { to: '/observations', icon: ClipboardList, label: 'Observations', show: isTeamLead },
+    ] },
+    { key: 'team', label: 'Team', icon: Activity, items: [
+      { to: '/workload', icon: Activity, label: 'Workload', show: isTeamLead },
+      { to: '/balance', icon: Scale, label: 'Work balance', show: isTeamLead },
+    ] },
+    { key: 'reports', label: isTeamLead ? 'Reports' : 'My stats', icon: ChartColumn, items: [
+      { to: '/insights', icon: ChartColumn, label: isTeamLead ? 'Insights' : 'My Stats', show: true },
+      { to: '/delivery', icon: PackageCheck, label: 'Delivery summary', show: isTeamLead },
+      { to: '/digest', icon: CalendarCheck, label: 'Daily digest', show: isTeamLead },
+    ] },
+    { key: 'setup', label: 'Xtrium & setup', icon: Zap, items: [
+      { to: '/xtrium', icon: Zap, label: 'Xtrium integration', show: isAdmin },
+      { to: '/sop-assign', icon: ListChecks, label: 'SOP assignment', show: isTeamLead },
+      { to: '/schemas', icon: Layers, label: 'Schemas', show: isAdmin && canManageSchemas },
+    ] },
+    { key: 'admin', label: 'Admin', icon: Settings, items: [
+      { to: '/admin/users', icon: Users, label: 'Users', show: canManageUsers },
+      { to: '/settings', icon: Settings, label: 'Settings', show: canManageUsers },
+      { to: '/audit', icon: History, label: 'Audit trail', show: isTeamLead },
+    ] },
+  ]
+  const vis = (g: { items: Item[] }) => g.items.filter(i => i.show)
+  const groupEntry = (key: string) => {
+    const g = GROUPS.find(x => x.key === key)!
+    const items = vis(g)
+    if (items.length === 0) return null
+    if (items.length === 1) return { ...items[0], forceActive: here(items[0].to) }
+    const badge = items.reduce((n, i) => n + (i.badge || 0), 0)
+    return { to: items[0].to, icon: g.icon, label: g.label, show: true, badge, badgeColor: items.some(i => i.badge && !i.badgeColor) ? '#dc2626' : '#d97706', forceActive: items.some(i => here(i.to)) }
+  }
+  const activeGroup = GROUPS.find(g => vis(g).length > 1 && vis(g).some(i => here(i.to)))
+
   const mainNav = [
     { to: '/',            icon: LayoutDashboard, label: 'Dashboard',    show: true },
     { to: '/sources',     icon: Database,        label: 'Sources',      show: true, forceActive: isSourcesPath },
-    { to: '/triage', icon: Link2Off, label: 'Link triage', show: true },
-    { to: '/escalations', icon: AlertTriangle,   label: 'Escalations',  show: true, badge: escalationCount },
-    { to: '/xtrium',      icon: Zap,             label: 'Xtrium Integration', show: isAdmin },
     { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true, forceActive: isProjectsPath },
-    { to: '/workload',    icon: Activity,        label: 'Team Workload', show: isTeamLead },
-    { to: '/balance',     icon: Scale,           label: 'Work balance', show: isTeamLead },
-    { to: '/digest',      icon: CalendarCheck,   label: 'Daily Digest', show: isTeamLead },
-    { to: '/delivery',    icon: PackageCheck,    label: 'Delivery Summary', show: isTeamLead },
-    { to: '/messages',   icon: MessageCircle,   label: 'Messages',     show: true, badge: counts.unread_messages },
+    groupEntry('issues'),
+    groupEntry('team'),
     { to: '/quality',    icon: ShieldCheck,    label: 'Quality',      show: isTeamLead },
-    { to: '/observations', icon: ClipboardList, label: 'Observations', show: isTeamLead },
-    { to: '/sop-assign', icon: ListChecks, label: 'SOP assignment', show: isTeamLead },
-    { to: '/data-health', icon: HeartPulse,      label: 'Data Health',  show: true, badge: counts.link_problems, badgeColor: '#d97706' },
-    { to: '/client-questions', icon: CircleHelp, label: 'Client Questions', show: true, badge: counts.open_questions, badgeColor: '#d97706' },
-    { to: '/insights',    icon: ChartColumn,     label: isTeamLead ? 'Insights' : 'My Stats', show: true },
-    { to: '/schemas',     icon: Layers,          label: 'Schemas',      show: isAdmin && canManageSchemas },
-  ].filter(n => n.show)
+    groupEntry('reports'),
+    { to: '/messages',   icon: MessageCircle,   label: 'Messages',     show: true, badge: counts.unread_messages },
+    groupEntry('setup'),
+  ].filter((n): n is any => !!n && n.show)
 
   const adminNav = [
-    { to: '/audit',       icon: History,  label: 'Audit Trail', show: isTeamLead },
-    { to: '/admin/users', icon: Users,    label: 'Users',    show: canManageUsers },
-    { to: '/settings',    icon: Settings, label: 'Settings', show: canManageUsers },
+    groupEntry('admin'),
     { to: '/help',        icon: BookOpen, label: 'Help',     show: true },
-  ].filter(n => n.show)
+  ].filter((n): n is any => !!n && n.show)
+
+  const paletteItems = [
+    { to: '/', label: 'Dashboard' }, { to: '/sources', label: 'Sources' }, { to: '/projects', label: 'Projects' }, { to: '/quality', label: 'Quality', hide: !isTeamLead },
+    { to: '/messages', label: 'Messages' }, { to: '/help', label: 'Help' },
+    ...GROUPS.flatMap(g => vis(g).map(i => ({ to: i.to, label: i.label }))),
+  ].filter((p: any) => !p.hide)
 
   const NavItem = ({ to, icon: Icon, label, exact = false, badge, badgeColor = '#dc2626', forceActive, mini }: any) => (
     <NavLink to={to} end={exact} title={mini ? label : undefined} className="dep-nav" aria-label={mini ? label : undefined}
@@ -292,7 +329,7 @@ export function AppLayout() {
         {adminNav.length > 0 && (
           <div style={{ marginTop: mini ? 10 : 16, paddingTop: mini ? 10 : 0, borderTop: mini ? '1px solid var(--bd-f1f5f9)' : undefined }}>
             {!mini && <p style={{ fontSize: 10, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase',
-              letterSpacing: '.07em', padding: '4px 14px', margin: '0 0 4px' }}>Admin</p>}
+              letterSpacing: '.07em', padding: '4px 14px', margin: '0 0 4px' }}>More</p>}
             {adminNav.map(n => <NavItem key={n.to} {...n} mini={mini} />)}
           </div>
         )}
@@ -471,6 +508,23 @@ export function AppLayout() {
           />
         )}
         <ConnectionBanner />
+        {activeGroup && (
+          <div style={{ maxWidth: 1200, margin: '0 auto', padding: '16px 24px 0' }} className="dep-hubbar">
+            <div role="tablist" aria-label={activeGroup.label} style={{ display: 'flex', gap: 4, flexWrap: 'wrap', borderBottom: '1px solid var(--bd-e2e8f0)' }}>
+              {vis(activeGroup).map(i => {
+                const on = here(i.to)
+                return (
+                  <NavLink key={i.to} to={i.to} role="tab" aria-selected={on} className="dep-nav"
+                    style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', fontSize: 13, fontWeight: 600, textDecoration: 'none', marginBottom: -1,
+                      borderBottom: `2px solid ${on ? 'var(--tx-2563eb)' : 'transparent'}`, color: on ? 'var(--tx-2563eb)' : 'var(--tx-64748b)', borderRadius: '8px 8px 0 0' }}>
+                    {i.label}
+                    {!!i.badge && i.badge > 0 && <span style={{ minWidth: 17, height: 17, padding: '0 5px', borderRadius: 20, background: i.badgeColor || '#dc2626', color: '#fff', fontSize: 10, fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{i.badge > 99 ? '99+' : i.badge}</span>}
+                  </NavLink>
+                )
+              })}
+            </div>
+          </div>
+        )}
         <ErrorBoundary resetKey={location.pathname}><Outlet /></ErrorBoundary>
       </main>
 
@@ -478,7 +532,7 @@ export function AppLayout() {
       <UndoBanner />
       <ConfirmHost />
       <IdleGuard onTimeout={() => { logout() }} />
-      <CommandPalette pages={[...mainNav, ...adminNav].map(n => ({ to: n.to, label: n.label }))} open={paletteOpen} onClose={() => setPaletteOpen(false)}
+      <CommandPalette pages={paletteItems.map(n => ({ to: n.to, label: n.label }))} open={paletteOpen} onClose={() => setPaletteOpen(false)}
         actions={[
           { id: 'theme', label: dark ? 'Switch to light mode' : 'Switch to dark mode', hint: 'Appearance', run: toggleTheme },
           { id: 'sidebar', label: collapsed ? 'Expand the sidebar' : 'Collapse the sidebar', hint: 'Ctrl+B', run: toggleSidebar },
