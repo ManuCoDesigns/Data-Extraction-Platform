@@ -6,7 +6,7 @@ import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
   Menu, X, Shield, Activity, AlertTriangle,
-  Zap, ShieldCheck, HeartPulse, CircleHelp, MessageCircle, CalendarCheck, PackageCheck, ChartColumn, History, Search, PanelLeftClose, PanelLeftOpen, Sun, Moon, ClipboardList, ListChecks } from 'lucide-react'
+  Zap, ShieldCheck, HeartPulse, CircleHelp, MessageCircle, CalendarCheck, PackageCheck, ChartColumn, History, Search, PanelLeftClose, PanelLeftOpen, Sun, Moon, ClipboardList, ListChecks, Link2Off } from 'lucide-react'
 import { cn, ToastContainer, toast } from '@/components/ui'
 import { notificationsApi, sourcesApi } from '@/api/client'
 import { useCapability } from '@/lib/permissions'
@@ -187,6 +187,7 @@ export function AppLayout() {
   const mainNav = [
     { to: '/',            icon: LayoutDashboard, label: 'Dashboard',    show: true },
     { to: '/sources',     icon: Database,        label: 'Sources',      show: true, forceActive: isSourcesPath },
+    { to: '/triage', icon: Link2Off, label: 'Link triage', show: true },
     { to: '/escalations', icon: AlertTriangle,   label: 'Escalations',  show: true, badge: escalationCount },
     { to: '/xtrium',      icon: Zap,             label: 'Xtrium Integration', show: isAdmin },
     { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true, forceActive: isProjectsPath },

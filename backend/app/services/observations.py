@@ -112,3 +112,27 @@ def counts(rows: list[SourceObservation]) -> list[dict]:
         d["count"] += 1
         d["sources"].add(r.source_id)
     return sorted(({**d, "sources": len(d["sources"])} for d in c.values()), key=lambda d: -d["count"])
+
+
+def add_mine(db: Session, source: Source, user: User, role: str, kind: str, note: str | None) -> SourceObservation:
+    """Add one issue to this person's observations without touching the others (used by link triage). Drops a 'no issues'
+    confirmation, since an issue was just found. Safe to repeat: the same kind is updated, not duplicated."""
+    if kind not in KINDS:
+        raise HTTPException(status_code=422, detail=f"Unknown kind: {kind}")
+    note = (note or "").strip() or None
+    if kind == "other" and not note:
+        raise HTTPException(status_code=422, detail="Say what the issue was when you choose 'Something else'.")
+    db.query(SourceObservation).filter(SourceObservation.source_id == source.id, SourceObservation.user_id == user.id, SourceObservation.kind == "none").delete(synchronize_session=False)
+    row = db.query(SourceObservation).filter(SourceObservation.source_id == source.id, SourceObservation.user_id == user.id, SourceObservation.kind == kind).first()
+    if row:
+        if note:
+            row.note = note
+        return row
+    row = SourceObservation(source_id=source.id, user_id=user.id, role=role, kind=kind, note=note)
+    db.add(row)
+    db.flush()
+    return row
+
+
+# link-check result -> the issue it most likely means
+FROM_LINK = {"dead": "dead_link", "login": "login_required", "blocked": "blocked_robots", "error": "not_accessible"}

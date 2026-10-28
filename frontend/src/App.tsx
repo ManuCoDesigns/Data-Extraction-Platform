@@ -27,6 +27,7 @@ import { AuditTrailPage } from '@/pages/AuditTrail'
 import { DeliveryPage } from '@/pages/Delivery'
 import { ObservationsPage } from '@/pages/Observations'
 import { SopAssignPage } from '@/pages/SopAssign'
+import { LinkTriagePage } from '@/pages/LinkTriage'
 import { InsightsPage } from '@/pages/Insights'
 import { MessagesPage } from '@/pages/Messages'
 import { QualityPage } from '@/pages/Quality'
@@ -161,6 +162,7 @@ export function App() {
           <Route path="digest" element={<RequireTeamLead><DigestPage /></RequireTeamLead>} />
           <Route path="delivery" element={<RequireTeamLead><DeliveryPage /></RequireTeamLead>} />
           <Route path="observations" element={<RequireTeamLead><ObservationsPage /></RequireTeamLead>} />
+          <Route path="triage" element={<LinkTriagePage />} />
           <Route path="sop-assign" element={<RequireTeamLead><SopAssignPage /></RequireTeamLead>} />
           <Route path="audit" element={<RequireTeamLead><AuditTrailPage /></RequireTeamLead>} />
 

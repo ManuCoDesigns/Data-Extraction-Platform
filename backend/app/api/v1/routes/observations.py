@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.v1.routes.enhancements import _can_chat, _need_lead, _visible_sources
 from app.core.security import get_current_user
 from app.db.session import get_db
-from app.models.all_models import Source, SourceObservation, SourceStatus, User
+from app.models.all_models import Source, SourceLinkCheck, SourceObservation, SourceStatus, User
 from app.services import enh, observations as ob
 
 router = APIRouter(prefix="/observations", tags=["observations"])
@@ -141,3 +141,57 @@ def summary(project_id: str | None = None, kind: str | None = None, source_id: s
         "by_kind": ob.counts(sel), "items": items[:500], "missing": missing,
         "confirmed_none": sum(1 for r in rows if r.kind == "none"), "kinds": ob.kind_list(),
     }
+
+
+# ─── Link triage: flag the sources that will not open, at the very start ──────────
+
+class TriageItem(BaseModel):
+    source_id: str
+    kind: str
+    note: str | None = None
+
+
+class TriageBody(BaseModel):
+    items: list[TriageItem]
+
+
+@router.get("/triage")
+def triage_list(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The sources this person works, with the last link check and what they have already flagged.
+    Extractors see their own; admins see every source that is not yet approved."""
+    admin = ob._is_admin(user)
+    srcs = [s for s in _visible_sources(db, user, project_id).filter(Source.status != SourceStatus.APPROVED).order_by(Source.name).all()
+            if s.assigned_extractor_id == user.id or admin]
+    ids = [s.id for s in srcs]
+    checks = {c.source_id: c for c in db.query(SourceLinkCheck).filter(SourceLinkCheck.source_id.in_(ids)).all()} if ids else {}
+    rows = ob.rows_for(db, ids)
+    items = []
+    for s in srcs:
+        c = checks.get(s.id)
+        stale = bool(c and c.url and c.url != s.website_url)
+        res = None if (not c or stale) else c.status
+        flags = [{"kind": r.kind, "label": "No issues found" if r.kind == "none" else ob.LABEL.get(r.kind, r.kind), "note": r.note, "mine": r.user_id == user.id}
+                 for r in rows if r.source_id == s.id and r.kind != "none"]
+        items.append({"source_id": s.id, "project_id": s.project_id, "name": s.name, "url": s.website_url, "item_no": s.external_ref_id,
+                      "status": getattr(s.status, "value", s.status), "mine": s.assigned_extractor_id == user.id,
+                      "link": {"status": res or "unchecked", "detail": c.detail if c and not stale else None, "suggest": ob.FROM_LINK.get(res or "")},
+                      "flags": flags, "flagged": any(f["mine"] for f in flags)})
+    return {"items": items, "total": len(items), "flagged": sum(1 for i in items if i["flags"]), "kinds": ob.kind_list()}
+
+
+@router.post("/triage")
+def triage_save(body: TriageBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not body.items:
+        raise HTTPException(status_code=422, detail="Nothing to save.")
+    ids = [i.source_id for i in body.items]
+    by = {s.id: s for s in _visible_sources(db, user).filter(Source.id.in_(ids)).all()}
+    done, skipped = 0, []
+    for it in body.items:
+        s = by.get(it.source_id)
+        role = ob.role_on(s, user) if s else None
+        if not s or not role:
+            skipped.append({"source_id": it.source_id, "why": "You do not work this source."}); continue
+        ob.add_mine(db, s, user, role, it.kind, it.note)
+        done += 1
+    db.commit()
+    return {"saved": done, "skipped": skipped}
