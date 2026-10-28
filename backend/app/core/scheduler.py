@@ -16,6 +16,12 @@ def _tick():
     db = SessionLocal()
     try:
         enh.run_reminders(db)
+        try:
+            from app.services import balance
+            balance.run_all(db)
+        except Exception as e:
+            log.warning("balance failed: %s", e)
+            db.rollback()
         now = datetime.now(timezone.utc)
         key = f"digest:{now.strftime('%Y-%m-%d')}"
         if mailer.enabled() and now.hour >= settings.DIGEST_HOUR_UTC and not db.query(ReminderLog.key).filter(ReminderLog.key == key).first():

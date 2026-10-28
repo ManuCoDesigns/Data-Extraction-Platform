@@ -27,6 +27,16 @@ class ObsMine(BaseModel):
     items: list[ObsItem] = []
 
 
+def _rebalance(db: Session, project_ids: set) -> None:
+    """A flagged source stops counting as work, so even out the rest straight away. Never blocks or fails the save."""
+    from app.services import balance
+    for pid in project_ids:
+        try:
+            balance.run_project(db, pid)
+        except Exception:
+            db.rollback()
+
+
 def _src(db: Session, user: User, source_id: str) -> Source:
     s = _visible_sources(db, user).filter(Source.id == source_id).first()
     if not s or not _can_chat(user, s):
@@ -74,6 +84,7 @@ def save_mine(source_id: str, body: ObsMine, db: Session = Depends(get_db), user
         raise HTTPException(status_code=403, detail="Only the extractor, the peer reviewers and admins record observations on a source.")
     ob.replace_mine(db, s, user, role, body.none, [i.model_dump() for i in body.items])
     db.commit()
+    _rebalance(db, {s.project_id})
     return for_source(source_id, db, user)
 
 
@@ -194,4 +205,5 @@ def triage_save(body: TriageBody, db: Session = Depends(get_db), user: User = De
         ob.add_mine(db, s, user, role, it.kind, it.note)
         done += 1
     db.commit()
+    _rebalance(db, {by[i.source_id].project_id for i in body.items if i.source_id in by})
     return {"saved": done, "skipped": skipped}
