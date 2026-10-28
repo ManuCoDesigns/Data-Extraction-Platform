@@ -399,6 +399,12 @@ def build(source, origin: str | None = None, live_error: str | None = None) -> d
     out["counts"] = {"sections": len(out["sections"]), "matching_sections": sum(1 for s in out["sections"] if s["matches"]), "rules": sum(len(s["rules"]) for s in out["sections"]), "must_rules": must_total,
                      "fields": len(out["fields"]), "required_fields": sum(1 for f in out["fields"] if f["required"] and not f.get("nested")), "fields_with_allowed_values": sum(1 for f in out["fields"] if f["allowed"]),
                      "warnings": len(w)}
+    if meta.get("origin") == "library":
+        # Assigned from Xtrium's SOP documents because the source was not pulled from Xtrium: shown for reference, not enforced.
+        out["fields"], out["required_fields"] = [], []
+        out["counts"].update({"fields": 0, "required_fields": 0, "fields_with_allowed_values": 0})
+        out["reference_only"] = True
+        w.insert(0, "This SOP was assigned from Xtrium's SOP documents because the source was not pulled from Xtrium. It is here to read; field-by-field checks start once Xtrium's own copy is attached.")
     return out
 
 

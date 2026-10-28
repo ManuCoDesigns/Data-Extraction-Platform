@@ -47,6 +47,18 @@ type Tab = 'records' | 'files' | 'details' | 'sop' | 'observations'
 
 // A fresh page for every source, so stepping from one source to the next never carries over
 // the previous one's open tabs or half-finished edits.
+/** Used when a project has not set its own escalation reasons. Taken from SOP-DS-003 (broken pages, login-only or confidential
+ *  content, paywalls, wrong entity, schema gaps), so extractors are never stuck with an empty list. */
+const DEFAULT_ESCALATION_REASONS = [
+  'Link is broken and no official alternate source exists',
+  'Page is blank or has nothing extractable',
+  'Needs a login or is confidential',
+  'Behind a paywall',
+  'Page does not match the expected company or item',
+  'Content does not fit the schema or SOP',
+  'Other (explain in the note)',
+]
+
 export function SourceDetailPage() {
   const { sourceId } = useParams<{ sourceId: string }>()
   return <SourceDetailInner key={sourceId} />
@@ -112,9 +124,10 @@ function SourceDetailInner() {
     resourcesApi.list(source.project_id)
       .then((r: any) => {
         const list = Array.isArray(r) ? r : r?.items ?? []
-        setEscalationReasons(list.filter((res: any) => res.type === 'escalation_reason').map((res: any) => res.title))
+        const own = list.filter((res: any) => res.type === 'escalation_reason').map((res: any) => res.title)
+        setEscalationReasons(own.length ? own : DEFAULT_ESCALATION_REASONS)
       })
-      .catch(() => setEscalationReasons([]))
+      .catch(() => setEscalationReasons(DEFAULT_ESCALATION_REASONS))
       .finally(() => setLoadingEscalationReasons(false))
   }, [source?.project_id])
 
