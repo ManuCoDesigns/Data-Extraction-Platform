@@ -224,9 +224,21 @@ export function AppLayout() {
     const badge = items.reduce((n, i) => n + (i.badge || 0), 0)
     return { to: items[0].to, icon: g.icon, label: g.label, show: true, badge, badgeColor: items.some(i => i.badge && !i.badgeColor) ? '#dc2626' : '#d97706', forceActive: items.some(i => here(i.to)) }
   }
-  const activeGroup = GROUPS.find(g => vis(g).length > 1 && vis(g).some(i => here(i.to)))
+  const activeGroup = !isTeamLead ? undefined : GROUPS.find(g => vis(g).length > 1 && vis(g).some(i => here(i.to)))
 
-  const mainNav = [
+  // Extractors keep the plain list they always had (plus Link triage). Grouping is for admins and leads, who have many more pages.
+  const flatNav = [
+    { to: '/',            icon: LayoutDashboard, label: 'Dashboard',    show: true },
+    { to: '/sources',     icon: Database,        label: 'Sources',      show: true, forceActive: isSourcesPath },
+    { to: '/triage',      icon: Link2Off,        label: 'Link triage',  show: true },
+    { to: '/escalations', icon: AlertTriangle,   label: 'Escalations',  show: true, badge: escalationCount },
+    { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true, forceActive: isProjectsPath },
+    { to: '/messages',    icon: MessageCircle,   label: 'Messages',     show: true, badge: counts.unread_messages },
+    { to: '/data-health', icon: HeartPulse,      label: 'Data Health',  show: true, badge: counts.link_problems, badgeColor: '#d97706' },
+    { to: '/client-questions', icon: CircleHelp, label: 'Client Questions', show: true, badge: counts.open_questions, badgeColor: '#d97706' },
+    { to: '/insights',    icon: ChartColumn,     label: 'My Stats',     show: true },
+  ]
+  const groupedNav = [
     { to: '/',            icon: LayoutDashboard, label: 'Dashboard',    show: true },
     { to: '/sources',     icon: Database,        label: 'Sources',      show: true, forceActive: isSourcesPath },
     { to: '/projects',    icon: FolderKanban,    label: 'Projects',     show: true, forceActive: isProjectsPath },
@@ -236,10 +248,11 @@ export function AppLayout() {
     groupEntry('reports'),
     { to: '/messages',   icon: MessageCircle,   label: 'Messages',     show: true, badge: counts.unread_messages },
     groupEntry('setup'),
-  ].filter((n): n is any => !!n && n.show)
+  ]
+  const mainNav = (isTeamLead ? groupedNav : flatNav).filter((n): n is any => !!n && n.show)
 
   const adminNav = [
-    groupEntry('admin'),
+    isTeamLead ? groupEntry('admin') : null,
     { to: '/help',        icon: BookOpen, label: 'Help',     show: true },
   ].filter((n): n is any => !!n && n.show)
 
