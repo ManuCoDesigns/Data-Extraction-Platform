@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { downloadText, toCsv } from '@/lib/csv'
 import { Link } from 'react-router-dom'
 import { qualityApi } from '@/api/client'
 import { Blank, Skeletons } from '@/components/enh/kit'
@@ -75,6 +76,12 @@ export function BatchReport({ projectId }: { projectId: string }) {
   }, [mode, projectId])
 
   const shown = useMemo(() => (d?.sources ?? []).filter((s: any) => !stageFilter || s.stage === stageFilter), [d, stageFilter])
+  const delivered = () => {
+    const rows = mode === 'deck' ? (eng?.delivered_rows ?? []) : (d?.sources ?? []).filter((s: any) => s.stage === 'delivered').map((s: any) => ({ name: s.name, project: s.project, item_no: s.item_no, records: s.approved, approved_at: s.approved_at, submitted_at: s.submitted_at, batch: d.label }))
+    if (!rows.length) { toast.error('Nothing delivered yet'); return }
+    downloadText(`delivered_${new Date().toISOString().slice(0, 10)}.csv`, toCsv(['Source', 'Project', 'Xtrium item', 'Batch', 'Approved records', 'Approved', 'Submitted to Xtrium'],
+      rows.map((r: any) => [r.name, r.project ?? '', r.item_no ?? '', r.batch ?? '', r.records, (r.approved_at || '').slice(0, 10), (r.submitted_at || '').slice(0, 10)])))
+  }
   const copy = async () => { try { await navigator.clipboard.writeText(reportText(d)); toast.success('Status text copied') } catch { toast.error('Could not copy') } }
 
   if (!list) return <Skeletons rows={3} />
@@ -98,6 +105,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
           </label>
         )}
         <div className="ml-auto flex gap-2">
+          <Button variant="secondary" disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={delivered}>Delivered CSV</Button>
           {mode !== 'deck' && <Button variant="secondary" disabled={!d || d.error} onClick={copy}>Copy status text</Button>}
           <Button disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={() => window.print()}>Save as PDF</Button>
         </div>
@@ -226,7 +234,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
               <div className="overflow-x-auto mt-2">
                 <table className="w-full text-sm">
                   <thead><tr className="text-left text-xs" style={{ background: '#1473f0', color: '#fff' }}>
-                    {['Source', 'Stage', 'Records', 'Peer reviews', 'Days', 'Accuracy'].map(h => <th key={h} className="py-2 px-2.5 font-semibold">{h}</th>)}
+                    {['Source', 'Stage', 'Records', 'Peer reviews', 'Approved', 'Days', 'Accuracy'].map(h => <th key={h} className="py-2 px-2.5 font-semibold">{h}</th>)}
                   </tr></thead>
                   <tbody>
                     {shown.map((s: any, i: number) => (
@@ -235,6 +243,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
                         <td className="px-2.5 whitespace-nowrap"><span className="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style={{ background: STAGE_COLOR[s.stage] }} />{d.stages.find((x: any) => x.key === s.stage)?.label}</td>
                         <td className="px-2.5 tabular-nums">{s.approved}/{s.records}</td>
                         <td className="px-2.5 tabular-nums">{s.peers_done}/{s.peers_total}</td>
+                        <td className="px-2.5 tabular-nums whitespace-nowrap">{s.approved_at ? s.approved_at.slice(0, 10) : '–'}</td>
                         <td className="px-2.5 tabular-nums">{s.days ?? '–'}</td>
                         <td className="px-2.5 tabular-nums">{pct(s.final_accuracy)}</td>
                       </tr>

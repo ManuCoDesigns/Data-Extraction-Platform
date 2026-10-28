@@ -130,6 +130,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
             "project": s.project.name if s.project else None, "stage": stage, "status": getattr(s.status, "value", s.status),
             "records": n, "approved": ok, "peers_done": sum(1 for p in s.peer_reviews if p.status == "submitted"), "peers_total": len(s.peer_reviews),
             "days": _days(s.created_at, end), "submitted_to_xtrium": bool(s.xtrium_submitted_at),
+            "approved_at": s.approved_at.isoformat() if s.approved_at else None, "submitted_at": s.xtrium_submitted_at.isoformat() if s.xtrium_submitted_at else None,
             "fields": qr.get("fields"), "errors": qr.get("errors"), "errors_per_100": qr.get("errors_per_100"),
             "first_pass_accuracy": qr.get("first_pass_accuracy"), "final_accuracy": qr.get("final_accuracy"),
         })
@@ -296,4 +297,6 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
         "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,
         "stages": stages_all, "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
         "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:3], "open_sources": open_sources,
+        "delivered_rows": sorted(({"name": x["name"], "project": x["project"], "item_no": x["item_no"], "records": x["approved"], "approved_at": x["approved_at"], "submitted_at": x["submitted_at"], "batch": r["label"]}
+                                  for r in reps for x in r["sources"] if x["stage"] == "delivered"), key=lambda x: x["approved_at"] or "", reverse=True),
     }

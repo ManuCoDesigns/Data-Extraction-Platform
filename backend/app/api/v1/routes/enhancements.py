@@ -159,69 +159,6 @@ def nav_counts(db: Session = Depends(get_db), user: User = Depends(get_current_u
     return {"open_questions": int(open_q or 0), "link_problems": int(bad or 0), "unread_messages": int(unread)}
 
 
-# ─── Delivery summary (for the client conversation) ─────────────────────────
-
-@router.get("/delivery")
-def delivery_summary(project_id: str | None = None, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """One page of facts for a status call with the client: what is delivered, what is moving,
-    what we are waiting on them for, and which websites we could not open."""
-    _need_lead(user)
-    srcs = _visible_sources(db, user, project_id).all()
-    ids = [s.id for s in srcs]
-    pnames = {p.id: p.name for p in db.query(Project).filter(Project.id.in_({s.project_id for s in srcs})).all()} if srcs else {}
-    names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_({s.assigned_extractor_id for s in srcs if s.assigned_extractor_id})).all()} if srcs else {}
-
-    stage_of = {
-        SourceStatus.NOT_STARTED: "not_started", SourceStatus.EXTRACTING: "extraction", SourceStatus.NEEDS_FIXES: "extraction",
-        SourceStatus.CHANGES_REQUESTED: "extraction", SourceStatus.READY_FOR_REVIEW: "review", SourceStatus.IN_REVIEW: "review",
-        SourceStatus.LLM_VERIFICATION: "review", SourceStatus.APPROVED: "delivered",
-    }
-    stages = {"not_started": 0, "extraction": 0, "review": 0, "delivered": 0}
-    done_ids = [s.id for s in srcs if s.status == SourceStatus.APPROVED]
-    live = dict(db.query(ExtractionJob.source_id, func.count(ExtractedRecord.id))
-                .join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
-                .filter(ExtractionJob.source_id.in_(done_ids), ExtractedRecord.review_status == ReviewStatus.APPROVED)
-                .group_by(ExtractionJob.source_id).all()) if done_ids else {}   # counted now, not the cached column
-    delivered, records_total = [], 0
-    for s in srcs:
-        st = stage_of.get(s.status, "extraction")
-        stages[st] += 1
-        if s.status == SourceStatus.APPROVED:
-            n_rec = live.get(s.id, s.approved_records or 0)
-            records_total += n_rec
-            delivered.append({
-                "source_id": s.id, "project_id": s.project_id, "name": s.name, "project": pnames.get(s.project_id),
-                "approved_at": s.approved_at, "records": n_rec, "item_no": s.external_ref_id,
-                "extractor": names.get(s.assigned_extractor_id), "submitted_at": s.xtrium_submitted_at,
-            })
-    delivered.sort(key=lambda d: str(d["approved_at"] or ""), reverse=True)
-
-    qs = db.query(ClientQuestion).filter(ClientQuestion.project_id.in_({s.project_id for s in srcs} or {""})).order_by(ClientQuestion.created_at.desc()).all()
-    waiting = [{"id": q.id, "question": q.question, "source_name": q.source.name if q.source else None, "project_id": q.project_id,
-                "source_id": q.source_id, "created_at": q.created_at, "sent_to_client_at": q.sent_to_client_at}
-               for q in qs if q.status == "open"]
-
-    checks = {c.source_id: c for c in db.query(SourceLinkCheck).filter(SourceLinkCheck.source_id.in_(ids)).all()} if ids else {}
-    cant_open = []
-    for s in srcs:
-        c = checks.get(s.id)
-        if c and c.status in ("login", "blocked", "dead") and s.status != SourceStatus.APPROVED:
-            cant_open.append({"source_id": s.id, "project_id": s.project_id, "name": s.name, "url": c.url or s.website_url,
-                              "status": c.status, "detail": c.detail})
-    cant_open.sort(key=lambda r: (r["status"], r["name"].lower()))
-
-    total = len(srcs)
-    week = enh.now_utc() - timedelta(days=7)
-    return {
-        "generated_at": enh.now_utc(), "project_id": project_id,
-        "totals": {"sources": total, "delivered": stages["delivered"], "records_delivered": records_total,
-                   "percent": round(100 * stages["delivered"] / total) if total else 0,
-                   "delivered_this_week": sum(1 for d in delivered if d["approved_at"] and enh.aware(d["approved_at"]) >= week)},
-        "stages": stages, "delivered": delivered[:300], "delivered_count": len(delivered),
-        "waiting_on_client": waiting, "cant_open": cant_open,
-    }
-
-
 # ─── Workflow monitor (whole project at a glance) ────────────────────────────
 
 MONITOR_STAGES = ["not_started", "extracting", "needs_fixes", "peer_review", "signoff", "delivered"]

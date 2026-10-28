@@ -1,3 +1,4 @@
+import { BalancePanel } from '@/components/enh/BalancePanel'
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCw, Users, AlertCircle, Clock, ArrowRight, Download } from 'lucide-react'
@@ -129,6 +130,8 @@ export function TeamWorkloadPage() {
           </button>
         </div>
       </div>
+
+      <BalancePanel />
 
       {loading ? (
         <div style={{ padding: 60, textAlign: 'center', color: '#94a3b8' }}>Loading workload…</div>

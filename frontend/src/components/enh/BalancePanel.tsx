@@ -3,17 +3,19 @@ import { Link } from 'react-router-dom'
 import { projectsApi } from '@/api/client'
 import { balanceApi } from '@/api/balance'
 import { useAuthStore } from '@/store/auth'
-import { Blank, Chip, PAGE, PageHeader, Panel, SelectBox, Skeletons, Tile, shortAgo } from '@/components/enh/kit'
+import { Blank, Chip, Panel, SelectBox, Skeletons, Tile, shortAgo } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
 
-/** Keeps everyone's remaining extraction work even without an admin. Only sources nobody has started are ever moved. */
-export function WorkBalancePage() {
+/** Keeps everyone's remaining extraction work even without an admin. Only sources nobody has started are ever moved.
+ *  Sits on the Team workload page. */
+export function BalancePanel() {
   const { user } = useAuthStore()
   const isAdmin = ['org_admin', 'project_admin'].some(r => user?.roles?.includes(r as any))
   const [projects, setProjects] = useState<any[]>([])
   const [projectId, setProjectId] = useState('')
   const [d, setD] = useState<any>(null)
   const [busy, setBusy] = useState(false)
+  const [open, setOpen] = useState(false)
   useEffect(() => { projectsApi.list().then((r: any) => { const l = Array.isArray(r) ? r : r.items ?? []; setProjects(l); if (l[0]) setProjectId(x => x || l[0].id) }).catch(() => {}) }, [])
   const load = () => { if (!projectId) return; setD(null); balanceApi.get(projectId).then(setD).catch(() => setD({ error: true })) }
   useEffect(load, [projectId]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -26,11 +28,21 @@ export function WorkBalancePage() {
   const toggleAside = (uid: string, include: boolean) => act(() => balanceApi.update(projectId, { set_aside: include ? aside.filter((x: string) => x !== uid) : [...aside, uid] }))
   const max = Math.max(1, ...(d?.people ?? []).map((p: any) => p.load))
 
+  const summary = d && !d.error ? `${d.even ? 'Even' : `${d.spread} apart`} · automatic balancing ${d.enabled ? 'on' : 'off'}` : ''
   return (
-    <div className={PAGE}>
-      <PageHeader title="Work balance" subtitle="Everyone's remaining extraction work is kept about equal, automatically. When someone flags broken links or finishes faster, sources nobody has started are moved to the people with the least left. Anything an extractor has started is never taken from them."
-        actions={isAdmin && d && !d.error ? <Button onClick={() => act(() => balanceApi.run(projectId), r => r.moved ? `${r.moved} ${r.moved === 1 ? 'source' : 'sources'} moved` : 'Already even')} disabled={busy || !d.enabled}>{busy ? 'Working…' : 'Balance now'}</Button> : undefined} />
-      <SelectBox label="Project" value={projectId} onChange={setProjectId}>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</SelectBox>
+    <div className="rounded-2xl border border-gray-200 bg-white mb-5" style={{ background: 'var(--bg-fff)', borderColor: 'var(--bd-e2e8f0)' }}>
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} className="w-full flex items-center gap-3 px-5 py-3.5 text-left">
+        <span className="font-bold text-sm">Work balance</span>
+        {d && !d.error && <Chip tone={d.even ? 'green' : 'amber'}>{summary}</Chip>}
+        <span className="text-xs text-gray-500 flex-1 hidden md:block">Remaining work is kept equal automatically. Only unstarted sources are moved.</span>
+        <span className="text-xs text-gray-400">{open ? 'Hide' : 'Show'}</span>
+      </button>
+      {open && (
+        <div className="px-5 pb-5 space-y-4">
+          <div className="flex items-end gap-3 flex-wrap">
+            <SelectBox label="Project" value={projectId} onChange={setProjectId}>{projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</SelectBox>
+            {isAdmin && d && !d.error && <Button onClick={() => act(() => balanceApi.run(projectId), r => r.moved ? `${r.moved} ${r.moved === 1 ? 'source' : 'sources'} moved` : 'Already even')} disabled={busy || !d.enabled}>{busy ? 'Working…' : 'Balance now'}</Button>}
+          </div>
       {!projectId || !d ? <Skeletons rows={5} /> : d.error ? <Blank title="Couldn't load work balance" /> : (
         <>
           <div className="grid gap-3 grid-cols-2 lg:grid-cols-4">
@@ -67,6 +79,8 @@ export function WorkBalancePage() {
             )}
           </Panel>
         </>
+      )}
+            </div>
       )}
     </div>
   )

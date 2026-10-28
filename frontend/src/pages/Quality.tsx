@@ -23,7 +23,7 @@ export function QualityPage() {
   const [days, setDays] = useState('90')
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
-  const [tab, setTab] = useState<Tab>('review')
+  const [tab, setTab] = useState<Tab>(() => (new URLSearchParams(window.location.search).get('tab') === 'batch' ? 'batch' : 'review'))
   const [projectId, setProjectId] = useState('')
   const [bench, setBench] = useState(!!new URLSearchParams(window.location.search).get('source'))
   const [params] = useSearchParams()

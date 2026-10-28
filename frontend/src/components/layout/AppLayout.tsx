@@ -6,7 +6,7 @@ import {
   LayoutDashboard, FolderKanban, Database, Layers,
   Users, Bell, LogOut, Settings, BookOpen, ChevronDown,
   Menu, X, Shield, Activity, AlertTriangle,
-  Zap, ShieldCheck, HeartPulse, CircleHelp, MessageCircle, CalendarCheck, PackageCheck, ChartColumn, History, Search, PanelLeftClose, PanelLeftOpen, Sun, Moon, ClipboardList, ListChecks, Link2Off, Scale } from 'lucide-react'
+  Zap, ShieldCheck, HeartPulse, CircleHelp, MessageCircle, CalendarCheck, ChartColumn, History, Search, PanelLeftClose, PanelLeftOpen, Sun, Moon, ClipboardList, ListChecks, Link2Off } from 'lucide-react'
 import { cn, ToastContainer, toast } from '@/components/ui'
 import { notificationsApi, sourcesApi } from '@/api/client'
 import { useCapability } from '@/lib/permissions'
@@ -195,13 +195,11 @@ export function AppLayout() {
       { to: '/data-health', icon: HeartPulse, label: 'Data health', show: true, badge: counts.link_problems, badgeColor: '#d97706' },
       { to: '/observations', icon: ClipboardList, label: 'Observations', show: isTeamLead },
     ] },
-    { key: 'team', label: 'Team', icon: Activity, items: [
-      { to: '/workload', icon: Activity, label: 'Workload', show: isTeamLead },
-      { to: '/balance', icon: Scale, label: 'Work balance', show: isTeamLead },
+    { key: 'team', label: 'Team workload', icon: Activity, items: [
+      { to: '/workload', icon: Activity, label: 'Team workload', show: isTeamLead },
     ] },
     { key: 'reports', label: isTeamLead ? 'Reports' : 'My stats', icon: ChartColumn, items: [
       { to: '/insights', icon: ChartColumn, label: isTeamLead ? 'Insights' : 'My Stats', show: true },
-      { to: '/delivery', icon: PackageCheck, label: 'Delivery summary', show: isTeamLead },
       { to: '/digest', icon: CalendarCheck, label: 'Daily digest', show: isTeamLead },
     ] },
     { key: 'setup', label: 'Xtrium & setup', icon: Zap, items: [

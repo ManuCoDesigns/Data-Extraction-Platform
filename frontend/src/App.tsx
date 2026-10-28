@@ -24,11 +24,9 @@ import { DataHealthPage } from '@/pages/DataHealth'
 import { ClientQuestionsPage } from '@/pages/ClientQuestions'
 import { DigestPage } from '@/pages/Digest'
 import { AuditTrailPage } from '@/pages/AuditTrail'
-import { DeliveryPage } from '@/pages/Delivery'
 import { ObservationsPage } from '@/pages/Observations'
 import { SopAssignPage } from '@/pages/SopAssign'
 import { LinkTriagePage } from '@/pages/LinkTriage'
-import { WorkBalancePage } from '@/pages/WorkBalance'
 import { InsightsPage } from '@/pages/Insights'
 import { MessagesPage } from '@/pages/Messages'
 import { QualityPage } from '@/pages/Quality'
@@ -161,9 +159,9 @@ export function App() {
           <Route path="messages" element={<MessagesPage />} />
           <Route path="quality" element={<RequireTeamLead><QualityPage /></RequireTeamLead>} />
           <Route path="digest" element={<RequireTeamLead><DigestPage /></RequireTeamLead>} />
-          <Route path="delivery" element={<RequireTeamLead><DeliveryPage /></RequireTeamLead>} />
+          <Route path="delivery" element={<Navigate to="/quality?tab=batch" replace />} />
           <Route path="observations" element={<RequireTeamLead><ObservationsPage /></RequireTeamLead>} />
-          <Route path="balance" element={<RequireTeamLead><WorkBalancePage /></RequireTeamLead>} />
+          <Route path="balance" element={<Navigate to="/workload" replace />} />
           <Route path="triage" element={<LinkTriagePage />} />
           <Route path="sop-assign" element={<RequireTeamLead><SopAssignPage /></RequireTeamLead>} />
           <Route path="audit" element={<RequireTeamLead><AuditTrailPage /></RequireTeamLead>} />
