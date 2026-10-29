@@ -26,6 +26,8 @@ export function DispatchPanel() {
   }
   const share = (key?: string) => act(() => dispatchApi.share(projectId, key ? { batch_key: key } : {}), r =>
     r.assigned ? `${r.assigned} shared: ${Object.entries(r.per_person).map(([n, c]) => `${n} ${c}`).join(', ')}` : (r.reason || 'Nothing to share'))
+  const shareRev = (scope: 'ready' | 'all_open') => act(() => dispatchApi.reviewers(projectId, { scope }), r =>
+    r.assigned ? `${r.assigned} ${r.assigned === 1 ? 'source' : 'sources'} given reviewers: ${Object.entries(r.per_person).map(([n, c]) => `${n} ${c}`).join(', ')}` : (r.reason || 'Nothing needs a reviewer'))
   const hold = (key: string, on: boolean) => act(() => dispatchApi.hold(projectId, { hold: on, batch_key: key }), r => r.changed ? `${r.changed} ${on ? 'put on hold' : 'released'}` : (on ? 'Nothing to hold in this pull' : 'Nothing was on hold'))
 
   const summary = d && !d.error ? `${d.unassigned.total} to share · ${d.held_count} on hold` : ''
@@ -66,6 +68,18 @@ export function DispatchPanel() {
                 <div className="flex items-center gap-3 text-sm flex-wrap"><label className="flex items-center gap-2"><input type="checkbox" checked={d.auto_share} disabled={busy} onChange={e => act(() => dispatchApi.auto(projectId, e.target.checked))} /> Share new pulls with the team automatically</label>
                   <span className="text-gray-500">Checked every 30 minutes. Nothing already owned or started is touched.</span></div>
               )}
+              <Panel title="Peer reviewers" subtitle="Each source without a reviewer gets the people with the fewest reviews waiting. Never its own extractor, and never someone set aside as away in Work balance.">
+                <div className="flex items-center gap-3 flex-wrap">
+                  <Button variant="secondary" size="sm" disabled={busy || !d.reviewers.waiting} onClick={() => shareRev('ready')}>Give reviewers to {d.reviewers.waiting} finished {d.reviewers.waiting === 1 ? 'source' : 'sources'}</Button>
+                  {d.reviewers.waiting_all > d.reviewers.waiting && <Button variant="secondary" size="sm" disabled={busy} onClick={() => shareRev('all_open')}>Include {d.reviewers.waiting_all - d.reviewers.waiting} still being extracted</Button>}
+                  {isAdmin && (<>
+                    <label className="flex items-center gap-2 text-sm">Reviewers per source
+                      <select className="rounded-lg border px-2 py-1 text-sm bg-transparent" value={d.reviewers.count} disabled={busy} onChange={e => act(() => dispatchApi.reviewerSettings(projectId, { count: Number(e.target.value) }))}>{[1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}</select></label>
+                    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={d.reviewers.auto} disabled={busy} onChange={e => act(() => dispatchApi.reviewerSettings(projectId, { auto: e.target.checked }))} /> Give reviewers automatically when extraction finishes</label>
+                  </>)}
+                </div>
+                {d.reviewers.people.length > 0 && <p className="text-xs text-gray-500 mt-3 mb-0">Reviews waiting now: {d.reviewers.people.map((p: any) => `${p.name} ${p.pending}`).join(' · ')}</p>}
+              </Panel>
               {d.held.length > 0 && (
                 <Panel title="On hold" subtitle="The clock is stopped for these">
                   <ul className="m-0 p-0 list-none divide-y divide-gray-100 max-h-72 overflow-y-auto">

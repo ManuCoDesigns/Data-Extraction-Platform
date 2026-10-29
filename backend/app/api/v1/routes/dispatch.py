@@ -8,6 +8,7 @@ from app.core.security import get_current_user
 from app.db.session import get_db
 from app.models.all_models import Project, Source, SourceStatus, User
 from app.services import distribute as dist
+from app.services import reviewer_share as rev
 from app.services import holds
 from app.services import quality as q
 
@@ -37,7 +38,7 @@ def _view(db: Session, user: User, p: Project) -> dict:
              for s in srcs if s.id in held]
     items.sort(key=lambda x: x["since"])
     return {"project_id": p.id, "project": p.name, "batches": sorted(batches.values(), key=lambda g: (g["key"] == "other", g["date"]), reverse=True),
-            "held": items, "held_count": len(items), "unassigned": dist.waiting_summary(db, p.id), "auto_share": dist.auto_on(db, p.id)}
+            "held": items, "held_count": len(items), "unassigned": dist.waiting_summary(db, p.id), "auto_share": dist.auto_on(db, p.id), "reviewers": rev.summary(db, p.id)}
 
 
 @router.get("/{project_id}")
@@ -100,5 +101,37 @@ def auto(project_id: str, body: AutoBody, db: Session = Depends(get_db), user: U
         raise HTTPException(status_code=403, detail="Only admins can switch this on.")
     p = _project(db, user, project_id)
     dist.set_auto(db, p.id, body.auto_share)
+    db.commit()
+    return _view(db, user, p)
+
+
+class ReviewersBody(BaseModel):
+    scope: str = "ready"                    # ready = extraction finished; all_open = every open source that has an extractor
+    batch_key: str | None = None
+
+
+@router.post("/{project_id}/reviewers")
+def share_reviewers(project_id: str, body: ReviewersBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    p = _project(db, user, project_id)
+    r = rev.run_project(db, p.id, scope="all_open" if body.scope == "all_open" else "ready", batch_key=body.batch_key, by_user_id=user.id)
+    per: dict = {}
+    for a in r["assigned"]:
+        for n in a["reviewers"]:
+            per[n] = per.get(n, 0) + 1
+    return {"assigned": len(r["assigned"]), "left": r["left"], "reason": r["reason"], "per_person": per, "view": _view(db, user, p)}
+
+
+class ReviewerSettings(BaseModel):
+    auto: bool | None = None
+    count: int | None = None
+
+
+@router.put("/{project_id}/reviewers-auto")
+def reviewers_auto(project_id: str, body: ReviewerSettings, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    if not (_roles(user) & {"org_admin", "project_admin"}):
+        raise HTTPException(status_code=403, detail="Only admins can change this.")
+    p = _project(db, user, project_id)
+    rev.set_settings(db, p.id, auto=body.auto, count=body.count)
     db.commit()
     return _view(db, user, p)
