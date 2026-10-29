@@ -67,7 +67,7 @@ def bulk_lock_reason(source) -> str | None:
         return None  # nothing left to protect: an empty source can always be filled (a deleted record must not leave it stuck)
     if _has_peers(source) and source.status in WITH_PEERS + (SourceStatus.CHANGES_REQUESTED,):
         return ("Records on this source have been in peer review, so they cannot be replaced or removed in bulk. "
-                "Fix the records that were sent back one by one instead.")
+                "Fix the records that were sent back one by one, or replace the data with a new version: the current data is kept.")
     return None
 
 

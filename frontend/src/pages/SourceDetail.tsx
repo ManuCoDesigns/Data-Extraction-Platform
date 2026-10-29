@@ -15,6 +15,7 @@ import { SourceActivity } from '@/components/enh/SourceActivity'
 import { SourceChat } from '@/components/enh/SourceChat'
 import { FlagErrorModal } from '@/components/enh/FlagErrorModal'
 import { SourceQuality } from '@/components/enh/SourceQuality'
+import { VersionsPanel } from '@/components/enh/VersionsPanel'
 import { FeedbackPanel } from '@/components/enh/FeedbackPanel'
 import { SourceRequiredCard } from '@/components/enh/RequiredFields'
 import { LinkChip } from '@/pages/DataHealth'
@@ -81,6 +82,8 @@ function SourceDetailInner() {
   // An upload that would replace records already seen by peers is refused. This offers to load the same file as corrections instead.
   const [lockedUpload, setLockedUpload] = useState<string | null>(null)
   const [corrBusy, setCorrBusy] = useState(false)
+  const [replaceReason, setReplaceReason] = useState('')
+  const [showVersions, setShowVersions] = useState(false)
   const [corrResult, setCorrResult] = useState<{ updated: { record: string; changed: string[]; skipped?: string[] }[]; unchanged: string[]; locked: string[]; unmatched: string[] } | null>(null)
   const applyCorrections = async () => {
     if (!sourceId || !file) return
@@ -580,10 +583,10 @@ function SourceDetailInner() {
     return detail || `Upload failed (HTTP ${status}).`
   }
 
-  const handleUpload = async (e: React.FormEvent) => {
+  const handleUpload = async (e: React.FormEvent, reason?: string) => {
     e.preventDefault()
     if (!sourceId) return
-    if (folderFiles && folderFiles.length > 0) return handleFolderUpload()
+    if (folderFiles && folderFiles.length > 0) return handleFolderUpload(reason)
     if (!file) return
 
     if (file.size > AUTO_SPLIT_THRESHOLD_BYTES) {
@@ -600,7 +603,7 @@ function SourceDetailInner() {
             setUploading(true)
             setUploadProgress(0)
             try {
-              const summary = await sourcesApi.uploadMulti(sourceId, chunks, setUploadProgress)
+              const summary = await sourcesApi.uploadMulti(sourceId, chunks, setUploadProgress, reason)
               toast.success(`Uploaded ${summary.files_processed} part${summary.files_processed !== 1 ? 's' : ''}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
               if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
               setShowUpload(false)
@@ -629,11 +632,13 @@ function SourceDetailInner() {
     try {
       const fd = new FormData()
       fd.append('file', file)
+      if (reason) fd.append('replace_reason', reason)
       const summary = await sourcesApi.upload(sourceId, fd, setUploadProgress)
       const isZip = file.name.toLowerCase().endsWith('.zip')
       const isAI = summary.extraction_method === 'llm'
       const method = isAI ? 'AI extraction' : isZip ? `${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from ZIP` : 'schema mapping'
-      toast.success(`Uploaded via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+      toast.success(`${reason ? 'Replaced. The old data is kept under Versions. ' : ''}Uploaded via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+      setReplaceReason(''); setLockedUpload(null); setCorrResult(null)
       if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
       setShowUpload(false)
       setFile(null)
@@ -648,12 +653,12 @@ function SourceDetailInner() {
     }
   }
 
-  const handleFolderUpload = async () => {
+  const handleFolderUpload = async (reason?: string) => {
     if (!sourceId || !folderFiles || folderFiles.length === 0) return
     setUploading(true)
     setUploadProgress(0)
     try {
-      const summary = await sourcesApi.uploadMulti(sourceId, Array.from(folderFiles), setUploadProgress)
+      const summary = await sourcesApi.uploadMulti(sourceId, Array.from(folderFiles), setUploadProgress, reason)
       toast.success(`Uploaded ${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from folder: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
       if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
       setShowUpload(false)
@@ -984,6 +989,11 @@ function SourceDetailInner() {
           {isExtractor && source.status !== 'approved' && (
             <Button variant="secondary" size="sm" onClick={() => setShowUpload(true)}>
               <Upload className="w-3.5 h-3.5" /> Upload Data
+            </Button>
+          )}
+          {(isExtractor || isReviewer) && (
+            <Button variant="secondary" size="sm" onClick={() => setShowVersions(true)}>
+              <HistoryIcon className="w-3.5 h-3.5" /> Versions
             </Button>
           )}
           {isExtractor && source.status !== 'approved' && (
@@ -1766,6 +1776,10 @@ function SourceDetailInner() {
       )}
 
 
+      <Modal open={showVersions} onClose={() => setShowVersions(false)} title="Versions of this data" size="lg">
+        {sourceId && <VersionsPanel sourceId={sourceId} onRestored={() => { load(); setRawFilesLoaded(false) }} />}
+      </Modal>
+
       <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Add extracted data to this source.">
         <form onSubmit={handleUpload} className="flex flex-col" style={{ maxHeight: '72vh' }}>
 
@@ -1773,7 +1787,7 @@ function SourceDetailInner() {
 
             {source.total_records > 0 && (
               <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-2 text-xs text-amber-700">
-                Re-uploading replaces all {source.total_records} existing records.
+                Re-uploading replaces all {source.total_records} existing records. The current data is kept under Versions, so nothing is lost.
               </div>
             )}
 
@@ -1782,6 +1796,8 @@ function SourceDetailInner() {
                 <p className="m-0"><b>This file cannot replace the records.</b> {lockedUpload}</p>
                 <p className="m-0">You can load the same file as <b>corrections</b> instead. Each row is matched to a record by its name and updates it in place, so the reviewers' catches stay attached. Only records that were sent back are changed.</p>
                 <Button type="button" size="sm" loading={corrBusy} disabled={!file} onClick={applyCorrections}>Apply as corrections to sent-back records</Button>
+                <hr className="border-indigo-200 my-2" />
+                <ReplaceBox reason={replaceReason} setReason={setReplaceReason} disabled={!file && !(folderFiles && folderFiles.length)} busy={uploading} onGo={(e) => handleUpload(e, replaceReason.trim())} />
               </div>
             )}
             {corrResult && (
@@ -1790,6 +1806,13 @@ function SourceDetailInner() {
                 {corrResult.updated.map(u => <p key={u.record} className="m-0">{u.record}: {u.changed.length ? `changed ${u.changed.slice(0, 8).join(', ')}${u.changed.length > 8 ? '…' : ''}` : 'no field changes'}{u.skipped && u.skipped.length > 0 ? <span className="text-amber-800"> — left as they were because the reviewers passed them: {u.skipped.join(', ')}</span> : null}</p>)}
                 {corrResult.locked.length > 0 && <p className="m-0 text-amber-800">Not changed because they are locked or not sent back: {corrResult.locked.join(', ')}</p>}
                 {corrResult.unmatched.length > 0 && <p className="m-0 text-amber-800">No matching record, so not added: {corrResult.unmatched.join(', ')}</p>}
+                {(corrResult.locked.length > 0 || corrResult.updated.some(u => (u.skipped ?? []).length > 0)) && (
+                  <div className="pt-1.5 space-y-1.5 text-amber-900">
+                    <p className="m-0"><b>Some edits in your file were not saved.</b> A correction can only change the fields the reviewers flagged, on records that were sent back. Anything else in the file was left as it was.</p>
+                    <p className="m-0">If the data itself was wrong, replace it with this file as a new version. The current data is kept, and the peers review the new data again.</p>
+                    <ReplaceBox reason={replaceReason} setReason={setReplaceReason} disabled={!file} busy={uploading} onGo={(e) => handleUpload(e, replaceReason.trim())} />
+                  </div>
+                )}
                 <p className="m-0">Now hand the source back for review from the source page.</p>
               </div>
             )}
@@ -2603,6 +2626,19 @@ function NotesEditor({ source, canEdit, onSave }: { source: Source; canEdit: boo
           <Save className="w-3.5 h-3.5" /> Save Notes
         </Button>
       )}
+    </div>
+  )
+}
+
+
+/** Replace the data with the chosen file as a new version. The reason is kept with the old version and sent to the reviewers. */
+function ReplaceBox({ reason, setReason, disabled, busy, onGo }: { reason: string; setReason: (v: string) => void; disabled: boolean; busy: boolean; onGo: (e: React.FormEvent) => void }) {
+  const ok = reason.trim().length >= 10
+  return (
+    <div className="space-y-2 text-xs">
+      <p className="m-0"><b>Or replace the data with this file as a new version.</b> The records now on the source are kept under Versions, with the reviewers' comments. The peer reviews start again and the reviewers are told why.</p>
+      <textarea value={reason} onChange={e => setReason(e.target.value)} rows={2} placeholder="Why is the data being replaced? For example: the wrong file was uploaded. At least 10 characters." className="w-full border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white text-gray-900" />
+      <Button type="button" size="sm" loading={busy} disabled={disabled || !ok} onClick={onGo as any}>Replace with a new version</Button>
     </div>
   )
 }

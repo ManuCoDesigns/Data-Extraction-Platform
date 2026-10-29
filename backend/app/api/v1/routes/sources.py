@@ -17,7 +17,7 @@ fixed inline via PATCH without a full re-upload.
 """
 import io, json, math, re
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select as sa_select
 from sqlalchemy.orm import Session, selectinload
@@ -780,6 +780,7 @@ async def upload_to_source(
     source_id: str,
     request: Request,
     file: UploadFile = File(...),
+    replace_reason: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -798,8 +799,8 @@ async def upload_to_source(
     source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
-    from app.services import record_locks as _rl  # upload.lock
-    _bulk_override = _rl.assert_bulk_editable(source, current_user)
+    from app.services import versions as _ver  # upload.lock: a reason lets the extractor replace data that is with the peers; the old data is kept as a version
+    _bulk_override = _ver.gate(db, source, current_user, replace_reason)
 
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > MAX_UPLOAD_SIZE_BYTES:
@@ -878,7 +879,7 @@ async def upload_to_source(
         extraction_method=extraction_method, file_breakdown=file_breakdown,
         files_processed=files_processed, display_filename=file.filename or "upload",
         content_len=len(content), schema_ver=schema_ver, schema_fields=schema_fields,
-        current_user=current_user, db=db, raw_entries=raw_entries,
+        current_user=current_user, db=db, raw_entries=raw_entries, replace_reason=replace_reason,
     )
 
 
@@ -889,6 +890,7 @@ def _finalize_upload(
     schema_ver, schema_fields: list[dict],
     current_user: "User", db: Session,
     raw_entries: list[dict] | None = None,
+    replace_reason: str | None = None,
 ) -> "SourceUploadSummary":
     """
     Shared logic for turning parsed rows into an ExtractionJob + ExtractedRecords.
@@ -902,6 +904,8 @@ def _finalize_upload(
     exact original structure can always be browsed/re-downloaded later via
     GET /sources/{id}/files, regardless of what was classified as data.
     """
+    from app.services import versions as _ver
+    _ver.prepare_replace(db, source, current_user, replace_reason, display_filename)   # keeps what is there as a version first
     _safe_clear_old_jobs(source_id, db)
 
     file_ext_type = {
@@ -1060,6 +1064,7 @@ async def upload_multi_to_source(
     source_id: str,
     request: Request,
     files: list[UploadFile] = File(...),
+    replace_reason: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1077,8 +1082,8 @@ async def upload_multi_to_source(
     source = _get_source_or_404(source_id, db, current_user)
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
-    from app.services import record_locks as _rl  # upload_multi.lock
-    _bulk_override = _rl.assert_bulk_editable(source, current_user)
+    from app.services import versions as _ver  # upload_multi.lock
+    _bulk_override = _ver.gate(db, source, current_user, replace_reason)
 
     if not files:
         raise HTTPException(status_code=422, detail="No files provided.")
@@ -1210,7 +1215,7 @@ async def upload_multi_to_source(
         files_processed=files_processed,
         display_filename=f"{len(real_files)} file{'s' if len(real_files) != 1 else ''} (folder upload)",
         content_len=total_size, schema_ver=schema_ver, schema_fields=schema_fields,
-        current_user=current_user, db=db, raw_entries=raw_entries,
+        current_user=current_user, db=db, raw_entries=raw_entries, replace_reason=replace_reason,
     )
 
 
