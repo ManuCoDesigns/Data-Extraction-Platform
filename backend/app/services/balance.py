@@ -74,7 +74,8 @@ def _state(db: Session, project_id: str):
     for r in ob.rows_for(db, ids):
         obs.setdefault(r.source_id, []).append(r)
     jobs = {j[0] for j in db.query(ExtractionJob.source_id).filter(ExtractionJob.source_id.in_(ids)).all()} if ids else set()
-    parked, touched = set(), set()
+    from app.services import holds
+    parked, touched = set(holds.held_since(db, ids)), set()      # sources on hold are set aside like blocked ones
     for s in srcs:
         for r in obs.get(s.id, []):
             if r.kind in ob.KINDS and ob.KINDS[r.kind][2]:

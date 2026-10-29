@@ -244,7 +244,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
                         <td className="px-2.5 tabular-nums">{s.approved}/{s.records}</td>
                         <td className="px-2.5 tabular-nums">{s.peers_done}/{s.peers_total}</td>
                         <td className="px-2.5 tabular-nums whitespace-nowrap">{s.approved_at ? s.approved_at.slice(0, 10) : '–'}</td>
-                        <td className="px-2.5 tabular-nums">{s.days ?? '–'}</td>
+                        <td className="px-2.5 tabular-nums whitespace-nowrap">{s.days ?? '–'}{s.on_hold ? <span style={{ color: '#6b7280' }}> · on hold</span> : null}</td>
                         <td className="px-2.5 tabular-nums">{pct(s.final_accuracy)}</td>
                       </tr>
                     ))}

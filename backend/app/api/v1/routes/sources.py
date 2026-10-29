@@ -16,7 +16,7 @@ no row-level merge/dedup in this version). Individual records can also be
 fixed inline via PATCH without a full re-upload.
 """
 import io, json, math, re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select as sa_select
@@ -498,12 +498,18 @@ def team_workload(
             user_cache[uid] = u.full_name if u else "Unknown"
         return user_cache[uid]
 
-    def elapsed_label(started: datetime | None) -> str | None:
+    from app.services import holds as _holds
+    _held_now = _holds.held_since(db, [x.id for x in sources])
+    _held_s = _holds.held_seconds(db, sources)
+
+    def elapsed_label(started: datetime | None, source_id: str | None = None) -> str | None:
         if not started:
             return None
         if started.tzinfo is None:
             started = started.replace(tzinfo=timezone.utc)
         delta = now - started
+        if source_id and _held_s.get(source_id):
+            delta = max(delta - timedelta(seconds=_held_s[source_id]), timedelta(0))     # time on hold does not count
         hrs = delta.total_seconds() / 3600
         if hrs < 1:
             return f"{int(delta.total_seconds() / 60)}m"
@@ -553,7 +559,8 @@ def team_workload(
             "status": s.status.value,
             "pipeline_stage": STAGE_LABELS.get(s.status.value, s.status.value),
             "extractor": extractor,
-            "extractor_elapsed": elapsed_label(s.extraction_started_at) if is_extracting else None,
+            "extractor_elapsed": elapsed_label(s.extraction_started_at, s.id) if is_extracting else None,
+            "on_hold": s.id in _held_now,
             "llm_verifying": is_llm_verifying,
             "llm_elapsed": elapsed_label(llm_started) if is_llm_verifying else None,
             "reviewer": reviewer,

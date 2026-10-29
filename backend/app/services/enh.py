@@ -319,9 +319,16 @@ def waiting_items(db: Session, sources: list) -> list[dict]:
             pnames[uid] = u.full_name if u else "Unknown"
         return pnames[uid]
 
+    from app.services import holds
+    on_hold = set(holds.held_since(db, [s.id for s in sources]))
+    held_s = holds.held_seconds(db, sources)
     rows = []
     for s in sources:
+        if s.id in on_hold:
+            continue                      # clock stopped: not overdue, no reminders
         since = stage_since(s) or now
+        if held_s.get(s.id):
+            since = min(now, since + timedelta(seconds=held_s[s.id]))
         days = max(0.0, (now - since).total_seconds() / 86400)
         base = {"source_id": s.id, "source_name": s.name, "project_id": s.project_id,
                 "project_name": projects.get(s.project_id, ""), "since": since.isoformat(), "days": round(days, 1), "level": level_for(days)}

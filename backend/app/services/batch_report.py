@@ -60,6 +60,13 @@ def _days(a, b):
     return round((b - a).total_seconds() / 86400, 1) if a and b else None
 
 
+def _net_days(days, held_seconds):
+    """Days with the time spent on hold taken out."""
+    if days is None:
+        return None
+    return max(0.0, round(days - (held_seconds or 0) / 86400, 1))
+
+
 def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> dict:
     pb = q.pull_batches(srcs)
     mine = [s for s in srcs if (pb.get(s.id) or {}).get("key") == key]
@@ -118,6 +125,9 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     qrow = {r["source_id"]: r for r in (sc or {}).get("batches", [])}
 
     rows, stages = [], {k: 0 for k, _ in STAGES}
+    from app.services import holds
+    held_now = set(holds.held_since(db, ids))
+    held_s = holds.held_seconds(db, mine)
     for s in mine:
         stage = "blocked" if s.id in blocked else _stage(s)
         stages[stage] += 1
@@ -129,7 +139,8 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
             "type": s.type or (s.schema.name if s.schema else None), "sop": ((s.xtrium_sop or {}).get("meta") or {}).get("sop_code"),
             "project": s.project.name if s.project else None, "stage": stage, "status": getattr(s.status, "value", s.status),
             "records": n, "approved": ok, "peers_done": sum(1 for p in s.peer_reviews if p.status == "submitted"), "peers_total": len(s.peer_reviews),
-            "days": _days(s.created_at, end), "submitted_to_xtrium": bool(s.xtrium_submitted_at),
+            "days": _net_days(_days(s.created_at, end), held_s.get(s.id)), "on_hold": s.id in held_now and s.status != SourceStatus.APPROVED,
+            "submitted_to_xtrium": bool(s.xtrium_submitted_at),
             "approved_at": s.approved_at.isoformat() if s.approved_at else None, "submitted_at": s.xtrium_submitted_at.isoformat() if s.xtrium_submitted_at else None,
             "fields": qr.get("fields"), "errors": qr.get("errors"), "errors_per_100": qr.get("errors_per_100"),
             "first_pass_accuracy": qr.get("first_pass_accuracy"), "final_accuracy": qr.get("final_accuracy"),
@@ -141,7 +152,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     recs_total = sum(c[0] for c in counts.values())
     recs_ok = sum(c[1] for c in counts.values())
     done_days = [r["days"] for r in rows if r["stage"] == "delivered" and r["days"] is not None]
-    waiting = [r for r in rows if r["stage"] != "delivered" and r["days"] is not None]
+    waiting = [r for r in rows if r["stage"] != "delivered" and r["days"] is not None and not r.get("on_hold")]
 
     # blocked groups, each with what we need from the client or the team
     groups: dict = {}
@@ -202,7 +213,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     return {
         "key": key, "label": label, "date": date, "generated_at": now,
         "totals": {"sources": total, "delivered": delivered, "percent": pct, "records": recs_total, "records_approved": recs_ok,
-                   "blocked": stages["blocked"], "in_progress": inflight, "submitted_to_xtrium": sum(1 for r in rows if r["submitted_to_xtrium"])},
+                   "blocked": stages["blocked"], "on_hold": sum(1 for r in rows if r.get("on_hold")), "in_progress": inflight, "submitted_to_xtrium": sum(1 for r in rows if r["submitted_to_xtrium"])},
         "stages": [{"key": k, "label": l, "count": stages[k]} for k, l in STAGES],
         "by_type": sorted(by_type.values(), key=lambda t: -t["total"]),
         "blocked": blocked_groups, "sources": rows, "team": team,

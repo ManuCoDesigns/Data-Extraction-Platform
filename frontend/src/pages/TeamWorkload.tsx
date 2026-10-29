@@ -1,4 +1,5 @@
 import { BalancePanel } from '@/components/enh/BalancePanel'
+import { DispatchPanel } from '@/components/enh/DispatchPanel'
 import { useEffect, useState, useCallback } from 'react'
 import { Link } from 'react-router-dom'
 import { RefreshCw, Users, AlertCircle, Clock, ArrowRight, Download } from 'lucide-react'
@@ -131,6 +132,7 @@ export function TeamWorkloadPage() {
         </div>
       </div>
 
+      <DispatchPanel />
       <BalancePanel />
 
       {loading ? (
@@ -247,6 +249,8 @@ export function TeamWorkloadPage() {
                           padding: '2px 8px', borderRadius: 20, display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                           🤖 LLM {s.llm_elapsed}
                         </span>
+                      ) : s.on_hold ? (
+                        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--tx-6b7280)', background: 'var(--bg-f3f4f6)', padding: '2px 8px', borderRadius: 20 }}>On hold</span>
                       ) : s.extractor_elapsed && (
                         <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--tx-3b82f6)', display: 'flex', alignItems: 'center', gap: 3 }}>
                           <Clock style={{ width: 11, height: 11 }} /> {s.extractor_elapsed}

@@ -17,7 +17,8 @@ def _tick():
     try:
         enh.run_reminders(db)
         try:
-            from app.services import balance
+            from app.services import balance, distribute
+            distribute.run_all(db)
             balance.run_all(db)
         except Exception as e:
             log.warning("balance failed: %s", e)
