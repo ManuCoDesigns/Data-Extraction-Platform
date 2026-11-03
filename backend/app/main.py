@@ -9,7 +9,7 @@ import app.core.mailer  # noqa: F401  (sends email alerts after commit)
 from app.api.v1.routes import (
     auth, users, projects, jobs, records, schemas,
     submission, project_resources, work_submissions, sources,
-    integrations, notifications, enhancements, quality, observations, sop_assign, balance, dispatch,
+    integrations, notifications, enhancements, quality, observations, sop_assign, balance, dispatch, admin_upload,
 )
 
 
@@ -89,6 +89,7 @@ app.include_router(observations.router,                     prefix=PREFIX)
 app.include_router(sop_assign.router,                       prefix=PREFIX)
 app.include_router(balance.router,                          prefix=PREFIX)
 app.include_router(dispatch.router,                         prefix=PREFIX)
+app.include_router(admin_upload.router,                    prefix=PREFIX)
 
 
 @app.get("/health")
