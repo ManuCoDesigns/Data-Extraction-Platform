@@ -103,6 +103,32 @@ class ApplyBody(BaseModel):
     source_id: str | None = None
 
 
+@router.get("/key")
+def key(batch_id: str = "latest", db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """A saved batch as the file Quality → Final check reads, so the zip does not have to be uploaded again. batch_id latest = the newest copy of each source."""
+    _admin(user)
+    k = au.key_from_copies(db, {s.project_id for s in _visible_sources(db, user).all()}, batch_id)
+    if not k:
+        raise HTTPException(status_code=404, detail="Nothing is saved for that batch.")
+    return Response(content=json.dumps(k, ensure_ascii=False, default=str), media_type="application/json")
+
+
+@router.post("/key/save")
+async def key_save(file: UploadFile = File(...), project_id: str | None = Form(None), source_id: str | None = Form(None),
+                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Keep a Final check file as private admin copies of the sources it matches."""
+    _admin(user)
+    from app.services import answer_key as ak
+    content = await file.read()
+    srcs = _visible_sources(db, user, project_id).all()
+    only = next((s.name for s in srcs if s.id == source_id), None) if source_id else None
+    try:
+        k = ak.load_key(file.filename or "", content, only)
+    except Exception:
+        raise HTTPException(status_code=422, detail="Could not read that file.")
+    return au.save_key(db, user, k, file.filename or "final check file", srcs)
+
+
 @router.get("/library")
 def library(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Every saved admin batch. Only admins can see this."""

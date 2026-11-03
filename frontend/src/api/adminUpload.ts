@@ -19,6 +19,11 @@ export const adminUploadApi = {
     return api.post('/admin-upload/batch/apply', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 })
       .then(r => r.data as { results: { file: string; source_id: string; source_name?: string; mode: string; ok: boolean; records?: number; valid?: number; invalid?: number; error?: string }[]; done: number; failed: number })
   },
+  key: (batchId: string) => api.get('/admin-upload/key', { params: { batch_id: batchId }, responseType: 'blob' }).then(r => r.data as Blob),
+  saveKey: (file: File, projectId?: string, sourceId?: string) => {
+    const fd = new FormData(); fd.append('file', file); if (projectId) fd.append('project_id', projectId); if (sourceId) fd.append('source_id', sourceId)
+    return api.post('/admin-upload/key/save', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 }).then(r => r.data as { saved: number; unchanged: number; unmatched: string[]; batch_id: string | null })
+  },
   library: () => api.get('/admin-upload/library').then(r => r.data as { batches: { batch_id: string; label: string; created_at: string; copies: CopyMeta[] }[] }),
   copies: (sourceId: string) => api.get(`/admin-upload/source/${sourceId}/copies`).then(r => r.data as { copies: CopyMeta[] }),
   compareCopy: (copyId: string, sourceId?: string) => api.get(`/admin-upload/copy/${copyId}/compare`, { params: { source_id: sourceId } }).then(r => r.data),

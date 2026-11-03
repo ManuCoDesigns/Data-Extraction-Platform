@@ -303,3 +303,47 @@ def plan_batch(db: Session, files: list[dict], sources: list) -> list[dict]:
             "candidates": [{"id": s.id, "name": s.name, "status": s.status.value, "score": sc} for sc, s in scored[:5]],
         })
     return plan
+
+
+# ─── the link with Quality → Final check ─────────────────────────────────────
+
+def key_from_copies(db: Session, project_ids: set | None, batch_id: str) -> dict:
+    """Saved copies as the answer key Final check reads: {source name: [records]}. batch_id 'latest' takes the newest copy of each source."""
+    q = db.query(AdminCopy).order_by(AdminCopy.created_at.desc())
+    if batch_id != "latest":
+        q = q.filter(AdminCopy.batch_id == batch_id)
+    out, seen = {}, set()
+    for c in q.all():
+        if project_ids is not None and c.project_id not in project_ids:
+            continue
+        if c.name_key in seen:
+            continue
+        seen.add(c.name_key)
+        out[c.source_name] = [dict(r.get("fields") or {}) for r in (c.records or [])]
+    return out
+
+
+def save_key(db: Session, user, key: dict, label: str, sources: list) -> dict:
+    """Keep the records of a Final check file as private admin copies, one per matching source. A file that is already saved is not saved twice."""
+    from app.services import answer_key as ak
+    by_norm: dict = {}
+    for s in sources:
+        by_norm.setdefault(ak.norm(s.name), s)
+    batch_id = str(uuid.uuid4())
+    saved, same, unmatched = 0, 0, []
+    for name, recs in key.items():
+        s = by_norm.get(ak.norm(name))
+        if not s:
+            unmatched.append(name)
+            continue
+        fields = [dict(r) for r in recs if isinstance(r, dict)]
+        last = db.query(AdminCopy).filter(AdminCopy.name_key == name_key(s.name)).order_by(AdminCopy.created_at.desc()).first()
+        if last and json.dumps([r.get("fields") for r in (last.records or [])], sort_keys=True, default=str) == json.dumps(fields, sort_keys=True, default=str):
+            same += 1
+            continue
+        db.add(AdminCopy(source_id=s.id, name_key=name_key(s.name), source_name=s.name, project_id=s.project_id, batch_id=batch_id, batch_label=label[:200], file=label[:300],
+                         records=[{"name": ak.record_name(f) or f"Record {i + 1}", "fields": f} for i, f in enumerate(fields)],
+                         record_count=len(fields), valid_count=len(fields), created_by=user.id))
+        saved += 1
+    db.commit()
+    return {"saved": saved, "unchanged": same, "unmatched": unmatched, "batch_id": batch_id if saved else None}

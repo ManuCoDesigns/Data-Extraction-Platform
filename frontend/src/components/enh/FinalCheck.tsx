@@ -3,6 +3,7 @@ import { qualityApi } from '@/api/client'
 import { Blank, Chip, Panel, Tile, type Tone } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
 import { ask } from '@/lib/confirm'
+import { adminUploadApi } from '@/api/adminUpload'
 
 /**
  * Upload the final records, see them against what the extractor delivered and what the reviewers flagged, with error % and accuracy %
@@ -33,6 +34,22 @@ const Legend = () => (
 
 export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceId: string }) {
   const [file, setFile] = useState<File | null>(null)
+  // Saved admin batches: the zip is kept the first time, so it never has to be uploaded again.
+  const [batches, setBatches] = useState<{ batch_id: string; label: string; created_at: string; copies: any[] }[]>([])
+  const [keep, setKeep] = useState(true)
+  const [fromSaved, setFromSaved] = useState('')
+  const [inputKey, setInputKey] = useState(0)
+  const savedFile = useRef<File | null>(null)
+  useEffect(() => { adminUploadApi.library().then(r => setBatches(r.batches)).catch(() => {}) }, [])
+  const useSaved = async (id: string) => {
+    setFromSaved(id)
+    if (!id) return
+    try {
+      const blob = await adminUploadApi.key(id)
+      const label = id === 'latest' ? 'latest saved copies' : (batches.find(b => b.batch_id === id)?.label ?? 'saved batch')
+      setFile(new File([blob], `${label}.json`, { type: 'application/json' })); setRes(null); setDec({}); setSub(null); setInputKey(k => k + 1)
+    } catch (e) { setFromSaved(''); toast.error(err(e, 'Nothing is saved for that batch')) }
+  }
   const [busy, setBusy] = useState<'check' | 'apply' | 'download' | ''>('')
   const [res, setRes] = useState<any>(null)
   const [open, setOpen] = useState<Record<string, boolean>>({})
@@ -59,6 +76,13 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
     try {
       const r = await qualityApi.answerKey(file, { apply, projectId, sourceId, decisions: dec })
       setRes(r)
+      if (!apply && keep && !fromSaved && batches !== null && savedFile.current !== file) {
+        savedFile.current = file
+        adminUploadApi.saveKey(file, projectId, sourceId).then(s => {
+          if (s.saved) toast.success(`Kept a private copy for ${s.saved} source${s.saved === 1 ? '' : 's'}. You will not need to upload it again.`)
+          adminUploadApi.library().then(x => setBatches(x.batches)).catch(() => {})
+        }).catch(() => {})
+      }
       if (apply) toast.success(`Recorded ${r.applied?.written ?? 0} field verdicts`)
     } catch (e) { toast.error(err(e, "Couldn't read that file")) } finally { setBusy('') }
   }
@@ -99,7 +123,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
     <div className="space-y-5">
       <Panel title="Check the final records" subtitle="Upload the zip or the all-records file. Sources and records are matched by name, and every field is compared with what the extractor delivered. Nothing is edited.">
         <div className="flex items-center gap-3 flex-wrap">
-          <input type="file" accept=".zip,.json" onChange={e => { setFile(e.target.files?.[0] ?? null); setRes(null); setDec({}); setSub(null) }} aria-label="Final records file"
+          <input key={inputKey} type="file" accept=".zip,.json" onChange={e => { setFile(e.target.files?.[0] ?? null); setFromSaved(''); setRes(null); setDec({}); setSub(null) }} aria-label="Final records file"
             className="text-sm text-gray-700 file:mr-3 file:rounded-lg file:border-0 file:bg-brand-600 file:text-white file:px-3 file:py-1.5 file:text-sm file:font-semibold" />
           <Button onClick={() => run(false)} disabled={!file || !!busy}>{busy === 'check' ? 'Checking…' : 'Check'}</Button>
           <span className="flex-1" />
@@ -107,6 +131,17 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
           {res && <Button variant="secondary" onClick={() => download('json')} disabled={!!busy}>JSON</Button>}
           {res && res.mode === 'preview' && <Button onClick={() => run(true)} disabled={!!busy} title="Saves each verdict you have decided, the same as marking the field in Review">{busy === 'apply' ? 'Recording…' : 'Record as audits'}</Button>}
         </div>
+        {batches.length > 0 && (
+          <div className="flex items-center gap-3 flex-wrap mt-3 text-sm">
+            <label className="text-gray-600" htmlFor="saved-batch">Or use what you saved before</label>
+            <select id="saved-batch" value={fromSaved} onChange={e => useSaved(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 bg-white text-gray-900 max-w-[22rem]">
+              <option value="">Choose a saved batch…</option>
+              <option value="latest">The newest saved copy of each source</option>
+              {batches.map(b => <option key={b.batch_id} value={b.batch_id}>{b.label} · {new Date(b.created_at).toLocaleDateString()} · {b.copies.length} sources</option>)}
+            </select>
+          </div>
+        )}
+        {!fromSaved && <label className="flex items-center gap-2 text-xs text-gray-600 mt-2"><input type="checkbox" checked={keep} onChange={e => setKeep(e.target.checked)} /> Keep a private copy for next time. Only admins can see it, and it is saved by source name.</label>}
         {sourceId && <p className="text-xs text-gray-500 mt-2 mb-0">A single list of records will be checked against the source picked above.</p>}
       </Panel>
 
