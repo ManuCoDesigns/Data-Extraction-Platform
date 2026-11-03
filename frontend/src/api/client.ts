@@ -523,7 +523,7 @@ export const qualityApi = {
     if (o.sourceId) fd.append('source_id', o.sourceId)
     return api.post('/quality/answer-key', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 }).then(r => r.data)
   },
-  answerKeyDownload: async (file: File, o: { format: 'xlsx' | 'json'; apply?: boolean; projectId?: string; sourceId?: string; decisions?: Record<string, string> }) => {
+  answerKeyDownload: async (file: File, o: { format: 'xlsx' | 'json' | 'llm' | 'llm_zip'; apply?: boolean; projectId?: string; sourceId?: string; decisions?: Record<string, string> }) => {
     const fd = new FormData()
     fd.append('file', file)
     fd.append('apply', 'false')
@@ -535,7 +535,7 @@ export const qualityApi = {
     const url = URL.createObjectURL(new Blob([r.data]))
     const a = document.createElement('a')
     a.href = url
-    a.download = `final_check_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${o.format}`
+    a.download = `final_check${o.format.startsWith('llm') ? '_for_llm' : ''}_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.${o.format === 'llm' ? 'md' : o.format === 'llm_zip' ? 'zip' : o.format}`
     a.click()
     URL.revokeObjectURL(url)
   },

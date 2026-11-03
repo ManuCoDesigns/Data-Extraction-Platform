@@ -61,7 +61,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
   const [view, setView] = useState<'all' | 'confirm' | 'errors' | 'clean'>('all')
   const [sort, setSort] = useState<'name' | 'accuracy' | 'errors'>('name')
 
-  const download = async (format: 'xlsx' | 'json') => {
+  const download = async (format: 'xlsx' | 'json' | 'llm' | 'llm_zip') => {
     if (!file) return
     setBusy('download')
     try { await qualityApi.answerKeyDownload(file, { format, projectId, sourceId, decisions: dec }) }
@@ -129,6 +129,8 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
           <span className="flex-1" />
           {res && <Button variant="secondary" onClick={() => download('xlsx')} disabled={!!busy} title="Summary, per source, wrong fields, not fixed, held, SOP failures, reviewers and extractors">{busy === 'download' ? 'Preparing…' : 'Download Excel'}</Button>}
           {res && <Button variant="secondary" onClick={() => download('json')} disabled={!!busy}>JSON</Button>}
+          {res && <Button variant="secondary" onClick={() => download('llm')} disabled={!!busy} title="One markdown file with the task, every item to verify, the reviewers' comments, the SOP rules and the full records on both sides. Give it to an AI to check against the sources.">{busy === 'download' ? 'Preparing…' : 'For an AI'}</Button>}
+          {res && <Button variant="secondary" onClick={() => download('llm_zip')} disabled={!!busy} title="The same, as one file per source plus the task, for when the single file is too long for the AI to take">For an AI (split)</Button>}
           {res && res.mode === 'preview' && <Button onClick={() => run(true)} disabled={!!busy} title="Saves each verdict you have decided, the same as marking the field in Review">{busy === 'apply' ? 'Recording…' : 'Record as audits'}</Button>}
         </div>
         {batches.length > 0 && (

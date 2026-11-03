@@ -1186,10 +1186,18 @@ async def answer_key(
               "wrong_fields": [], "false_alarm_fields": [], "fixed_fields": [], "records": [], "unmatched_scored": [], "sop_failure_list": [],
               "key_records_unmatched": [ak.record_name(final_recs[i]) or f"record {i + 1}" for i in miss_final],
               "extractor_records_unmatched": [ak.record_name(recs[j].extracted_fields or {}, recs[j].canonical_name) or f"record {j + 1}" for j in miss_ext]}
+        if export in ("llm", "llm_zip"):      # extra context for the pack a language model verifies from
+            sd["website_url"] = s.website_url
+            sd["sop"] = {"required": sorted(req.get("required") or []) if sop_on else [], "allowed": sorted(req.get("allowed") or []) if (sop_on and req.get("allowed")) else []}
+            sd["pack"] = []
         for i, j in pairs:
             r, fr = recs[j], final_recs[i]
             label = ak.record_name(r.extracted_fields or {}, r.canonical_name) or f"record {j + 1}"
             rows = ak.compare(r.extracted_fields or {}, fr, ignore_set)
+            if export in ("llm", "llm_zip"):
+                sd["pack"].append({"record": label, "extractor": r.extracted_fields or {}, "final": fr,
+                                   "comments": {f_: [{"comment": e.get("comment"), "type": e.get("type"), "role": e.get("role")} for e in (lst or []) if isinstance(e, dict)][:4]
+                                                for f_, lst in (r.reviewer_field_comments or {}).items() if isinstance(lst, list)}})
             rec_wrong = 0
             if sop_on:   # the SOP applies to the final record, and is reported apart from extractor errors
                 try:
@@ -1341,6 +1349,15 @@ async def answer_key(
                 skipped.append({"source": s.name, "field": row["field"], "why": str(e.detail)})
         result["mode"] = "applied"
         result["applied"] = {"written": written, "already_recorded": already, "held": held, "skipped": skipped}
+    if export in ("llm", "llm_zip"):
+        from fastapi.responses import Response
+        from app.services import llm_pack as lp
+        stamp = enh.now_utc().strftime("%Y%m%d")
+        if export == "llm":
+            return Response(content=lp.combined_md(result, {"generated": stamp}).encode("utf-8"), media_type="text/markdown; charset=utf-8",
+                            headers={"Content-Disposition": f'attachment; filename="final_check_for_llm_{stamp}.md"'})
+        return Response(content=lp.zip_pack(result, {"generated": stamp}), media_type="application/zip",
+                        headers={"Content-Disposition": f'attachment; filename="final_check_for_llm_{stamp}.zip"'})
     if export in ("xlsx", "json"):
         from fastapi.responses import Response
         from app.services import quality_export as qx
