@@ -708,19 +708,36 @@ def review_sources(project_id: str | None = None, scope: str = Query("peer_done"
     pids = {s.project_id for s in allsrc}
     if "org_admin" in {r.role.value for r in user.roles}:
         pids |= {p.id for p in db.query(Project.id).all()}
-    pn = {p.id: p.name for p in db.query(Project).filter(Project.id.in_(pids)).all()} if pids else {}
+    _prj = db.query(Project).filter(Project.id.in_(pids)).all() if pids else []
+    pn = {p.id: p.name for p in _prj}
+    pcreated = {p.id: p.created_at for p in _prj}
+    _ts = lambda d: d.isoformat() if d else None
     ids = [s.id for s in allsrc]
     open_f = dict(db.query(QualityFinding.source_id, func.count(QualityFinding.id)).filter(QualityFinding.source_id.in_(ids or ["-"]), QualityFinding.status == "open").group_by(QualityFinding.source_id).all())
     aud = dict(db.query(FieldAudit.source_id, func.count(FieldAudit.id)).filter(FieldAudit.source_id.in_(ids or ["-"])).group_by(FieldAudit.source_id).all())
     rec_n = dict(db.query(ExtractionJob.source_id, func.count(ExtractedRecord.id)).join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
                  .filter(ExtractionJob.source_id.in_(ids or ["-"])).group_by(ExtractionJob.source_id).all())
-    proj = {k: {"id": k, "name": pn.get(k, ""), "sources": 0, "peer_done": 0, "checked": 0, "open": 0} for k in pids}
+    def _newp(k):
+        # latest_at = when the project was made or its newest source was added; live = sources that have started; sent = those already submitted to the client
+        return {"id": k, "name": pn.get(k, ""), "sources": 0, "peer_done": 0, "checked": 0, "open": 0,
+                "created_at": _ts(pcreated.get(k)), "latest_at": _ts(pcreated.get(k)), "live": 0, "sent": 0, "sent_at": None}
+    proj = {k: _newp(k) for k in pids}
     rows = []
     for s in allsrc:
         total, done = _peer_state(s)
         peer_done = total > 0 and done == total
-        pr = proj.setdefault(s.project_id, {"id": s.project_id, "name": pn.get(s.project_id, ""), "sources": 0, "peer_done": 0, "checked": 0, "open": 0})
+        pr = proj.setdefault(s.project_id, _newp(s.project_id))
         pr["sources"] += 1
+        _c = _ts(s.created_at)
+        if _c and (not pr["latest_at"] or _c > pr["latest_at"]):
+            pr["latest_at"] = _c
+        if s.status != SourceStatus.NOT_STARTED:
+            pr["live"] += 1
+            if getattr(s, "xtrium_submitted_at", None):
+                pr["sent"] += 1
+                _t = _ts(s.xtrium_submitted_at)
+                if not pr["sent_at"] or _t > pr["sent_at"]:
+                    pr["sent_at"] = _t
         pr["peer_done"] += 1 if peer_done else 0
         pr["checked"] += int(aud.get(s.id, 0))
         pr["open"] += int(open_f.get(s.id, 0))
@@ -730,9 +747,15 @@ def review_sources(project_id: str | None = None, scope: str = Query("peer_done"
             continue
         rows.append({"source_id": s.id, "project_id": s.project_id, "project": pn.get(s.project_id, ""), "name": s.name, "status": s.status.value,
                      "peers_total": total, "peers_done": done, "peer_done": peer_done, "records": int(rec_n.get(s.id, 0)),
-                     "open_findings": int(open_f.get(s.id, 0)), "audited": int(aud.get(s.id, 0))})
-    rows.sort(key=lambda x: (x["project"].lower(), -x["open_findings"], x["name"].lower()))
-    return {"items": rows, "projects": sorted(proj.values(), key=lambda x: x["name"].lower())}
+                     "open_findings": int(open_f.get(s.id, 0)), "audited": int(aud.get(s.id, 0)),
+                     "submitted": bool(getattr(s, "xtrium_submitted_at", None))})
+    # A project is finished once every source that started has been submitted to the client. Newest projects come first.
+    for pr in proj.values():
+        pr["submitted"] = pr["live"] > 0 and pr["sent"] == pr["live"]
+    plist = sorted(proj.values(), key=lambda x: (x["latest_at"] or "", x["name"].lower()), reverse=True)
+    rank = {p["id"]: i for i, p in enumerate(plist)}
+    rows.sort(key=lambda x: (rank.get(x["project_id"], 9999), -x["open_findings"], x["name"].lower()))
+    return {"items": rows, "projects": plist}
 
 
 def _email_ids(db: Session, emails: set) -> dict:

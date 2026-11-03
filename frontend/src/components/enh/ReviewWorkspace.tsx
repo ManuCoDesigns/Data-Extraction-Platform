@@ -37,10 +37,24 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '', onBen
   const [scope, setScope] = useState<Scope>(initialSource ? 'all' : 'peer_done')
   const [q, setQ] = useState('')
   const [sourceId, setSourceId] = useState(initialSource)
+  const [tab, setTab] = useState<'active' | 'submitted'>('active')   // projects already submitted to the client live on their own tab
+  const [showAllProjects, setShowAllProjects] = useState(false)
 
   useEffect(() => { setList(null); qualityApi.reviewSources({ project_id: project || undefined, scope }).then(setList).catch(() => setList({ items: [], projects: [] })) }, [project, scope])
   useEffect(() => { onBench?.(!!sourceId) }, [sourceId])  // eslint-disable-line react-hooks/exhaustive-deps
-  const items: any[] = useMemo(() => (list?.items ?? []).filter((s: any) => !q.trim() || s.name.toLowerCase().includes(q.trim().toLowerCase())), [list, q])
+  const projs: any[] = list?.projects ?? []
+  const nSent = projs.filter(p => p.submitted).length
+  const nActive = projs.length - nSent
+  const tabProjects: any[] = useMemo(() => (list?.projects ?? []).filter((p: any) => !!p.submitted === (tab === 'submitted')), [list, tab])
+  const tabIds = useMemo(() => new Set(tabProjects.map((p: any) => p.id)), [tabProjects])
+  // Follow the project or source that is open, so it is never hidden behind the other tab.
+  useEffect(() => {
+    if (!list) return
+    const pid = project || (list.items ?? []).find((s: any) => s.source_id === sourceId)?.project_id
+    const p = pid ? (list.projects ?? []).find((x: any) => x.id === pid) : null
+    if (p) setTab(p.submitted ? 'submitted' : 'active')
+  }, [list, project, sourceId])
+  const items: any[] = useMemo(() => (list?.items ?? []).filter((s: any) => (project || tabIds.has(s.project_id)) && (!q.trim() || s.name.toLowerCase().includes(q.trim().toLowerCase()))), [list, q, tabIds, project])
   const groups = useMemo(() => {
     const m = new Map<string, any[]>()
     items.forEach(s => { const k = s.project || 'No project'; m.set(k, [...(m.get(k) ?? []), s]) })
@@ -57,26 +71,43 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '', onBen
   }
   return (
     <div className="space-y-4">
-      <div role="tablist" aria-label="Projects" className="flex gap-3 overflow-x-auto pb-1 -mx-1 px-1">
-        {!list ? <div className="h-[84px] w-full rounded-2xl bg-gray-100 animate-pulse" /> : [{ id: '', name: 'All projects', sources: (list.projects ?? []).reduce((n: number, p: any) => n + p.sources, 0), peer_done: (list.projects ?? []).reduce((n: number, p: any) => n + p.peer_done, 0), open: (list.projects ?? []).reduce((n: number, p: any) => n + p.open, 0), checked: (list.projects ?? []).reduce((n: number, p: any) => n + p.checked, 0) }, ...(list.projects ?? [])].map((p: any) => (
+      <div className="flex items-center gap-3 flex-wrap">
+        <Tabs value={tab} onChange={(v: 'active' | 'submitted') => { setTab(v); setProject(''); setShowAllProjects(false) }}
+          items={[{ key: 'active', label: 'Active projects', count: nActive }, { key: 'submitted', label: 'Submitted to client', count: nSent, tone: 'green' }]} />
+        <span className="text-xs text-gray-500">{tab === 'active' ? 'Newest first. A project moves to the other tab once every source in it is submitted to the client.' : 'Every source in these projects has been submitted to the client. Newest first.'}</span>
+      </div>
+      <div role="tablist" aria-label="Projects" className="grid gap-2.5 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
+        {!list ? <div className="h-[84px] col-span-full rounded-2xl bg-gray-100 animate-pulse" /> : [
+          { id: '', name: tab === 'active' ? 'All active projects' : 'All submitted projects', sources: tabProjects.reduce((n: number, p: any) => n + p.sources, 0), peer_done: tabProjects.reduce((n: number, p: any) => n + p.peer_done, 0), open: tabProjects.reduce((n: number, p: any) => n + p.open, 0), checked: tabProjects.reduce((n: number, p: any) => n + p.checked, 0) },
+          ...(() => { const shown = showAllProjects ? tabProjects : tabProjects.slice(0, 7); const sel = project && !shown.some((p: any) => p.id === project) ? tabProjects.find((p: any) => p.id === project) : null; return sel ? [...shown, sel] : shown })(),
+        ].map((p: any) => (
           <button key={p.id || 'all'} type="button" role="tab" aria-selected={project === p.id} onClick={() => setProject(p.id)}
-            className={cn('shrink-0 w-56 text-left rounded-2xl border px-4 py-3 bg-white transition', project === p.id ? 'border-transparent ring-2 ring-brand-400 shadow-card' : 'border-gray-100 hover:border-gray-200')}>
+            className={cn('w-full min-w-0 text-left rounded-2xl border px-4 py-3 bg-white transition', project === p.id ? 'border-transparent ring-2 ring-brand-400 shadow-card' : 'border-gray-100 hover:border-gray-200')}>
             <span className="block text-sm font-bold text-gray-900 truncate">{p.name || 'Untitled project'}</span>
             <span className="flex items-baseline gap-1.5 mt-1.5"><span className="text-2xl font-extrabold tabular-nums text-emerald-600 leading-none">{p.peer_done}</span><span className="text-xs text-gray-500">peer reviewed of {p.sources}</span></span>
             <span className="flex items-center gap-1.5 mt-2 flex-wrap">
+              {p.submitted && <Chip tone="green">Submitted{p.sent_at ? ' ' + new Date(p.sent_at).toLocaleDateString() : ''}</Chip>}
               {p.open > 0 && <Chip tone="amber">{p.open} open</Chip>}
               {p.checked > 0 && <Chip tone="blue">{p.checked} checked</Chip>}
               {p.sources === 0 && <Chip tone="gray">No sources yet</Chip>}
             </span>
+            {!!p.id && !p.submitted && p.latest_at && <span className="block text-[11px] text-gray-400 mt-1.5">Latest {new Date(p.latest_at).toLocaleDateString()}</span>}
           </button>
         ))}
       </div>
+      {tabProjects.length > 7 && (
+        <button type="button" onClick={() => setShowAllProjects(v => !v)} className="text-xs font-semibold text-brand-600 hover:underline bg-transparent border-0 p-0 cursor-pointer">
+          {showAllProjects ? 'Show fewer projects' : `Show all ${tabProjects.length} projects`}
+        </button>
+      )}
       <div className="flex items-center gap-3 flex-wrap">
         <Tabs value={scope} onChange={setScope} items={[{ key: 'peer_done', label: 'Peer reviewed' }, { key: 'all', label: 'All sources' }]} />
         <input value={q} onChange={e => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" className="text-sm rounded-xl border border-gray-200 px-3 py-2 w-56 max-w-full" />
         <span className="ml-auto inline-flex items-center gap-1.5"><DownloadButtons project={project} scope={scope} /></span>
       </div>
-      {!list ? <Skeletons rows={5} /> : groups.length === 0 ? (
+      {!list ? <Skeletons rows={5} /> : tabProjects.length === 0 ? (
+        <Blank title={tab === 'submitted' ? 'No submitted projects yet' : 'No active projects'} text={tab === 'submitted' ? 'A project moves here once every source in it has been submitted to the client.' : 'Every project is already submitted to the client. Look in the Submitted to client tab.'} />
+      ) : groups.length === 0 ? (
         <Blank title={scope === 'peer_done' ? 'No peer-reviewed sources yet' : 'No sources'} text={scope === 'peer_done' ? 'Sources show here once every peer reviewer has submitted. Switch to All sources to look at the rest.' : 'Sources show here once work has started.'} />
       ) : groups.map(([name, rows]) => (
         <section key={name}>
