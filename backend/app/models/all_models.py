@@ -836,3 +836,24 @@ class SourceObservation(Base):
     note = Column(Text, nullable=True)
     record_id = Column(String(36), ForeignKey("extracted_records.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_utc, index=True)
+
+
+class AdminCopy(Base):
+    """Data an admin saved for their own checking and final review. It is kept apart from the source, so extractors and reviewers never see it,
+    and it is kept by the source's name, so it is still there when the source is deleted and pulled again."""
+    __tablename__ = "admin_copies"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="SET NULL"), nullable=True, index=True)
+    name_key = Column(String(300), nullable=False, index=True)
+    source_name = Column(String(512), nullable=False)
+    project_id = Column(String(36), nullable=True, index=True)
+    batch_id = Column(String(36), nullable=False, index=True)
+    batch_label = Column(String(200), nullable=True)
+    file = Column(String(300), nullable=True)
+    records = Column(JSON, nullable=False, default=list)      # [{"name", "fields"}]
+    record_count = Column(Integer, default=0)
+    valid_count = Column(Integer, default=0)
+    created_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=now_utc, index=True)
+    applied_at = Column(DateTime(timezone=True), nullable=True)

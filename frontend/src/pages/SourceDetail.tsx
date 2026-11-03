@@ -16,7 +16,7 @@ import { SourceChat } from '@/components/enh/SourceChat'
 import { FlagErrorModal } from '@/components/enh/FlagErrorModal'
 import { SourceQuality } from '@/components/enh/SourceQuality'
 import { VersionsPanel } from '@/components/enh/VersionsPanel'
-import { AdminModePicker, AdminDraftBanner, type UploadMode } from '@/components/enh/AdminUpload'
+import { AdminModePicker, AdminDraftBanner, AdminCopiesPanel, AdminRecordCopy, type UploadMode } from '@/components/enh/AdminUpload'
 import { FeedbackPanel } from '@/components/enh/FeedbackPanel'
 import { SourceRequiredCard } from '@/components/enh/RequiredFields'
 import { LinkChip } from '@/pages/DataHealth'
@@ -84,7 +84,7 @@ function SourceDetailInner() {
   const [lockedUpload, setLockedUpload] = useState<string | null>(null)
   const [corrBusy, setCorrBusy] = useState(false)
   const [replaceReason, setReplaceReason] = useState('')
-  const [adminMode, setAdminMode] = useState<UploadMode>('draft')
+  const [adminMode, setAdminMode] = useState<UploadMode>('reference')
   const [showVersions, setShowVersions] = useState(false)
   const [corrResult, setCorrResult] = useState<{ updated: { record: string; changed: string[]; skipped?: string[] }[]; unchanged: string[]; locked: string[]; unmatched: string[] } | null>(null)
   const applyCorrections = async () => {
@@ -640,7 +640,7 @@ function SourceDetailInner() {
       const isZip = file.name.toLowerCase().endsWith('.zip')
       const isAI = summary.extraction_method === 'llm'
       const method = isAI ? 'AI extraction' : isZip ? `${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from ZIP` : 'schema mapping'
-      toast.success(`${isAdmin && adminMode === 'draft' ? 'Saved as a draft. It is not with the reviewers yet. ' : isAdmin && adminMode === 'reference' ? 'Kept as a reference copy under Versions. The source data is unchanged. ' : reason ? 'Replaced. The old data is kept under Versions. ' : ''}Uploaded via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+      toast.success(`${isAdmin && adminMode === 'draft' ? 'Loaded as data, not submitted. ' : isAdmin && adminMode === 'reference' ? 'Saved privately. Only admins can see it, and the source is unchanged. ' : reason ? 'Replaced. The old data is kept under Versions. ' : ''}Uploaded via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
       setReplaceReason(''); setLockedUpload(null); setCorrResult(null)
       if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
       setShowUpload(false)
@@ -1782,6 +1782,7 @@ function SourceDetailInner() {
 
       <Modal open={showVersions} onClose={() => setShowVersions(false)} title="Versions of this data" size="lg">
         {sourceId && <VersionsPanel sourceId={sourceId} onRestored={() => { load(); setRawFilesLoaded(false) }} />}
+        {isAdmin && sourceId && <AdminCopiesPanel sourceId={sourceId} onApplied={() => { load(); setRawFilesLoaded(false) }} />}
       </Modal>
 
       <Modal open={showUpload} onClose={() => !uploading && setShowUpload(false)} title="Upload Data" description="Add extracted data to this source.">
@@ -2252,6 +2253,7 @@ function SourceDetailInner() {
               <div style={{ textAlign: 'center', padding: 40, color: '#94a3b8' }}>Could not load timeline</div>
             ) : (
               <div>
+                {isAdmin && sourceId && showTimeline && <AdminRecordCopy sourceId={sourceId} recordId={showTimeline} />}
                 {isAdmin && timeline.current_status === 'pending_admin_review' && (
                   <div style={{ background: 'var(--bg-fffbeb)', border: '1px solid var(--bd-fde68a)', borderRadius: 12,
                     padding: '14px 16px', marginBottom: 18 }}>

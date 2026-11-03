@@ -5,8 +5,8 @@ Ready for review, the submitted clock was stamped and the reviewers were pointed
 
 - draft:     the records are saved as pending drafts and the source stays in extraction. No submitted time, nothing for the reviewers.
              The admin sends it for review when they decide it is ready (submit_draft).
-- reference: the file is kept as a version next to the extractors' data, for a side-by-side compare. The records on the source
-             are not touched, and nothing about the source changes.
+- reference: the file is saved as a private admin copy, for the admin's own checking and the final review. The records on the source
+             are not touched, extractors and reviewers cannot see it, and it is kept by source name, so it survives a re-pull.
 - submit:    the old behaviour, for an admin who is working the source as its extractor.
 
 Nobody but an admin can use these. A draft never counts as an extraction in the reports, because the source is not submitted.
@@ -18,14 +18,16 @@ import io
 import json
 import re
 import unicodedata
+import uuid
 import zipfile
+from types import SimpleNamespace
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.models.all_models import AuditAction, AuditLog, SchemaVersion, SourceRound, SourceStatus, User
+from app.models.all_models import AdminCopy, AuditAction, AuditLog, ExtractedRecord, ExtractionJob, SchemaVersion, Source, SourceStatus, User
 from app.services import record_locks as rl
 
 MODES = ("draft", "reference", "submit")
@@ -70,29 +72,118 @@ def map_rows(rows: list, ext: str, method: str, schema_fields: list) -> list[dic
     return out
 
 
+def name_key(name: str) -> str:
+    return _key(name)
+
+
 def store_reference(db: Session, source, user, rows: list, ext: str, method: str, file_breakdown: list, files_processed: int,
-                    filename: str, schema_fields: list):
-    """Keep the file as a version beside the live data. The records on the source are not changed."""
+                    filename: str, schema_fields: list, batch_id: str | None = None, batch_label: str | None = None):
+    """Save the file as a private admin copy. The records on the source are not changed, and only admins can see the copy."""
     from app.api.v1.routes import sources as S
     from app.schemas.api_schemas import SourceUploadSummary
     mapped = map_rows(rows, ext, method, schema_fields)
     valid = sum(1 for m in mapped if S.validate_record(m, schema_fields)[0])
-    rn = (db.query(func.max(SourceRound.round)).filter(SourceRound.source_id == source.id).scalar() or 0) + 1
-    ex = db.query(User).filter(User.id == source.assigned_extractor_id).first() if source.assigned_extractor_id else None
-    rd = SourceRound(
-        source_id=source.id, round=rn, created_by=user.id, reason=f"Reference copy: {filename}", status_at=source.status.value,
-        extractor_id=source.assigned_extractor_id, extractor_name=ex.full_name if ex else None, record_count=len(mapped),
-        reviewers=[], audits=[], findings=[],
-        records=[{"id": None, "name": _name(m) or f"Record {i + 1}", "fields": m, "review_status": None, "comments": {}, "corrections": 0, "admin_note": None}
-                 for i, m in enumerate(mapped)])
-    db.add(rd)
+    cp = AdminCopy(
+        source_id=source.id, name_key=name_key(source.name), source_name=source.name, project_id=source.project_id,
+        batch_id=batch_id or str(uuid.uuid4()), batch_label=(batch_label or filename)[:200], file=filename[:300],
+        records=[{"name": _name(m) or f"Record {i + 1}", "fields": m} for i, m in enumerate(mapped)],
+        record_count=len(mapped), valid_count=valid, created_by=user.id)
+    db.add(cp)
     db.flush()
     db.add(AuditLog(user_id=user.id, project_id=source.project_id, source_id=source.id, action=AuditAction.SOURCE_DATA_UPLOADED,
                     after_value={"file": filename, "method": method, "rows": len(mapped), "valid": valid, "invalid": len(mapped) - valid,
-                                 "admin_mode": "reference", "kept_as_version": rn}))
+                                 "admin_mode": "reference", "admin_copy": cp.id}))
     db.commit()
-    return SourceUploadSummary(total_rows=len(mapped), valid_rows=valid, invalid_rows=len(mapped) - valid, job_id=rd.id,
+    return SourceUploadSummary(total_rows=len(mapped), valid_rows=valid, invalid_rows=len(mapped) - valid, job_id=cp.id,
                                extraction_method=method, files_processed=files_processed, file_breakdown=file_breakdown, batch_warnings=[])
+
+
+def copies_for(db: Session, source) -> list:
+    """The admin copies that belong to a source: saved against it, or saved against a source of the same name (a re-pull gets a new id)."""
+    from sqlalchemy import or_
+    return (db.query(AdminCopy).filter(or_(AdminCopy.source_id == source.id, AdminCopy.name_key == name_key(source.name)))
+            .order_by(AdminCopy.created_at.desc()).all())
+
+
+def copy_meta(c, present: bool | None = None) -> dict:
+    d = {"id": c.id, "source_id": c.source_id, "source_name": c.source_name, "batch_id": c.batch_id, "batch_label": c.batch_label, "file": c.file,
+         "records": c.record_count or 0, "valid": c.valid_count or 0, "invalid": (c.record_count or 0) - (c.valid_count or 0),
+         "created_at": c.created_at.isoformat() if c.created_at else None, "applied_at": c.applied_at.isoformat() if c.applied_at else None}
+    if present is not None:
+        d["source_present"] = present
+    return d
+
+
+def compare_copy(db: Session, source, c) -> dict:
+    from app.services import versions as ver
+    return ver.compare(db, source, SimpleNamespace(records=c.records or [], round=0))
+
+
+def _same(a, b) -> bool:
+    empty = (None, "", [], {})
+    if a in empty and b in empty:
+        return True
+    return json.dumps(a, sort_keys=True, default=str) == json.dumps(b, sort_keys=True, default=str)
+
+
+def record_diff(db: Session, source, record_id: str) -> dict:
+    """The newest admin copy of this record next to what is on the source now: for the admin's final check."""
+    from app.services import versions as ver
+    rec = (db.query(ExtractedRecord).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+           .filter(ExtractedRecord.id == record_id, ExtractionJob.source_id == source.id).first())
+    if not rec:
+        raise HTTPException(status_code=404, detail="Record not found.")
+    live = rec.extracted_fields or {}
+    want = ver._key(ver._name(rec))
+    for c in copies_for(db, source):
+        for r in (c.records or []):
+            if ver._key(r.get("name")) == want:
+                theirs = r.get("fields") or {}
+                keys = sorted(set(live) | set(theirs))
+                diff = [{"field": k, "live": live.get(k), "copy": theirs.get(k)} for k in keys if not _same(live.get(k), theirs.get(k))]
+                return {"found": True, "copy": copy_meta(c), "differs": len(diff), "same": len([k for k in keys if _same(live.get(k), theirs.get(k))]), "diff": diff[:60]}
+    return {"found": False, "copies": len(copies_for(db, source))}
+
+
+def apply_copy(db: Session, source, user, c, mode: str) -> dict:
+    """Load a saved copy as the data of a source. mode draft keeps it unsubmitted; submit is the normal upload."""
+    from app.api.v1.routes import sources as S
+    from app.services import versions as ver
+    if mode not in ("draft", "submit"):
+        raise HTTPException(status_code=422, detail="Mode must be draft or submit.")
+    am = "draft" if mode == "draft" else None
+    check(source, "draft" if mode == "draft" else None)
+    if source.status == SourceStatus.APPROVED:
+        raise HTTPException(status_code=422, detail="This source is approved. Send it back before loading new data.")
+    ver.gate(db, source, user, None)
+    rows = [dict(r.get("fields") or {}) for r in (c.records or [])]
+    if not rows:
+        raise HTTPException(status_code=422, detail="That copy holds no records.")
+    sv = db.query(SchemaVersion).filter(SchemaVersion.schema_id == source.schema_id).order_by(SchemaVersion.version.desc()).first() if source.schema_id else None
+    fields = sv.definition.get("fields", []) if sv and sv.definition else []
+    summary = S._finalize_upload(source=source, source_id=source.id, rows=rows, ext=".json", extraction_method="structured", file_breakdown=[], files_processed=1,
+                                 display_filename=f"admin copy {c.file or ''}".strip(), content_len=0, schema_ver=sv, schema_fields=fields, current_user=user, db=db,
+                                 raw_entries=None, replace_reason=None, admin_mode=am)
+    c.applied_at = datetime.now(timezone.utc)
+    c.source_id = source.id
+    db.commit()
+    return {"records": summary.total_rows, "valid": summary.valid_rows, "invalid": summary.invalid_rows, "mode": mode}
+
+
+def library(db: Session, sources: list, project_ids: set | None = None) -> list:
+    """Every saved batch, newest first, with each file and whether its source exists now."""
+    by_key = {name_key(s.name): s for s in sources}
+    out: dict = {}
+    for c in db.query(AdminCopy).order_by(AdminCopy.created_at.desc()).all():
+        if project_ids is not None and c.project_id not in project_ids:
+            continue
+        s = by_key.get(c.name_key)
+        b = out.setdefault(c.batch_id, {"batch_id": c.batch_id, "label": c.batch_label, "created_at": c.created_at.isoformat() if c.created_at else None, "copies": []})
+        m = copy_meta(c, present=bool(s))
+        m["current_source_id"] = s.id if s else None
+        m["current_status"] = s.status.value if s else None
+        b["copies"].append(m)
+    return list(out.values())
 
 
 def draft_state(db: Session, source) -> dict:
@@ -207,7 +298,7 @@ def plan_batch(db: Session, files: list[dict], sources: list) -> list[dict]:
             "file": f["file"], "error": f.get("error"), "records": len(f["rows"]), "names": [n for n in names if n],
             "source_id": match.id if match else None, "source_name": match.name if match else None,
             "status": match.status.value if match else None, "existing_records": have,
-            "suggested_mode": "reference" if (have or (match and match.status == SourceStatus.APPROVED)) else "draft",
+            "suggested_mode": "reference", "saved_copies": db.query(AdminCopy).filter(AdminCopy.name_key == name_key(match.name)).count() if match else 0,
             "valid": valid, "invalid": len(f["rows"]) - valid, "errors": errs,
             "candidates": [{"id": s.id, "name": s.name, "status": s.status.value, "score": sc} for sc, s in scored[:5]],
         })
