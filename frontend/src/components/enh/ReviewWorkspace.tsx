@@ -1,5 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { Link } from 'react-router-dom'
 import { qualityApi, sourcesApi } from '@/api/client'
 import { Blank, Chip, Panel, SelectBox, Skeletons, Tabs, type Tone } from '@/components/enh/kit'
 import { CATEGORY_OPTIONS } from '@/components/enh/FlagErrorModal'
@@ -42,10 +43,11 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '', onBen
 
   useEffect(() => { setList(null); qualityApi.reviewSources({ project_id: project || undefined, scope }).then(setList).catch(() => setList({ items: [], projects: [] })) }, [project, scope])
   useEffect(() => { onBench?.(!!sourceId) }, [sourceId])  // eslint-disable-line react-hooks/exhaustive-deps
-  const projs: any[] = list?.projects ?? []
+  const projs: any[] = (list?.projects ?? []).filter((p: any) => p.sources > 0)     // a project with no sources has nothing to review
+  const nEmpty = (list?.projects ?? []).length - projs.length
   const nSent = projs.filter(p => p.submitted).length
   const nActive = projs.length - nSent
-  const tabProjects: any[] = useMemo(() => (list?.projects ?? []).filter((p: any) => !!p.submitted === (tab === 'submitted')), [list, tab])
+  const tabProjects: any[] = useMemo(() => (list?.projects ?? []).filter((p: any) => p.sources > 0 && !!p.submitted === (tab === 'submitted')), [list, tab])
   const tabIds = useMemo(() => new Set(tabProjects.map((p: any) => p.id)), [tabProjects])
   // Follow the project or source that is open, so it is never hidden behind the other tab.
   useEffect(() => {
@@ -74,6 +76,7 @@ export function ReviewWorkspace({ initialSource = '', initialProject = '', onBen
       <div className="flex items-center gap-3 flex-wrap">
         <Tabs value={tab} onChange={(v: 'active' | 'submitted') => { setTab(v); setProject(''); setShowAllProjects(false) }}
           items={[{ key: 'active', label: 'Active projects', count: nActive }, { key: 'submitted', label: 'Submitted to client', count: nSent, tone: 'green' }]} />
+        {tab === 'active' && nEmpty > 0 && <span className="text-xs text-gray-400">{nEmpty} project{nEmpty === 1 ? '' : 's'} with no sources hidden. Delete {nEmpty === 1 ? 'it' : 'them'} on the <Link to="/projects" className="underline">Projects page</Link> if not needed.</span>}
         <span className="text-xs text-gray-500">{tab === 'active' ? 'Newest first. A project moves to the other tab once every source in it is submitted to the client.' : 'Every source in these projects has been submitted to the client. Newest first.'}</span>
       </div>
       <div role="tablist" aria-label="Projects" className="grid gap-2.5 grid-cols-2 md:grid-cols-3 xl:grid-cols-4">
@@ -170,7 +173,7 @@ function SourcePicker({ list, groups, project, setProject, scope, setScope, q, s
       {open && (
         <div role="dialog" aria-label="Pick a source" className="absolute left-0 top-full mt-2 z-50 w-[min(580px,92vw)] rounded-2xl border border-gray-200 bg-white shadow-xl p-3 space-y-3">
           <div className="flex items-center gap-2 flex-wrap">
-            <SelectBox label="Project" value={project} onChange={setProject} className="!py-1.5"><option value="">All projects</option>{(list?.projects ?? []).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</SelectBox>
+            <SelectBox label="Project" value={project} onChange={setProject} className="!py-1.5"><option value="">All projects</option>{(list?.projects ?? []).filter((p: any) => p.sources > 0).map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}</SelectBox>
             <Tabs value={scope} onChange={setScope} items={[{ key: 'peer_done', label: 'Peer reviewed' }, { key: 'all', label: 'All' }]} />
             <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Find a source" aria-label="Find a source" className="text-sm rounded-xl border border-gray-200 px-3 py-1.5 flex-1 min-w-[140px]" />
           </div>

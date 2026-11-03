@@ -707,8 +707,8 @@ def review_sources(project_id: str | None = None, scope: str = Query("peer_done"
     allsrc = _visible_sources(db, user, None).all()
     pids = {s.project_id for s in allsrc}
     if "org_admin" in {r.role.value for r in user.roles}:
-        pids |= {p.id for p in db.query(Project.id).all()}
-    _prj = db.query(Project).filter(Project.id.in_(pids)).all() if pids else []
+        pids |= {p.id for p in db.query(Project.id).filter(Project.deleted_at == None).all()}
+    _prj = db.query(Project).filter(Project.id.in_(pids), Project.deleted_at == None).all() if pids else []   # a deleted project is gone from here too
     pn = {p.id: p.name for p in _prj}
     pcreated = {p.id: p.created_at for p in _prj}
     _ts = lambda d: d.isoformat() if d else None
@@ -721,9 +721,11 @@ def review_sources(project_id: str | None = None, scope: str = Query("peer_done"
         # latest_at = when the project was made or its newest source was added; live = sources that have started; sent = those already submitted to the client
         return {"id": k, "name": pn.get(k, ""), "sources": 0, "peer_done": 0, "checked": 0, "open": 0,
                 "created_at": _ts(pcreated.get(k)), "latest_at": _ts(pcreated.get(k)), "live": 0, "sent": 0, "sent_at": None}
-    proj = {k: _newp(k) for k in pids}
+    proj = {k: _newp(k) for k in pids if k in pn}
     rows = []
     for s in allsrc:
+        if s.project_id not in pn:
+            continue
         total, done = _peer_state(s)
         peer_done = total > 0 and done == total
         pr = proj.setdefault(s.project_id, _newp(s.project_id))
