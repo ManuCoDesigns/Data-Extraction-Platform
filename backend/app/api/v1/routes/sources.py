@@ -781,6 +781,7 @@ async def upload_to_source(
     request: Request,
     file: UploadFile = File(...),
     replace_reason: str | None = Form(None),
+    admin_mode: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -800,7 +801,10 @@ async def upload_to_source(
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
     from app.services import versions as _ver  # upload.lock: a reason lets the extractor replace data that is with the peers; the old data is kept as a version
-    _bulk_override = _ver.gate(db, source, current_user, replace_reason)
+    from app.services import admin_upload as _au  # an admin upload is a draft or a reference copy, never final by itself
+    _mode = _au.resolve(current_user, admin_mode)
+    _au.check(source, _mode)
+    _bulk_override = None if _mode == "reference" else _ver.gate(db, source, current_user, replace_reason)
 
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > MAX_UPLOAD_SIZE_BYTES:
@@ -879,7 +883,7 @@ async def upload_to_source(
         extraction_method=extraction_method, file_breakdown=file_breakdown,
         files_processed=files_processed, display_filename=file.filename or "upload",
         content_len=len(content), schema_ver=schema_ver, schema_fields=schema_fields,
-        current_user=current_user, db=db, raw_entries=raw_entries, replace_reason=replace_reason,
+        current_user=current_user, db=db, raw_entries=raw_entries, replace_reason=replace_reason, admin_mode=_mode,
     )
 
 
@@ -891,6 +895,7 @@ def _finalize_upload(
     current_user: "User", db: Session,
     raw_entries: list[dict] | None = None,
     replace_reason: str | None = None,
+    admin_mode: str | None = None,
 ) -> "SourceUploadSummary":
     """
     Shared logic for turning parsed rows into an ExtractionJob + ExtractedRecords.
@@ -905,6 +910,9 @@ def _finalize_upload(
     GET /sources/{id}/files, regardless of what was classified as data.
     """
     from app.services import versions as _ver
+    if admin_mode == "reference":
+        from app.services import admin_upload as _au
+        return _au.store_reference(db, source, current_user, rows, ext, extraction_method, file_breakdown, files_processed, display_filename, schema_fields)
     _ver.prepare_replace(db, source, current_user, replace_reason, display_filename)   # keeps what is there as a version first
     _safe_clear_old_jobs(source_id, db)
 
@@ -919,7 +927,7 @@ def _finalize_upload(
         schema_id=source.schema_id, schema_version=(schema_ver.version if schema_ver else None),
         name=f"{source.name} — {extraction_method} upload {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}",
         source_file_name=display_filename, source_file_size_bytes=content_len,
-        source_type=file_ext_type, status=JobStatus.READY_FOR_REVIEW,
+        source_type=file_ext_type, status=(JobStatus.EXTRACTING if admin_mode == "draft" else JobStatus.READY_FOR_REVIEW),
         total_raw_records=len(rows), total_extracted=len(rows),
         created_by=current_user.id,
     )
@@ -1017,11 +1025,15 @@ def _finalize_upload(
         db.add(record)
 
     invalid_count = len(rows) - valid_count
-    source.status = SourceStatus.NEEDS_FIXES if invalid_count > 0 else SourceStatus.READY_FOR_REVIEW
-    if not source.extraction_started_at:
-        source.extraction_started_at = datetime.now(timezone.utc)
-    if invalid_count == 0:
-        source.extraction_completed_at = datetime.now(timezone.utc)
+    if admin_mode == "draft":
+        source.status = SourceStatus.EXTRACTING     # an admin draft is not a submission: no clock, nothing for the reviewers
+        source.extraction_completed_at = None
+    else:
+        source.status = SourceStatus.NEEDS_FIXES if invalid_count > 0 else SourceStatus.READY_FOR_REVIEW
+        if not source.extraction_started_at:
+            source.extraction_started_at = datetime.now(timezone.utc)
+        if invalid_count == 0:
+            source.extraction_completed_at = datetime.now(timezone.utc)
 
     upload_warnings: list[str] = []
     try:
@@ -1033,10 +1045,10 @@ def _finalize_upload(
         except Exception:
             upload_warnings = []
         db.add(AuditLog(
-            user_id=current_user.id, project_id=source.project_id,
+            user_id=current_user.id, project_id=source.project_id, source_id=source.id,
             action=AuditAction.SOURCE_DATA_UPLOADED,
             after_value={"file": display_filename, "method": extraction_method, "rows": len(rows), "valid": valid_count, "invalid": invalid_count,
-                         "warnings": len(upload_warnings)},
+                         "warnings": len(upload_warnings), "admin_mode": admin_mode},
         ))
         db.commit()
     except Exception as db_err:
@@ -1065,6 +1077,7 @@ async def upload_multi_to_source(
     request: Request,
     files: list[UploadFile] = File(...),
     replace_reason: str | None = Form(None),
+    admin_mode: str | None = Form(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -1083,7 +1096,10 @@ async def upload_multi_to_source(
     if not _is_assigned_extractor(current_user, source):
         raise HTTPException(status_code=403, detail="Only the assigned extractor, project admin, or org admin can upload to this source")
     from app.services import versions as _ver  # upload_multi.lock
-    _bulk_override = _ver.gate(db, source, current_user, replace_reason)
+    from app.services import admin_upload as _au
+    _mode = _au.resolve(current_user, admin_mode)
+    _au.check(source, _mode)
+    _bulk_override = None if _mode == "reference" else _ver.gate(db, source, current_user, replace_reason)
 
     if not files:
         raise HTTPException(status_code=422, detail="No files provided.")
@@ -1215,7 +1231,7 @@ async def upload_multi_to_source(
         files_processed=files_processed,
         display_filename=f"{len(real_files)} file{'s' if len(real_files) != 1 else ''} (folder upload)",
         content_len=total_size, schema_ver=schema_ver, schema_fields=schema_fields,
-        current_user=current_user, db=db, raw_entries=raw_entries, replace_reason=replace_reason,
+        current_user=current_user, db=db, raw_entries=raw_entries, replace_reason=replace_reason, admin_mode=_mode,
     )
 
 

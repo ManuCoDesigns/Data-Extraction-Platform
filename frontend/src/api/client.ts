@@ -312,9 +312,10 @@ export const sourcesApi = {
     }).then(r => r.data),
   uploadCorrections: (id: string, formData: FormData) =>
     api.post(`/sources/${id}/upload-corrections`, formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 120000 }).then(r => r.data as { updated: { record: string; changed: string[]; skipped?: string[] }[]; unchanged: string[]; locked: string[]; unmatched: string[]; rows: number }),
-  uploadMulti: (id: string, files: File[], onProgress?: (pct: number) => void, replaceReason?: string) => {
+  uploadMulti: (id: string, files: File[], onProgress?: (pct: number) => void, replaceReason?: string, adminMode?: string) => {
     const formData = new FormData()
     if (replaceReason) formData.append('replace_reason', replaceReason)
+    if (adminMode) formData.append('admin_mode', adminMode)
     files.forEach(f => formData.append('files', f, (f as any).webkitRelativePath || f.name))
     return api.post(`/sources/${id}/upload-multi`, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },

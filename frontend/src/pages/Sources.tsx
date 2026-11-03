@@ -12,6 +12,7 @@ import { useCapability } from '@/lib/permissions'
 import { MyQueue } from '@/components/MyQueue'
 import { SourcesWorkbench } from '@/components/SourcesWorkbench'
 import { RedoModal } from '@/components/enh/RedoModal'
+import { AdminBatchUpload } from '@/components/enh/AdminBatchUpload'
 import { enhApi } from '@/api/client'
 import { saveNav } from '@/lib/sourceNav'
 import { isPeerOf } from '@/lib/peers'
@@ -277,6 +278,7 @@ export function SourcesPage() {
         </div>
         {canManage && (
           <div className="flex items-center gap-2">
+            <AdminBatchUpload projectId={projectId} onDone={() => window.location.reload()} />
             <Button variant="secondary" onClick={() => setShowRedo(true)} title="Give sources a new extractor and reviewer, shuffled evenly across the team">
               <Shuffle className="w-4 h-4" /> Re-extract
             </Button>

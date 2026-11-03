@@ -148,7 +148,7 @@ def listing(db: Session, source) -> list[dict]:
     names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_({r.created_by for r in rows if r.created_by})).all()} if rows else {}
     out = []
     for r in rows:
-        kind = "replaced" if (r.reason or "").startswith("Replaced") else "restored" if (r.reason or "").startswith("Restored") else "round"
+        kind = "replaced" if (r.reason or "").startswith("Replaced") else "restored" if (r.reason or "").startswith("Restored") else "reference" if (r.reason or "").startswith("Reference") else "round"
         out.append({"id": r.id, "round": r.round, "created_at": r.created_at.isoformat() if r.created_at else None, "by": names.get(r.created_by),
                     "reason": r.reason, "kind": kind, "records": r.record_count or 0, "status_at": r.status_at, "extractor": r.extractor_name,
                     "reviewers": [{"name": x.get("name"), "status": x.get("status"), "comment": x.get("comment")} for x in (r.reviewers or [])],

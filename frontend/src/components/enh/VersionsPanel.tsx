@@ -44,7 +44,7 @@ export function VersionsPanel({ sourceId, onRestored }: { sourceId: string; onRe
         <div key={v.id} className="rounded-xl border border-gray-200 bg-white p-3">
           <div className="flex items-center gap-2 flex-wrap">
             <b className="text-sm">Version {v.round}</b>
-            <Chip tone={v.kind === 'replaced' ? 'amber' : v.kind === 'restored' ? 'blue' : 'gray'}>{v.kind === 'replaced' ? 'replaced' : v.kind === 'restored' ? 'restored over' : 'earlier round'}</Chip>
+            <Chip tone={v.kind === 'replaced' ? 'amber' : v.kind === 'restored' ? 'blue' : v.kind === 'reference' ? 'purple' : 'gray'}>{v.kind === 'replaced' ? 'replaced' : v.kind === 'restored' ? 'restored over' : v.kind === 'reference' ? 'reference copy' : 'earlier round'}</Chip>
             <span className="text-xs text-gray-500">{v.records} records · kept {when(v.created_at)}{v.by ? ` · by ${v.by}` : ''}</span>
             <div className="ml-auto flex gap-1.5">
               <Button size="sm" variant="secondary" onClick={() => compare(v.id)}>{diff[v.id] ? 'Hide' : 'Compare'}</Button>

@@ -16,6 +16,7 @@ import { SourceChat } from '@/components/enh/SourceChat'
 import { FlagErrorModal } from '@/components/enh/FlagErrorModal'
 import { SourceQuality } from '@/components/enh/SourceQuality'
 import { VersionsPanel } from '@/components/enh/VersionsPanel'
+import { AdminModePicker, AdminDraftBanner, type UploadMode } from '@/components/enh/AdminUpload'
 import { FeedbackPanel } from '@/components/enh/FeedbackPanel'
 import { SourceRequiredCard } from '@/components/enh/RequiredFields'
 import { LinkChip } from '@/pages/DataHealth'
@@ -83,6 +84,7 @@ function SourceDetailInner() {
   const [lockedUpload, setLockedUpload] = useState<string | null>(null)
   const [corrBusy, setCorrBusy] = useState(false)
   const [replaceReason, setReplaceReason] = useState('')
+  const [adminMode, setAdminMode] = useState<UploadMode>('draft')
   const [showVersions, setShowVersions] = useState(false)
   const [corrResult, setCorrResult] = useState<{ updated: { record: string; changed: string[]; skipped?: string[] }[]; unchanged: string[]; locked: string[]; unmatched: string[] } | null>(null)
   const applyCorrections = async () => {
@@ -603,7 +605,7 @@ function SourceDetailInner() {
             setUploading(true)
             setUploadProgress(0)
             try {
-              const summary = await sourcesApi.uploadMulti(sourceId, chunks, setUploadProgress, reason)
+              const summary = await sourcesApi.uploadMulti(sourceId, chunks, setUploadProgress, reason, isAdmin ? adminMode : undefined)
               toast.success(`Uploaded ${summary.files_processed} part${summary.files_processed !== 1 ? 's' : ''}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
               if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
               setShowUpload(false)
@@ -633,11 +635,12 @@ function SourceDetailInner() {
       const fd = new FormData()
       fd.append('file', file)
       if (reason) fd.append('replace_reason', reason)
+      if (isAdmin) fd.append('admin_mode', adminMode)
       const summary = await sourcesApi.upload(sourceId, fd, setUploadProgress)
       const isZip = file.name.toLowerCase().endsWith('.zip')
       const isAI = summary.extraction_method === 'llm'
       const method = isAI ? 'AI extraction' : isZip ? `${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from ZIP` : 'schema mapping'
-      toast.success(`${reason ? 'Replaced. The old data is kept under Versions. ' : ''}Uploaded via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
+      toast.success(`${isAdmin && adminMode === 'draft' ? 'Saved as a draft. It is not with the reviewers yet. ' : isAdmin && adminMode === 'reference' ? 'Kept as a reference copy under Versions. The source data is unchanged. ' : reason ? 'Replaced. The old data is kept under Versions. ' : ''}Uploaded via ${method}: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
       setReplaceReason(''); setLockedUpload(null); setCorrResult(null)
       if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
       setShowUpload(false)
@@ -658,7 +661,7 @@ function SourceDetailInner() {
     setUploading(true)
     setUploadProgress(0)
     try {
-      const summary = await sourcesApi.uploadMulti(sourceId, Array.from(folderFiles), setUploadProgress, reason)
+      const summary = await sourcesApi.uploadMulti(sourceId, Array.from(folderFiles), setUploadProgress, reason, isAdmin ? adminMode : undefined)
       toast.success(`Uploaded ${summary.files_processed} file${summary.files_processed !== 1 ? 's' : ''} from folder: ${summary.valid_rows} valid, ${summary.invalid_rows} need fixes`)
       if (summary.batch_warnings?.length) setUploadWarnings(summary.batch_warnings)
       setShowUpload(false)
@@ -1093,6 +1096,7 @@ function SourceDetailInner() {
         </div>
       </div>
 
+      <AdminDraftBanner sourceId={source.id} reloadKey={String(source.updated_at ?? '') + String(source.status)} onSubmitted={load} />
       {isFromXtrium && isAdmin && <XtriumNoticesBanner sourceId={source.id} reloadKey={String(source.updated_at ?? '')} />}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -1790,6 +1794,8 @@ function SourceDetailInner() {
                 Re-uploading replaces all {source.total_records} existing records. The current data is kept under Versions, so nothing is lost.
               </div>
             )}
+
+            {isAdmin && <AdminModePicker mode={adminMode} setMode={setAdminMode} hasRecords={source.total_records > 0} />}
 
             {lockedUpload && (
               <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-3 text-xs text-indigo-900 space-y-2">

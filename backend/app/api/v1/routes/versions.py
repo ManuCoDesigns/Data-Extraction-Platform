@@ -71,5 +71,6 @@ def restore_version(source_id: str, round_id: str, body: RestoreBody, db: Sessio
     summary = S._finalize_upload(
         source=source, source_id=source.id, rows=rows, ext=".json", extraction_method="structured", file_breakdown=[], files_processed=1,
         display_filename=f"version {rd.round} restored", content_len=0, schema_ver=sv, schema_fields=fields, current_user=user, db=db, raw_entries=None,
-        replace_reason=f"Restored version {rd.round}: {reason}" if body.reason else f"Restored version {rd.round}")
+        replace_reason=f"Restored version {rd.round}: {reason}" if body.reason else f"Restored version {rd.round}",
+        admin_mode="draft" if (rl.is_admin(user) and (rd.reason or "").startswith("Reference")) else None)   # an admin using a reference copy as the data saves a draft
     return {"restored": rd.round, "total_rows": summary.total_rows, "invalid_rows": summary.invalid_rows}
