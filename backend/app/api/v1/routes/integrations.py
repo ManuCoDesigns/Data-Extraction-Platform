@@ -1583,6 +1583,56 @@ def clear_pulled_sources(
     return {"cleared": len(cleared), "skipped": skipped, "items": cleared}
 
 
+@router.get("/missing-check")
+async def missing_check(days: int = 30, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """
+    Read-only: where could an assigned source have gone? Nothing is pulled, claimed, synced or changed.
+    1) items Xtrium lists for us that are not on this platform, 2) sources removed here (audit log),
+    3) what was pulled on each day, per project, 4) sources sitting in a removed project.
+    """
+    from datetime import timedelta
+    _require_admin(current_user)
+    since = datetime.now(timezone.utc) - timedelta(days=max(1, min(120, int(days))))
+    aw = lambda d: d if d is None or d.tzinfo else d.replace(tzinfo=timezone.utc)
+    srcs = db.query(Source).filter(Source.external_ref_id != None).all()  # noqa: E711
+    have = {str(s.external_ref_id) for s in srcs}
+    projects = {p.id: p for p in db.query(Project).all()}
+
+    per_day: dict = {}
+    for s in srcs:
+        c = aw(s.created_at)
+        if c and c >= since:
+            k = (c.date().isoformat(), (projects.get(s.project_id).name if projects.get(s.project_id) else "Unknown project"))
+            per_day[k] = per_day.get(k, 0) + 1
+    pulled = [{"date": d, "project": p, "sources": n} for (d, p), n in sorted(per_day.items(), reverse=True)]
+
+    items, err = None, None
+    for st in ("all", "Queued,In Progress"):
+        try:
+            items = await _cached_get_items(st, 200)
+            err = None
+            break
+        except Exception as e:  # best effort: the rest of the check still works
+            err = str(e)[:200]
+    order = {"In Progress": 0, "Queued": 1}
+    not_here = sorted(
+        ({"id": str(i.get("id")), "name": i.get("name"), "status": i.get("status"), "url": i.get("website_url") or i.get("url")}
+         for i in (items if isinstance(items, list) else []) if isinstance(i, dict) and str(i.get("id")) not in have),
+        key=lambda x: (order.get(x["status"], 2), str(x["id"])))[:60]
+
+    users = {u.id: u.full_name for u in db.query(User).all()}
+    removed = []
+    for lg in db.query(AuditLog).filter(AuditLog.action == AuditAction.SOURCE_STATUS_CHANGED, AuditLog.timestamp >= since).order_by(AuditLog.timestamp.desc()).limit(3000).all():
+        av, bv = lg.after_value or {}, lg.before_value or {}
+        if isinstance(av, dict) and av.get("deleted"):
+            removed.append({"name": (bv or {}).get("name"), "item_id": (bv or {}).get("external_ref_id"), "status": (bv or {}).get("status"),
+                            "when": lg.timestamp.isoformat() if lg.timestamp else None, "by": users.get(lg.user_id) if lg.user_id else None,
+                            "bulk": bool(av.get("bulk"))})
+    gone = [{"project": p.name, "removed_at": p.deleted_at.isoformat(), "sources": sum(1 for s in srcs if s.project_id == p.id)}
+            for p in projects.values() if getattr(p, "deleted_at", None)]
+    return {"days": days, "linked_sources": len(srcs), "pulled": pulled, "not_here": not_here, "xtrium_error": err, "removed": removed[:40], "removed_projects": gone}
+
+
 # ─── Rework + bulk operations (added) ────────────────────────────────────────
 
 def _apply_rework(db: Session, source, result: dict, current_user: User) -> bool:

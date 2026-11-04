@@ -404,6 +404,7 @@ export const xtriumApi = {
     api.get(`/integrations/xtrium/sources/${sourceId}/status`).then(r => r.data),
   stats: () => api.get('/integrations/xtrium/stats').then(r => r.data),
   dashboard: () => api.get('/integrations/xtrium/dashboard').then(r => r.data),
+  missingCheck: (days = 30) => api.get('/integrations/xtrium/missing-check', { params: { days } }).then(r => r.data),
   sop: (sourceId: string) =>
     api.get(`/integrations/xtrium/sources/${sourceId}/sop`).then(r => r.data),
   clearSources: (sourceIds: string[]) =>

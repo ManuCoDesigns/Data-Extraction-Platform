@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { downloadText, toCsv } from '@/lib/csv'
 import { Link } from 'react-router-dom'
-import { qualityApi } from '@/api/client'
+import { qualityApi, xtriumApi } from '@/api/client'
 import { briefsApi } from '@/api/briefs'
 import { LeadBrief } from '@/components/enh/LeadBrief'
 import { Blank, Skeletons } from '@/components/enh/kit'
@@ -58,6 +58,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
   const [scope, setScope] = useState('')            // this_month | last_month | latest | all | month:YYYY-MM | batch:KEY
   const [names, setNames] = useState(false)
   const [subN, setSubN] = useState(2)
+  const [miss, setMiss] = useState<any>(null)
   const fitA = useFit(A4.w), fitD = useFit(SLIDE.w)
   const [list, setList] = useState<any[] | null>(null)
   const [key, setKey] = useState('')
@@ -99,6 +100,11 @@ export function BatchReport({ projectId }: { projectId: string }) {
       toast.success(`${r.updated} sources updated`)
       setEng(null); setEng(await briefsApi.report(sc, scv, projectId || undefined))
     } catch { toast.error('Could not record the submissions') }
+  }
+
+  const findMissing = async () => {
+    setMiss({ loading: true })
+    try { setMiss(await xtriumApi.missingCheck(45)) } catch { setMiss({ error: 'Could not run the check. Try again in a moment.' }) }
   }
 
   const shown = useMemo(() => (d?.sources ?? []).filter((s: any) => !stageFilter || s.stage === stageFilter), [d, stageFilter])
@@ -145,6 +151,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
         <div className="ml-auto flex gap-2">
           {mode !== 'brief' && <Button variant="secondary" disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={delivered}>Delivered CSV</Button>}
           {mode === 'deck' && <Button variant="secondary" disabled={!eng || eng.error} onClick={timesCsv}>Times CSV</Button>}
+          {mode === 'deck' && <Button variant="secondary" onClick={findMissing}>Find missing source</Button>}
           {mode === 'deck' && <span className="inline-flex items-center gap-1.5 text-sm text-gray-600">Sent to Xtrium
             <select className="border rounded-md px-1.5 py-1 text-sm" value={subN} onChange={e => setSubN(Number(e.target.value))}><option value={1}>once</option><option value={2}>twice</option><option value={3}>3 times</option></select>
             <Button variant="secondary" disabled={!eng || eng.error} onClick={recordSubs}>Record</Button></span>}
@@ -154,6 +161,29 @@ export function BatchReport({ projectId }: { projectId: string }) {
         </div>
       </div>
       {(mode === 'page' || mode === 'deck') && <p className="no-print text-xs text-gray-500 m-0">{mode === 'page' ? 'One A4 page. In the print window choose "Save as PDF", with margins set to None.' : 'Pick what to cover and the report builds itself from live data. In the print window choose "Save as PDF", with margins set to None. Times are elapsed clock time.'}</p>}
+      {miss && (
+        <div className="no-print rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-gray-800 grid gap-3">
+          <div className="flex items-center justify-between"><b>Where could the missing source be?</b><button className="text-xs underline" onClick={() => setMiss(null)}>Close</button></div>
+          {miss.loading ? <p className="m-0">Checking. Nothing is pulled or changed.</p> : miss.error ? <p className="m-0">{miss.error}</p> : (<>
+            <div className="grid gap-1">
+              <b>In Xtrium's list but not on this platform: {miss.not_here.length}</b>
+              {miss.xtrium_error && <p className="m-0 text-xs">Could not read Xtrium just now: {miss.xtrium_error}</p>}
+              {!miss.xtrium_error && miss.not_here.length === 0 && <p className="m-0">None. Every item Xtrium lists for us is already here.</p>}
+              {miss.not_here.map((i: any) => <p key={i.id} className="m-0">#{i.id} {i.name || 'Unnamed'} <span className="text-gray-500">({i.status || 'no status'})</span></p>)}
+            </div>
+            <div className="grid gap-1">
+              <b>Removed from this platform: {miss.removed.length}</b>
+              {miss.removed.length === 0 && <p className="m-0">Nothing was deleted or cleared in the last {miss.days} days.</p>}
+              {miss.removed.map((r: any, n: number) => <p key={n} className="m-0">{r.name || 'Unnamed'}{r.item_id ? ` (#${r.item_id})` : ''}, {(r.when || '').slice(0, 10)}{r.by ? `, by ${r.by}` : ''}{r.bulk ? ', cleared in bulk' : ''}</p>)}
+            </div>
+            {miss.removed_projects.length > 0 && <div className="grid gap-1"><b>Projects that were removed</b>{miss.removed_projects.map((p: any, n: number) => <p key={n} className="m-0">{p.project}, {p.sources} sources, removed {(p.removed_at || '').slice(0, 10)}</p>)}</div>}
+            <div className="grid gap-1">
+              <b>What was pulled, by day (the last {miss.days} days)</b>
+              {miss.pulled.map((p: any, n: number) => <p key={n} className="m-0">{p.date}: {p.sources} from {p.project}</p>)}
+            </div>
+          </>)}
+        </div>
+      )}
       {mode === 'brief' && <LeadBrief projectId={projectId} />}
 
       {mode === 'page' && (!d ? <Skeletons rows={4} /> : d.error ? <Blank title="Couldn't build the report" text="Try again in a moment." /> : (
