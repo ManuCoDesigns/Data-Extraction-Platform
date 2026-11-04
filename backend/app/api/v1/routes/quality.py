@@ -1848,3 +1848,8 @@ def engagement_report(project_id: str | None = None, db: Session = Depends(get_d
     except Exception:
         sc = None
     return br.engagement(db, user, srcs, sc)
+
+
+# Checked fields sent back to extractors (/quality/audit-challenges/...). Included last so every helper above exists.
+from app.api.v1.routes.audit_challenges import router as _challenge_router  # noqa: E402
+router.include_router(_challenge_router)

@@ -18,6 +18,7 @@ import { SourceQuality } from '@/components/enh/SourceQuality'
 import { VersionsPanel } from '@/components/enh/VersionsPanel'
 import { AdminModePicker, AdminDraftBanner, AdminCopiesPanel, AdminRecordCopy, type UploadMode } from '@/components/enh/AdminUpload'
 import { FeedbackPanel } from '@/components/enh/FeedbackPanel'
+import { SourceChallenges } from '@/components/enh/AuditChallenges'
 import { SourceRequiredCard } from '@/components/enh/RequiredFields'
 import { LinkChip } from '@/pages/DataHealth'
 import {
@@ -1160,6 +1161,8 @@ function SourceDetailInner() {
       )}
 
       <PeerReviewPanel sourceId={source.id} onChanged={load} />
+
+      <SourceChallenges sourceId={source.id} refreshKey={source.updated_at} />
 
       <FeedbackPanel sourceId={source.id} refreshKey={source.updated_at} onOpenRecord={rid => { const i = records.findIndex((x: any) => x.id === rid); if (i >= 0) setActiveRecordIndex(i) }} />
 

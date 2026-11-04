@@ -803,6 +803,40 @@ class FieldAudit(Base):
     times_checked = Column(Integer, default=1, server_default='1', nullable=False)
 
 
+class AuditChallenge(Base):
+    """An admin's checked field sent back to the extractor to review. The admin's verdict is copied here when it is sent and is never changed
+    by the extractor's reply: the extractor confirms it, or disagrees with a finding, an optional link and an optional SOP reference.
+    Only an admin ruling of "overturned" changes the audit itself."""
+    __tablename__ = "audit_challenges"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    audit_id = Column(String(36), ForeignKey("field_audits.id", ondelete="CASCADE"), nullable=False, unique=True, index=True)
+    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
+    record_id = Column(String(36), nullable=True)
+    field = Column(String(255), nullable=False)
+    extractor_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    sent_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    sent_at = Column(DateTime(timezone=True), default=now_utc, index=True)
+    sent_note = Column(Text, nullable=True)
+    # what the admin had decided when it was sent
+    admin_verdict = Column(String(10), nullable=False)
+    admin_truth = Column(Text, nullable=True)
+    admin_note = Column(Text, nullable=True)
+    extracted_value = Column(JSON, nullable=True)
+    # the extractor's view
+    stance = Column(String(10), nullable=True)                 # agree | disagree
+    finding = Column(Text, nullable=True)
+    evidence_url = Column(String(1000), nullable=True)
+    sop_ref = Column(String(300), nullable=True)
+    responded_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    responded_at = Column(DateTime(timezone=True), nullable=True)
+    # the admin's ruling on a disagreement
+    ruling = Column(String(12), nullable=True)                 # upheld | overturned
+    ruling_note = Column(Text, nullable=True)
+    ruled_by = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    ruled_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class SourceRound(Base):
     """A kept copy of a source as one extraction round left it (v1), taken before a re-extraction clears it, so the rounds can be compared."""
     __tablename__ = "source_rounds"

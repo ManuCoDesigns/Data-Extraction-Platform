@@ -4,6 +4,7 @@ import { Blank, Chip, Panel, Tile, type Tone } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
 import { ask } from '@/lib/confirm'
 import { adminUploadApi } from '@/api/adminUpload'
+import { AdminChallenges } from '@/components/enh/AuditChallenges'
 
 /**
  * Upload the final records, see them against what the extractor delivered and what the reviewers flagged, with error % and accuracy %
@@ -350,6 +351,8 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
               </div>
             )}
           </Panel>
+
+          <AdminChallenges projectId={projectId || undefined} sourceId={sourceId || undefined} sourceIds={(res.sources ?? []).map((s: any) => s.source_id).filter(Boolean)} />
 
           {(res.unmatched_sources.length > 0 || res.notes.length > 0) && (
             <div className="rounded-xl border border-amber-300 bg-amber-50 text-amber-900 px-4 py-3 text-sm space-y-1">
