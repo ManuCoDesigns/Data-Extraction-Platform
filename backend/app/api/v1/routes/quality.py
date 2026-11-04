@@ -1125,7 +1125,7 @@ def _json_dumps(o) -> bytes:
 @router.post("/answer-key")
 async def answer_key(
     file: UploadFile = File(...), apply: bool = Form(False), project_id: str = Form(""), source_id: str = Form(""), ignore: str = Form("retrieved_at"), export: str = Form(""),
-    decisions: str = Form(""),
+    decisions: str = Form(""), comments: str = Form(""),
     db: Session = Depends(get_db), user: User = Depends(get_current_user),
 ):
     """The admin's final records against what the extractor delivered and what the reviewers flagged: error %, accuracy %, catches and false alarms.
@@ -1153,6 +1153,10 @@ async def answer_key(
         decs = {str(k): v for k, v in (_json.loads(decisions) if decisions else {}).items() if v in ("wrong", "right")}
     except Exception:
         raise HTTPException(status_code=422, detail="The decisions could not be read.")
+    try:
+        cmts = {str(k): str(v).strip()[:1000] for k, v in (_json.loads(comments) if comments else {}).items() if isinstance(v, str) and v.strip()}
+    except Exception:
+        cmts = {}      # a comment that cannot be read is dropped; the verdicts still save
     ignore_set = {x.strip() for x in (ignore or "").split(",") if x.strip()}
 
     sources = _visible_sources(db, user, project_id or None).all()
@@ -1369,12 +1373,16 @@ async def answer_key(
             if verdict == "correct" and row["field"] not in (r.extracted_fields or {}):
                 continue           # nothing delivered on this field, so there is nothing to mark correct
             a = db.query(FieldAudit).filter(FieldAudit.record_id == r.id, FieldAudit.field == row["field"]).first()
+            _cm = cmts.get(f"{r.id}|{row['field']}")
             if a and a.verdict == verdict and _same(a.extracted_value, (r.extracted_fields or {}).get(row["field"])) and (verdict == "correct" or _same(a.truth_value, truth)):
                 already += 1
+                if _cm and _cm not in (a.note or ""):
+                    a.note = ((a.note + " | ") if a.note else "") + _cm     # a comment added after the verdict was recorded
+                    db.commit()
                 continue
             try:
                 review_mark(MarkBody(record_id=r.id, field=row["field"], verdict=verdict, truth_value=truth,
-                                     note="Checked against the admin's final records." if verdict == "incorrect" else None,
+                                     note=(("Checked against the admin's final records." if verdict == "incorrect" else "") + ((" " if verdict == "incorrect" else "") + _cm if _cm else "")).strip() or None,
                                      category=row["category"] or "wrong_value", severity="major"), db, user)
                 written += 1
             except HTTPException as e:

@@ -514,11 +514,12 @@ export const qualityApi = {
     a.click()
     setTimeout(() => URL.revokeObjectURL(url), 2000)
   },
-  answerKey: (file: File, o: { apply?: boolean; projectId?: string; sourceId?: string; decisions?: Record<string, string> }) => {
+  answerKey: (file: File, o: { apply?: boolean; projectId?: string; sourceId?: string; decisions?: Record<string, string>; comments?: Record<string, string> }) => {
     const fd = new FormData()
     fd.append('file', file)
     fd.append('apply', o.apply ? 'true' : 'false')
     if (o.decisions && Object.keys(o.decisions).length) fd.append('decisions', JSON.stringify(o.decisions))
+    if (o.comments && Object.keys(o.comments).length) fd.append('comments', JSON.stringify(o.comments))
     if (o.projectId) fd.append('project_id', o.projectId)
     if (o.sourceId) fd.append('source_id', o.sourceId)
     return api.post('/quality/answer-key', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 }).then(r => r.data)

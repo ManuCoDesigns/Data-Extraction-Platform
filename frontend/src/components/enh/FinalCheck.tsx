@@ -55,6 +55,9 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
   const [res, setRes] = useState<any>(null)
   const [open, setOpen] = useState<Record<string, boolean>>({})
   const [dec, setDec] = useState<Record<string, 'wrong' | 'right'>>({})
+  const [cmt, setCmt] = useState<Record<string, string>>({})          // a note per field, saved with the verdict when you press Record as audits
+  const [bulk, setBulk] = useState<Record<string, string>>({})        // one note per source, copied to the fields a bulk button decides
+  const [full, setFull] = useState<Record<string, boolean>>({})
   const first = useRef(true)
   const [sub, setSub] = useState<any>(null)
   const [approve, setApprove] = useState(true)
@@ -75,7 +78,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
     if (apply && !await ask(`Record these results as audits?\n\nThis saves a correct or wrong verdict for every field you have decided, and settles the reviewers' comments on them. No record is edited.${held ? `\n\n${held} field${held === 1 ? ' is' : 's are'} still to confirm and will not be recorded.` : ''}`, { confirmLabel: 'Record audits' })) return
     setBusy(apply ? 'apply' : 'check')
     try {
-      const r = await qualityApi.answerKey(file, { apply, projectId, sourceId, decisions: dec })
+      const r = await qualityApi.answerKey(file, { apply, projectId, sourceId, decisions: dec, comments: apply ? cmt : undefined })
       setRes(r)
       if (!apply && keep && !fromSaved && batches !== null && savedFile.current !== file) {
         savedFile.current = file
@@ -105,6 +108,12 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
       setSub(r)
       if (apply) toast.success(`Submitted: ${r.totals.records_updated} updated, ${r.totals.records_added} added, ${r.totals.records_removed} removed`)
     } catch (e) { toast.error(err(e, "Couldn't submit the final records")) } finally { setBusy('') }
+  }
+  const bulkDo = (s: any, v: 'wrong' | 'right') => {
+    const keys: string[] = s.wrong_fields.filter((w: any) => w.decision === 'pending').map((w: any) => w.key)
+    decide(keys, v)
+    const t = (bulk[s.source_id] ?? '').trim()
+    if (t) setCmt(c => { const n = { ...c }; keys.forEach(k => { if (!n[k]) n[k] = t }); return n })
   }
   const decide = (keys: string[], v: 'wrong' | 'right' | null) => setDec(d => { const n = { ...d }; keys.forEach(k => { if (v) n[k] = v; else delete n[k] }); return n })
   const t = res?.totals
@@ -219,31 +228,45 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
                       {s.pending > 0 && (
                         <div className="mt-3 flex items-center gap-2 flex-wrap text-xs text-gray-600">
                           <span>{s.pending} to confirm in this source:</span>
-                          <button type="button" className="font-semibold rounded-md border border-gray-300 px-2 py-1 hover:bg-gray-100" onClick={() => decide(s.wrong_fields.filter((w: any) => w.decision === 'pending').map((w: any) => w.key), 'wrong')}>All extractor wrong</button>
-                          <button type="button" className="font-semibold rounded-md border border-gray-300 px-2 py-1 hover:bg-gray-100" onClick={() => decide(s.wrong_fields.filter((w: any) => w.decision === 'pending').map((w: any) => w.key), 'right')}>All extractor right</button>
+                          <button type="button" className="font-semibold rounded-md border border-gray-300 px-2 py-1 hover:bg-gray-100" onClick={() => bulkDo(s, 'wrong')}>All extractor wrong</button>
+                          <button type="button" className="font-semibold rounded-md border border-gray-300 px-2 py-1 hover:bg-gray-100" onClick={() => bulkDo(s, 'right')}>All extractor right</button>
+                          <input value={bulk[s.source_id] ?? ''} onChange={e => setBulk(b => ({ ...b, [s.source_id]: e.target.value }))} maxLength={500} aria-label="Comment for the fields decided with these buttons"
+                            placeholder="Comment for all of them (optional)" className="flex-1 min-w-[14rem] rounded-md border border-gray-200 px-2 py-1 text-xs bg-white" />
                         </div>
                       )}
                       {s.wrong_fields.length > 0 && (
-                        <div className="mt-2 overflow-x-auto"><table className="w-full text-[13px] border-collapse">
-                          <thead><tr className="text-left text-[11px] text-gray-500"><th className="py-1 pr-3">Record</th><th className="pr-3">Field</th><th className="pr-3">Extractor delivered</th><th className="pr-3">Final</th><th className="pr-3">Flagged by</th><th className="pr-3">Result</th><th>Your call</th></tr></thead>
-                          <tbody>{s.wrong_fields.map((w: any, i: number) => (
-                            <tr key={i} className="border-t border-gray-100 align-top">
-                              <td className="py-1.5 pr-3 text-gray-700">{w.record}</td>
-                              <td className="pr-3"><span className="font-mono text-[12px]">{w.field}</span>{w.not_fixed && <div className="mt-0.5"><Chip tone="red">Not fixed</Chip></div>}<div className="mt-0.5 text-[11px] text-gray-500 max-w-[200px]">{w.reason}</div></td>
-                              <td className="pr-3 text-gray-700 break-words max-w-[240px]">{show(w.extractor_value)}</td>
-                              <td className="pr-3 text-gray-900 break-words max-w-[240px]">{show(w.final_value)}</td>
-                              <td className="pr-3 text-gray-700">{w.flagged_by.length ? w.flagged_by.join(', ') : w.system_flagged ? 'System check' : '—'}</td>
-                              <td className="pr-3"><Chip tone={w.outcome === 'caught' ? 'green' : w.outcome === 'escaped' ? 'red' : w.outcome === 'admin_change' ? 'blue' : 'amber'}>{w.outcome === 'caught' ? 'Error, caught' : w.outcome === 'escaped' ? 'Error, got through' : w.outcome === 'admin_change' ? 'Your change' : 'To confirm'}</Chip></td>
-                              <td className="whitespace-nowrap">
+                        <ul className="mt-2 space-y-2 p-0 m-0 list-none">{s.wrong_fields.map((w: any, i: number) => {
+                          const k: string = w.key; const open2 = !!full[k]
+                          const txt = (v: unknown) => { const x = show(v); return !open2 && x.length > 240 ? x.slice(0, 240) + '…' : x }
+                          const longer = show(w.extractor_value).length > 240 || show(w.final_value).length > 240
+                          const decided = w.decision === 'wrong' || w.decision === 'right'
+                          return (
+                            <li key={k + i} className="rounded-xl border border-gray-200 bg-white p-3 space-y-2">
+                              <div className="flex items-start justify-between gap-2 flex-wrap">
+                                <p className="m-0 text-sm text-gray-900 min-w-0 break-words"><span className="font-mono text-[13px] font-semibold">{w.field}</span> <span className="text-gray-500">in {w.record}</span> {w.not_fixed && <Chip tone="red">Not fixed</Chip>}</p>
+                                <Chip tone={w.outcome === 'caught' ? 'green' : w.outcome === 'escaped' ? 'red' : w.outcome === 'admin_change' ? 'blue' : 'amber'}>{w.outcome === 'caught' ? 'Error, caught' : w.outcome === 'escaped' ? 'Error, got through' : w.outcome === 'admin_change' ? 'Your change' : 'To confirm'}</Chip>
+                              </div>
+                              <p className="m-0 text-[11px] text-gray-500">{w.reason}. Flagged by: {w.flagged_by.length ? w.flagged_by.join(', ') : w.system_flagged ? 'System check' : 'nobody'}.</p>
+                              <div className="grid md:grid-cols-2 gap-2 text-[13px]">
+                                <div className="rounded-lg bg-gray-50 p-2.5 min-w-0"><p className="m-0 text-[11px] text-gray-500">Extractor delivered</p><p className="m-0 mt-0.5 text-gray-700 break-words whitespace-pre-wrap">{txt(w.extractor_value)}</p></div>
+                                <div className="rounded-lg bg-sky-50 p-2.5 min-w-0"><p className="m-0 text-[11px] text-gray-500">Final (your value)</p><p className="m-0 mt-0.5 text-gray-900 break-words whitespace-pre-wrap">{txt(w.final_value)}</p></div>
+                              </div>
+                              {longer && <button type="button" className="text-xs text-brand-700 underline" onClick={() => setFull(f => ({ ...f, [k]: !f[k] }))}>{open2 ? 'Show less' : 'Show the full values'}</button>}
+                              <div className="flex items-center gap-1.5 flex-wrap">
                                 {w.not_fixed ? <button type="button" onClick={() => decide([w.key], 'right')} title="Replace your earlier Wrong verdict with Correct"
                                   className="text-xs font-semibold rounded-md border border-gray-300 text-gray-700 hover:bg-gray-100 px-2 py-1">Overrule: extractor right</button> : <>
                                   <button type="button" onClick={() => decide([w.key], w.decision === 'wrong' ? null : 'wrong')} aria-pressed={w.decision === 'wrong'}
-                                    className={`text-xs font-semibold rounded-md border px-2 py-1 mr-1 ${w.decision === 'wrong' ? 'bg-red-600 text-white border-red-600' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}>Extractor wrong</button>
+                                    className={`text-xs font-semibold rounded-md border px-2 py-1 ${w.decision === 'wrong' ? 'bg-red-600 text-white border-red-600' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}>Extractor wrong</button>
                                   <button type="button" onClick={() => decide([w.key], w.decision === 'right' ? null : 'right')} aria-pressed={w.decision === 'right'}
                                     className={`text-xs font-semibold rounded-md border px-2 py-1 ${w.decision === 'right' ? 'bg-emerald-600 text-white border-emerald-600' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}>Extractor right</button></>}
-                              </td>
-                            </tr>))}</tbody>
-                        </table></div>
+                              </div>
+                              {(decided || w.not_fixed) && (
+                                <input value={cmt[k] ?? ''} onChange={e => setCmt(c => ({ ...c, [k]: e.target.value }))} maxLength={1000} aria-label={`Comment on ${w.field}`}
+                                  placeholder="Comment (optional): why, with the SOP reference. Saved when you press Record as audits"
+                                  className="w-full rounded-md border border-gray-200 px-2 py-1.5 text-xs bg-white" />
+                              )}
+                            </li>)
+                        })}</ul>
                       )}
                       {(s.unmatched_scored ?? []).length > 0 && (
                         <div className="mt-3"><p className="m-0 text-xs font-semibold text-red-700">Delivered records with no final record (every field scored as wrong unless you overrule it)</p>
