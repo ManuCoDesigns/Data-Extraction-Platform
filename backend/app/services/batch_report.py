@@ -17,7 +17,7 @@ from app.services import enh, observations as obs, quality as q, report_timing a
 
 STAGES = [
     ("delivered", "Delivered"), ("ready_to_send", "Approved, not yet sent to Xtrium"), ("signoff", "Ready for sign-off"), ("peer_review", "In peer review"),
-    ("needs_fixes", "Needs fixes"), ("extracting", "Extracting"), ("not_started", "Not started"), ("blocked", "Blocked"),
+    ("needs_fixes", "Needs fixes"), ("extracting", "Extracting"), ("not_started", "Not started"), ("blocked", "Needs a decision"),
 ]
 LINK_WHY = {"dead": "The link no longer opens", "blocked": "The site blocks automated access", "login": "The page needs a sign-in"}
 
@@ -215,7 +215,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     if done_days:
         lines.append(f"Delivered sources took {round(sum(done_days) / len(done_days), 1)} days on average from the pull.")
     if quality and quality["final_accuracy"] is not None:
-        lines.append(f"Delivered data is {round(quality['final_accuracy'], 1)}% accurate across {quality['fields']} checked fields.")
+        lines.append(f"Delivered data is {round(quality['final_accuracy'], 1):g}% accurate across {quality['fields']} checked fields.")
 
     pulled = [_aware(s.created_at) for s in mine if s.created_at]
     peers_all = [pr for s in mine for pr in s.peer_reviews]
@@ -224,7 +224,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     if total:
         cards.append({"title": f"{pct}% delivered", "text": f"{delivered} of {total} sources are approved and delivered, with {recs_ok} approved records."})
     if quality and quality["final_accuracy"] is not None:
-        cards.append({"title": f"{round(quality['final_accuracy'], 1)}% accurate", "text": f"Final accuracy across {quality['fields']} fields checked against the real sources."})
+        cards.append({"title": f"{round(quality['final_accuracy'], 1):g}% accurate", "text": f"Final accuracy across {quality['fields']} fields checked against the real sources."})
     if len(by_type) > 1 and full_types:
         cards.append({"title": f"{len(full_types)} {'type' if len(full_types) == 1 else 'types'} at 100%", "text": ", ".join(full_types[:3]) + (" are" if len(full_types) > 1 else " is") + " fully delivered."})
     if (delivered or ready) and any(r["submitted_to_xtrium"] for r in rows):
@@ -363,7 +363,9 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None, keys: list 
     open_sources = tot_sources - tot_deliv
     if latest and latest["totals"]["sources"] != latest["totals"]["delivered"]:
         _n = latest['totals']['sources'] - latest['totals']['delivered']
-        nxt.append({"title": "Complete the current batch", "text": f"Finish the {_n} remaining {'source' if _n == 1 else 'sources'} in {latest['label']}."})
+        _lv = next((v for v in reversed(views) if v["key"] == latest["key"]), None)
+        _lab = f"{str((scope or {}).get('label', '')).split()[0]} batch {_lv['ordinal']}" if (scope or {}).get("kind") == "month" and _lv and _lv["ordinal"] else latest["label"]
+        nxt.append({"title": "Complete the current batch", "text": f"Finish the {_n} remaining {'source' if _n == 1 else 'sources'} in {_lab}."})
     if totals["blocked"]:
         nxt.append({"title": "Clear what is blocked", "text": f"{totals['blocked']} {'source needs' if totals['blocked'] == 1 else 'sources need'} a decision from the client or the team: a corrected link, an answer, or confirmation to skip."})
     if stage_tot.get("ready_to_send"):
