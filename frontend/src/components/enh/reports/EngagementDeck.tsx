@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 
 /** The full engagement report, as 16:9 slides. One slide per Xtrium batch is not needed: batches are the rows and bars inside.
- *  Every number is read from the platform when the report opens. No team member names appear anywhere. */
+ *  Every number is read from the platform when the report opens. Names appear only on the timing slides, and only when `names` is on. */
 export const SLIDE = { w: 1280, h: 720 }
 const INK = '#0b2447', BLUE = '#1473f0', DEEP = '#0d3b8f', PALE = '#eef4ff', LINE = '#dbe5f5', MUTE = '#5a6b86', AMBER = '#e39b0b', GREEN = '#12a06b', RED = '#d6453d'
 const SERIF = "Georgia, Cambria, 'Times New Roman', serif"
@@ -40,7 +40,7 @@ function Frame({ n, title, lede, children, project }: { n: number; title: string
 const Panel = ({ children, style }: { children: React.ReactNode; style?: React.CSSProperties }) => <div style={{ background: PALE, borderRadius: 16, padding: 28, ...style }}>{children}</div>
 const Big = ({ v, l, c = BLUE }: { v: string; l: string; c?: string }) => <div><div style={{ fontFamily: SERIF, fontSize: 62, fontWeight: 700, color: c, lineHeight: 1, letterSpacing: -1 }}>{v}</div><div style={{ fontSize: 17, color: MUTE, marginTop: 8, lineHeight: 1.35 }}>{l}</div></div>
 
-export function EngagementDeck({ e }: { e: any }) {
+export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }) {
   const T = e.totals, L = e.latest, phases: any[] = e.phases
   const project = e.projects[0] || 'Data extraction'
   const rangeA = e.period_from ? dt(e.period_from) : '', rangeB = dt(e.generated_at)
@@ -58,6 +58,16 @@ export function EngagementDeck({ e }: { e: any }) {
   }
   const ch = ['link', 'nodata', 'question'].map(k => ({ k, c: e.challenges.find((x: any) => x.kind === k) }))
   const rows: any[] = L ? L.sources.slice(0, 9) : []
+  const tm = e.timing && !e.timing.empty ? e.timing : null
+  const who = (i: number, name?: string | null) => (names && name ? name : `Extractor ${i + 1}`)
+  const hrs = (h: number | null | undefined) => (h === null || h === undefined ? '–' : h < 48 ? `${h} h` : `${Math.round((h / 24) * 10) / 10} days`)
+  const dd = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${v}`)
+  const byId: Record<string, any> = Object.fromEntries((tm?.per_source ?? []).map((x: any) => [x.source_id, x]))
+  const people = (tm?.people ?? []).filter((x: any) => x.sources > 0).slice(0, 10)
+  const slowest = Math.max(1, ...people.map((x: any) => x.extraction?.max ?? 0))
+  const srcRows = [...(tm?.per_source ?? [])].sort((a: any, b: any) => (b.total_days ?? -1) - (a.total_days ?? -1)).slice(0, 12)
+  const extIdx: Record<string, number> = Object.fromEntries((tm?.people ?? []).filter((x: any) => x.sources > 0).map((x: any, i: number) => [x.name, i]))
+  const fieldMax = Math.max(1, ...(tm?.corrections?.top_fields ?? []).map((x: any) => x.count))
 
   return (
     <div className="deck-wrap">
@@ -66,7 +76,7 @@ export function EngagementDeck({ e }: { e: any }) {
         <div style={{ position: 'absolute', right: 90, top: 110 }}><Ring pct={pct} size={430} stroke={34} color="#fff" track="rgba(255,255,255,.2)" label={`${pct}%`} sub="of sources delivered" textColor="#fff" /></div>
         <div style={{ position: 'absolute', left: 80, top: 64 }}><span style={{ background: '#fff', color: '#1f2937', borderRadius: 12, padding: '9px 20px', fontWeight: 800, fontSize: 20 }}>Careerflow.ai</span></div>
         <div style={{ position: 'absolute', left: 80, top: 250, width: 640 }}>
-          <h1 style={{ margin: 0, fontFamily: SERIF, fontSize: 66, lineHeight: 1.04, fontWeight: 700, letterSpacing: -1.5, color: '#fff' }}>Engagement report</h1>
+          <h1 style={{ margin: 0, fontFamily: SERIF, fontSize: 66, lineHeight: 1.04, fontWeight: 700, letterSpacing: -1.5, color: '#fff' }}>{e.scope && e.scope.kind !== 'all' ? e.scope.label.replace(/\s*\(.*\)/, '') : 'Engagement report'}</h1>
           <p style={{ margin: '22px 0 0', fontSize: 23, lineHeight: 1.5, opacity: .93 }}>{nf(T.sources)} sources across {T.batches} {T.batches === 1 ? 'batch' : 'batches'}, extracted, peer-reviewed and approved on one auditable platform.</p>
         </div>
         <div style={{ position: 'absolute', left: 80, bottom: 70, fontSize: 16, lineHeight: 1.7, opacity: .92 }}>{project}<br />{rangeA} to {rangeB}</div>
@@ -130,6 +140,89 @@ export function EngagementDeck({ e }: { e: any }) {
         </div>
         {phases.length > 9 && <div style={{ fontSize: 13, color: MUTE, marginTop: 6 }}>Showing the latest 9 of {phases.length} batches.</div>}
       </Frame>
+
+      {/* timing: timeline, per extractor, per source, validation, corrections */}
+      {tm && tm.milestones.length > 1 && (
+        <Frame n={next()} project={project} title={tm.span_days ? `From first pull to final approval in ${tm.span_days} days` : 'How the work moved through the steps'} lede={tm.caveat}>
+          <div style={{ position: 'relative', paddingTop: 30 }}>
+            <div style={{ position: 'absolute', left: 0, right: 0, top: 41, height: 4, background: LINE, borderRadius: 2 }} />
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tm.milestones.length},1fr)`, gap: 14 }}>
+              {tm.milestones.map((m: any, i: number) => (
+                <div key={m.key} style={{ position: 'relative' }}>
+                  <div style={{ width: 24, height: 24, borderRadius: 12, background: i === tm.milestones.length - 1 ? GREEN : BLUE, border: '4px solid #fff', boxShadow: `0 0 0 2px ${LINE}`, marginBottom: 20 }} />
+                  <div style={{ fontFamily: SERIF, fontSize: 25, fontWeight: 700 }}>{dshort(m.at)}{m.at_end ? ` to ${dshort(m.at_end)}` : ''}</div>
+                  <div style={{ fontSize: 19, fontWeight: 700, color: BLUE, margin: '6px 0' }}>{m.label}</div>
+                  <div style={{ fontSize: 15.5, color: MUTE, lineHeight: 1.5 }}>{m.detail}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Frame>
+      )}
+      {tm && people.length > 0 && (
+        <Frame n={next()} project={project} title={tm.extraction ? `Extraction took ${tm.extraction.avg} days on average per source` : 'Time per extractor'} lede={`Days from starting a source to sending it for review, as elapsed time. ${names ? '' : 'Names are left out of this version.'}`}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 18 }}>
+            <thead><tr style={{ textAlign: 'left', color: MUTE, fontSize: 15 }}>{['Extractor', 'Sources', 'Records', 'Average', 'Fastest', 'Slowest', ''].map((h, i) => <th key={i} style={{ padding: '0 12px 12px', fontWeight: 600, borderBottom: `2px solid ${INK}` }}>{h}</th>)}</tr></thead>
+            <tbody>{people.map((x: any, i: number) => (
+              <tr key={x.user_id} style={{ background: i % 2 ? '#f8faff' : '#fff' }}>
+                <td style={{ padding: '10px 12px', fontWeight: 600 }}>{who(i, x.name)}</td>
+                <td style={{ padding: '10px 12px' }}>{x.sources}</td>
+                <td style={{ padding: '10px 12px' }}>{nf(x.records)}</td>
+                <td style={{ padding: '10px 12px', fontWeight: 700, color: BLUE }}>{dd(x.extraction?.avg)} days</td>
+                <td style={{ padding: '10px 12px' }}>{dd(x.extraction?.min)}</td>
+                <td style={{ padding: '10px 12px' }}>{dd(x.extraction?.max)}</td>
+                <td style={{ padding: '10px 12px', width: 220 }}><div style={{ height: 12, background: LINE, borderRadius: 6 }}><div style={{ height: 12, borderRadius: 6, background: BLUE, width: `${((x.extraction?.avg ?? 0) / slowest) * 100}%` }} /></div></td>
+              </tr>))}</tbody>
+          </table>
+        </Frame>
+      )}
+      {tm && srcRows.length > 0 && (
+        <Frame n={next()} project={project} title="Time on each source, longest first" lede={`Extraction is the extractor's working time. Review runs from submission to final approval, and includes peer review and admin sign-off. ${srcRows.length < tm.per_source.length ? `Showing ${srcRows.length} of ${tm.per_source.length} sources.` : ''}`}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 16 }}>
+            <thead><tr style={{ textAlign: 'left', color: MUTE, fontSize: 14 }}>{['Source', 'Extractor', 'Extraction', 'Review', 'Total', 'Returned'].map(h => <th key={h} style={{ padding: '0 10px 10px', fontWeight: 600, borderBottom: `2px solid ${INK}` }}>{h}</th>)}</tr></thead>
+            <tbody>{srcRows.map((s: any, i: number) => (
+              <tr key={s.source_id} style={{ background: i % 2 ? '#f8faff' : '#fff' }}>
+                <td style={{ padding: '7px 10px', fontWeight: 600, maxWidth: 380, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</td>
+                <td style={{ padding: '7px 10px' }}>{s.extractor ? who(extIdx[s.extractor] ?? 0, s.extractor) : '–'}</td>
+                <td style={{ padding: '7px 10px' }}>{s.extraction_days === null ? '–' : `${s.extraction_days} d`}</td>
+                <td style={{ padding: '7px 10px' }}>{s.review_days === null ? '–' : `${s.review_days} d`}</td>
+                <td style={{ padding: '7px 10px', fontWeight: 700, color: BLUE }}>{s.total_days === null ? '–' : `${s.total_days} d`}</td>
+                <td style={{ padding: '7px 10px' }}>{s.returns ? `${s.returns}×` : '–'}</td>
+              </tr>))}</tbody>
+          </table>
+        </Frame>
+      )}
+      {tm && (
+        <Frame n={next()} project={project} title="Every source is validated three ways before delivery" lede="AI check, independent peer review, and admin sign-off. Times are measured between recorded steps on the platform.">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 18 }}>
+            <Panel style={{ minHeight: 330 }}><div style={{ fontSize: 19, fontWeight: 700 }}>AI check</div><div style={{ margin: '18px 0 10px' }}><Big v={tm.validation.llm.avg_minutes === null ? '–' : `${tm.validation.llm.avg_minutes} min`} l={tm.validation.llm.timed ? `average over ${tm.validation.llm.timed} sources, longest ${tm.validation.llm.max_minutes} min` : 'not timed for these sources'} /></div></Panel>
+            <Panel style={{ minHeight: 330 }}><div style={{ fontSize: 19, fontWeight: 700 }}>Peer review</div><div style={{ margin: '18px 0 10px' }}><Big v={String(tm.validation.peer.submitted)} l={`reviews submitted${tm.validation.peer.turnaround_days ? `, ${tm.validation.peer.turnaround_days.avg} days on average after submission to review` : ''}`} c={DEEP} /></div></Panel>
+            <Panel style={{ minHeight: 330 }}><div style={{ fontSize: 19, fontWeight: 700 }}>Admin sign-off</div><div style={{ margin: '18px 0 10px' }}><Big v={hrs(tm.validation.admin.hours?.avg)} l={tm.validation.admin.hours ? `average from sending to a decision, over ${tm.validation.admin.hours.n} decisions` : 'no decisions recorded'} c={GREEN} /></div></Panel>
+            <Panel style={{ minHeight: 330 }}><div style={{ fontSize: 19, fontWeight: 700 }}>Fixing corrections</div><div style={{ margin: '18px 0 10px' }}><Big v={hrs(tm.validation.corrections.hours?.avg)} l={tm.validation.corrections.hours ? `average from return to resubmission, over ${tm.validation.corrections.hours.n} returns` : 'nothing was returned'} c={AMBER} /></div></Panel>
+          </div>
+        </Frame>
+      )}
+      {tm && (tm.corrections.records_returned > 0 || tm.corrections.top_fields.length > 0) && (
+        <Frame n={next()} project={project} title={`${tm.corrections.records_returned} ${tm.corrections.records_returned === 1 ? 'record' : 'records'} came back for correction`} lede="Sending work back is the review working. These are the fields reviewers commented on most.">
+          <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 50 }}>
+            <div style={{ display: 'grid', gap: 26 }}>
+              <Big v={String(tm.corrections.sources_returned)} l="sources had records returned" c={AMBER} />
+              <Big v={String(tm.corrections.notes)} l="reviewer notes written" c={DEEP} />
+              <Big v={String(tm.corrections.resets)} l="sources reset to start again" c={tm.corrections.resets ? RED : GREEN} />
+            </div>
+            <div>
+              {tm.corrections.top_fields.map((f: any) => (
+                <div key={f.field} style={{ display: 'grid', gridTemplateColumns: '240px 1fr 50px', alignItems: 'center', gap: 16, marginBottom: 16 }}>
+                  <div style={{ fontSize: 18, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.field.replace(/_/g, ' ')}</div>
+                  <div style={{ height: 20, background: LINE, borderRadius: 10 }}><div style={{ height: 20, borderRadius: 10, background: AMBER, width: `${(f.count / fieldMax) * 100}%` }} /></div>
+                  <div style={{ fontSize: 18, fontWeight: 700 }}>{f.count}</div>
+                </div>
+              ))}
+              {!tm.corrections.top_fields.length && <p style={{ fontSize: 19, color: MUTE }}>Reviewers returned work without field-level notes.</p>}
+            </div>
+          </div>
+        </Frame>
+      )}
 
       {/* 5. quality */}
       {hasQuality && (
@@ -248,12 +341,12 @@ export function EngagementDeck({ e }: { e: any }) {
       {L && (
         <Frame n={next()} project={project} title="Where each source in the latest batch stands">
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 17 }}>
-            <thead><tr style={{ textAlign: 'left', color: MUTE, fontSize: 15 }}>{['Source', 'Stage', 'Time in pipeline', 'Records approved', 'Peer reviews', 'Accuracy'].map(h => <th key={h} style={{ padding: '0 12px 12px', fontWeight: 600, borderBottom: `2px solid ${INK}` }}>{h}</th>)}</tr></thead>
+            <thead><tr style={{ textAlign: 'left', color: MUTE, fontSize: 15 }}>{['Source', 'Stage', 'Extraction time', 'Records approved', 'Peer reviews', 'Accuracy'].map(h => <th key={h} style={{ padding: '0 12px 12px', fontWeight: 600, borderBottom: `2px solid ${INK}` }}>{h}</th>)}</tr></thead>
             <tbody>{rows.map((s: any, i: number) => (
               <tr key={s.source_id} style={{ background: i % 2 ? '#f8faff' : '#fff' }}>
                 <td style={{ padding: '11px 12px', fontWeight: 600 }}>{s.name}</td>
                 <td style={{ padding: '11px 12px' }}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, background: stageColor[s.stage], marginRight: 8 }} />{L.stages.find((x: any) => x.key === s.stage)?.label}</td>
-                <td style={{ padding: '11px 12px' }}>{s.days === null ? '–' : `${s.days} days`}</td>
+                <td style={{ padding: '11px 12px' }}>{byId[s.source_id]?.extraction_days != null ? `${byId[s.source_id].extraction_days} days` : s.stage === 'not_started' ? 'Not started' : '–'}</td>
                 <td style={{ padding: '11px 12px' }}>{s.approved} of {s.records}</td>
                 <td style={{ padding: '11px 12px' }}>{s.peers_done} of {s.peers_total}{s.peers_flagged > 0 && s.peers_done < s.peers_total ? `, ${s.peers_flagged} flagged` : ''}</td>
                 <td style={{ padding: '11px 12px' }}>{p1(s.final_accuracy)}</td>
@@ -263,8 +356,8 @@ export function EngagementDeck({ e }: { e: any }) {
         </Frame>
       )}
 
-      {/* 12. open issues */}
-      <Frame n={next()} project={project} title={e.blocked.length ? `${T.blocked} ${T.blocked === 1 ? 'source needs' : 'sources need'} a decision` : 'Nothing is waiting on a decision'} lede={e.blocked.length ? 'These cannot move as things stand. Each group says what we need.' : 'Every source can move forward as written.'}>
+      {/* 12. open issues (left out when nothing is waiting) */}
+      {e.blocked.length > 0 && <Frame n={next()} project={project} title={`${T.blocked} ${T.blocked === 1 ? 'source needs' : 'sources need'} a decision`} lede="These cannot move as things stand. Each group says what we need.">
         {e.blocked.length > 0 && (
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(3, e.blocked.length)},1fr)`, gap: 18 }}>
             {e.blocked.slice(0, 3).map((g: any) => (
@@ -278,13 +371,13 @@ export function EngagementDeck({ e }: { e: any }) {
             ))}
           </div>
         )}
-      </Frame>
+      </Frame>}
 
       {/* 13. next */}
       <Frame n={next()} project={project} title="What comes next">
         <div>
           {e.next.map((x: any, i: number) => (
-            <div key={i} style={{ display: 'flex', gap: 24, padding: '30px 0', borderTop: i ? `1px solid ${LINE}` : 'none', alignItems: 'baseline' }}>
+            <div key={i} style={{ display: 'flex', gap: 24, padding: e.next.length > 3 ? '16px 0' : '30px 0', borderTop: i ? `1px solid ${LINE}` : 'none', alignItems: 'baseline' }}>
               <div style={{ fontFamily: SERIF, fontSize: 40, fontWeight: 700, color: BLUE, width: 44 }}>{i + 1}</div>
               <div><div style={{ fontSize: 28, fontWeight: 700 }}>{x.title}</div><div style={{ fontSize: 20, color: MUTE, marginTop: 8, lineHeight: 1.5 }}>{x.text}</div></div>
             </div>

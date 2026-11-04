@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { downloadText, toCsv } from '@/lib/csv'
 import { Link } from 'react-router-dom'
 import { qualityApi } from '@/api/client'
+import { briefsApi } from '@/api/briefs'
+import { LeadBrief } from '@/components/enh/LeadBrief'
 import { Blank, Skeletons } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
 import { A4, OnePager } from '@/components/enh/reports/OnePager'
@@ -47,11 +49,14 @@ function reportText(d: any) {
 }
 
 /** One page per Xtrium pull, built from live data: progress, what is blocked and what we need, people and accuracy. Print it to save as a PDF. */
-type Mode = 'page' | 'detail' | 'deck'
+type Mode = 'page' | 'detail' | 'deck' | 'brief'
 
 export function BatchReport({ projectId }: { projectId: string }) {
-  const [mode, setMode] = useState<Mode>('page')
+  const [mode, setMode] = useState<Mode>('deck')
   const [eng, setEng] = useState<any>(null)
+  const [periods, setPeriods] = useState<any>(null)
+  const [scope, setScope] = useState('')            // this_month | last_month | latest | all | month:YYYY-MM | batch:KEY
+  const [names, setNames] = useState(false)
   const fitA = useFit(A4.w), fitD = useFit(SLIDE.w)
   const [list, setList] = useState<any[] | null>(null)
   const [key, setKey] = useState('')
@@ -70,10 +75,21 @@ export function BatchReport({ projectId }: { projectId: string }) {
   }, [key, projectId])
 
   useEffect(() => {
-    if (mode !== 'deck') return
+    briefsApi.periods(projectId || undefined).then(p => {
+      setPeriods(p)
+      setScope(s => s || (p.months.some((m: any) => m.value === p.this_month) ? 'this_month' : p.months.some((m: any) => m.value === p.last_month) ? 'last_month' : 'latest'))
+    }).catch(() => setPeriods({ months: [], batches: [] }))
+  }, [projectId])
+  const [sc, scv] = scope.includes(':') ? [scope.split(':')[0], scope.split(':').slice(1).join(':')] : [scope, undefined]
+  useEffect(() => {
+    if (mode !== 'deck' || !scope) return
     setEng(null)
-    qualityApi.engagement(projectId || undefined).then(setEng).catch(() => setEng({ error: true }))
-  }, [mode, projectId])
+    briefsApi.report(sc, scv, projectId || undefined).then(setEng).catch(err => setEng({ error: true, detail: err?.response?.data?.detail }))
+  }, [mode, projectId, scope])
+  const slack = async () => { try { await navigator.clipboard.writeText(eng.summary_text); toast.success('Summary copied for Slack') } catch { toast.error('Could not copy') } }
+  const timesCsv = async () => {
+    try { downloadText(`times_${(eng?.scope?.value || 'all')}.csv`, await briefsApi.csv(sc, scv, projectId || undefined, !names)) } catch { toast.error('Could not build the times file') }
+  }
 
   const shown = useMemo(() => (d?.sources ?? []).filter((s: any) => !stageFilter || s.stage === stageFilter), [d, stageFilter])
   const delivered = () => {
@@ -93,11 +109,23 @@ export function BatchReport({ projectId }: { projectId: string }) {
       <style>{`@media print { body * { visibility: hidden !important } ${mode === 'page' ? '#onepager-wrap' : mode === 'deck' ? '#deck-wrap' : '#batch-report'}, ${mode === 'page' ? '#onepager-wrap' : mode === 'deck' ? '#deck-wrap' : '#batch-report'} * { visibility: visible !important } ${mode === 'page' ? '#onepager-wrap' : mode === 'deck' ? '#deck-wrap' : '#batch-report'} { position: absolute; left: 0; top: 0; ${mode === 'detail' ? 'width: 100%;' : 'zoom: 1 !important; width: auto !important; height: auto !important; overflow: visible !important;'} } html, body { margin: 0 !important; padding: 0 !important; background: #fff !important } .no-print { display: none !important } @page { ${mode === 'page' ? 'size: 210mm 297mm; margin: 0' : mode === 'deck' ? `size: ${SLIDE.w}px ${SLIDE.h}px; margin: 0` : 'size: A4; margin: 8mm'} } * { -webkit-print-color-adjust: exact; print-color-adjust: exact } .avoid-break { break-inside: avoid } #deck-wrap { gap: 0 !important } .deck-slide { break-after: page; page-break-after: always } .deck-slide:last-child { break-after: auto; page-break-after: auto } }`}</style>
       <div className="no-print flex items-center gap-3 flex-wrap">
         <div className="inline-flex rounded-xl border border-gray-200 bg-white p-0.5 text-sm">
-          {([['page', 'One page'], ['detail', 'Batch detail'], ['deck', 'Full engagement report']] as [Mode, string][]).map(([m, l]) => (
+          {([['deck', 'Report'], ['brief', 'Lead brief'], ['page', 'One page'], ['detail', 'Batch detail']] as [Mode, string][]).map(([m, l]) => (
             <button key={m} onClick={() => setMode(m)} className={`px-3 py-1.5 rounded-lg ${mode === m ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}>{l}</button>
           ))}
         </div>
-        {mode !== 'deck' && (
+        {mode === 'deck' && periods && (
+          <>
+            <label className="text-sm text-gray-600 flex items-center gap-2">Cover
+              <select value={scope} onChange={e => setScope(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white text-gray-900">
+                <option value="this_month">This month</option><option value="last_month">Last month</option><option value="latest">Latest batch</option><option value="all">Whole engagement</option>
+                {periods.months.length > 0 && <optgroup label="A month">{periods.months.map((m: any) => <option key={m.value} value={`month:${m.value}`}>{m.label} · {m.delivered}/{m.sources} delivered</option>)}</optgroup>}
+                {periods.batches.length > 0 && <optgroup label="A batch">{periods.batches.map((b: any) => <option key={b.key} value={`batch:${b.key}`}>{b.label} · {b.delivered}/{b.sources} delivered</option>)}</optgroup>}
+              </select>
+            </label>
+            <label className="text-sm text-gray-600 flex items-center gap-1.5"><input type="checkbox" checked={names} onChange={e => setNames(e.target.checked)} />Show names</label>
+          </>
+        )}
+        {mode !== 'deck' && mode !== 'brief' && (
           <label className="text-sm text-gray-600 flex items-center gap-2">Batch
             <select value={key} onChange={e => setKey(e.target.value)} className="border border-gray-200 rounded-lg px-2.5 py-1.5 text-sm bg-white text-gray-900">
               {list.map(b => <option key={b.key} value={b.key}>{b.label} · {b.delivered}/{b.sources} delivered</option>)}
@@ -105,18 +133,21 @@ export function BatchReport({ projectId }: { projectId: string }) {
           </label>
         )}
         <div className="ml-auto flex gap-2">
-          <Button variant="secondary" disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={delivered}>Delivered CSV</Button>
-          {mode !== 'deck' && <Button variant="secondary" disabled={!d || d.error} onClick={copy}>Copy status text</Button>}
-          <Button disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={() => window.print()}>Save as PDF</Button>
+          {mode !== 'brief' && <Button variant="secondary" disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={delivered}>Delivered CSV</Button>}
+          {mode === 'deck' && <Button variant="secondary" disabled={!eng || eng.error} onClick={timesCsv}>Times CSV</Button>}
+          {mode === 'deck' && <Button variant="secondary" disabled={!eng || eng.error} onClick={slack}>Copy for Slack</Button>}
+          {(mode === 'page' || mode === 'detail') && <Button variant="secondary" disabled={!d || d.error} onClick={copy}>Copy status text</Button>}
+          {mode !== 'brief' && <Button disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={() => window.print()}>Save as PDF</Button>}
         </div>
       </div>
-      {mode !== 'detail' && <p className="no-print text-xs text-gray-500 m-0">{mode === 'page' ? 'One A4 page. In the print window choose "Save as PDF", with margins set to None.' : 'Slides for the whole engagement, one per page. In the print window choose "Save as PDF", with margins set to None.'}</p>}
+      {(mode === 'page' || mode === 'deck') && <p className="no-print text-xs text-gray-500 m-0">{mode === 'page' ? 'One A4 page. In the print window choose "Save as PDF", with margins set to None.' : 'Pick what to cover and the report builds itself from live data. In the print window choose "Save as PDF", with margins set to None. Times are elapsed clock time.'}</p>}
+      {mode === 'brief' && <LeadBrief projectId={projectId} />}
 
       {mode === 'page' && (!d ? <Skeletons rows={4} /> : d.error ? <Blank title="Couldn't build the report" text="Try again in a moment." /> : (
         <div ref={fitA.ref} className="w-full"><div id="onepager-wrap" style={{ zoom: fitA.s, width: A4.w, margin: '0 auto', boxShadow: '0 4px 24px rgba(0,0,0,.18)', borderRadius: 6, overflow: 'hidden' }}><OnePager d={d} /></div></div>
       ))}
-      {mode === 'deck' && (!eng ? <Skeletons rows={4} /> : eng.error ? <Blank title="Couldn't build the report" text="Try again in a moment." /> : (
-        <div ref={fitD.ref} className="w-full"><div id="deck-wrap" style={{ zoom: fitD.s, width: SLIDE.w, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}><EngagementDeck e={eng} /></div></div>
+      {mode === 'deck' && (!eng ? <Skeletons rows={4} /> : eng.error ? <Blank title="Couldn't build the report" text={eng.detail || 'Try again in a moment.'} /> : (
+        <div ref={fitD.ref} className="w-full"><div id="deck-wrap" style={{ zoom: fitD.s, width: SLIDE.w, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}><EngagementDeck e={eng} names={names} /></div></div>
       ))}
       {mode === 'detail' && (!d ? <Skeletons rows={4} /> : d.error ? <Blank title="Couldn't build the report" text="Try again in a moment." /> : (
         <div id="batch-report" className="rounded-2xl overflow-hidden border border-gray-200 shadow-sm" style={{ background: '#fff', color: '#111827' }}>

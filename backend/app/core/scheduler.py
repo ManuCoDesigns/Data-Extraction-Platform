@@ -24,6 +24,12 @@ def _tick():
         except Exception as e:
             log.warning("balance failed: %s", e)
             db.rollback()
+        try:
+            from app.services import lead_brief
+            lead_brief.run_month_notice(db)
+        except Exception as e:
+            log.warning("month notice failed: %s", e)
+            db.rollback()
         now = datetime.now(timezone.utc)
         key = f"digest:{now.strftime('%Y-%m-%d')}"
         if mailer.enabled() and now.hour >= settings.DIGEST_HOUR_UTC and not db.query(ReminderLog.key).filter(ReminderLog.key == key).first():

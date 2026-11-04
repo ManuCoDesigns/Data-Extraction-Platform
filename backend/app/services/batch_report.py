@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from app.models.all_models import (
     ClientQuestion, ExtractedRecord, ExtractionJob, QualityFinding, ReviewStatus, Source, SourceLinkCheck, SourceStatus, User,
 )
-from app.services import enh, observations as obs, quality as q
+from app.services import enh, observations as obs, quality as q, report_timing as rt
 
 STAGES = [
     ("delivered", "Delivered"), ("ready_to_send", "Approved, not yet sent to Xtrium"), ("signoff", "Ready for sign-off"), ("peer_review", "In peer review"),
@@ -250,10 +250,14 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     }
 
 
-def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
+def engagement(db: Session, user: User, srcs: list, sc: dict | None, keys: list | None = None, scope: dict | None = None) -> dict:
     """The whole engagement across every batch: one phase per pull, SOP coverage, recurring problems, the platform in numbers
     and the latest batch in detail. Everything is read from the platform when the report is opened."""
-    batches = list_batches(srcs)
+    batches = list_batches(srcs)          # numbered on everything, so a batch keeps its number when a report covers only some of them
+    if keys:
+        batches = [b for b in batches if b["key"] in set(keys)]
+    pb_all = q.pull_batches(srcs)
+    scoped = [s for s in srcs if (pb_all.get(s.id) or {}).get("key") in {b["key"] for b in batches}]
     reps = [assemble(db, user, srcs, b["key"], sc) for b in batches]
     pulled = [r for r in reps if r["key"] != "other"]
     phases = []
@@ -263,7 +267,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
                        "records": r["totals"]["records_approved"], "percent": r["totals"]["percent"], "blocked": r["totals"]["blocked"],
                        "status": "covered" if r["totals"]["sources"] == r["totals"]["delivered"] else "in_progress",
                        "types": [x["type"] for x in tp[:3]], "accuracy": (r["quality"] or {}).get("final_accuracy")})
-    ids = [s.id for s in srcs]
+    ids = [s.id for s in scoped]
     sop_total: dict = {}
     latest = pulled[-1] if pulled else (reps[-1] if reps else None)
     latest_ids = {x["source_id"] for x in latest["sources"]} if latest else set()
@@ -304,7 +308,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
             m = merged.setdefault((g["kind"], g["title"]), {"kind": g["kind"], "title": g["title"], "need": g["need"], "items": []})
             m["items"] += [{**i, "batch": r["label"]} for i in g["items"]]
 
-    pids = {s.project_id for s in srcs}
+    pids = {s.project_id for s in scoped}
     qs = db.query(ClientQuestion).filter(ClientQuestion.project_id.in_(pids)).order_by(ClientQuestion.created_at).all() if pids else []
     topics: dict = {}
     for x in qs:
@@ -314,8 +318,16 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
     qa = {"topics": sorted(topics.values(), key=lambda z: -z["asked"]),
           "items": [{"topic": x.topic or "General", "question": x.question, "answer": x.answer, "status": x.status} for x in qs],
           "open": sum(1 for x in qs if x.status == "open"), "answered": sum(1 for x in qs if x.status == "answered")}
-    peers = [p for s in srcs for p in s.peer_reviews]
+    peers = [p for s in scoped for p in s.peer_reviews]
     cum = (sc or {}).get("cumulative") or {}
+    if keys:    # the project-wide figures would be wrong for part of the engagement: add up the batches that are in it
+        qs_ = [r["quality"] for r in reps if r.get("quality") and r["quality"].get("fields")]
+        f_ = sum(x["fields"] for x in qs_)
+        def _w(k):
+            return round(sum((x.get(k) or 0) * x["fields"] for x in qs_ if x.get(k) is not None) / f_, 1) if f_ else None
+        e_ = sum((x.get("errors") or 0) for x in qs_)
+        cum = {"fields": f_ or None, "errors": e_ if f_ else None, "final_accuracy": _w("final_accuracy"), "first_pass_accuracy": _w("first_pass_accuracy"),
+               "errors_per_100": round(e_ / f_ * 100, 1) if f_ else None, "caught_rate": None}
     tot_sources = sum(p["sources"] for p in phases)
     tot_deliv = sum(p["delivered"] for p in phases)
     totals = {
@@ -337,10 +349,13 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
     if stage_tot.get("ready_to_send"):
         nxt.append({"title": "Send approved work to Xtrium", "text": f"{stage_tot['ready_to_send']} approved sources have not been submitted back to Xtrium yet."})
     nxt.append({"title": "Keep the peer-review structure", "text": "Continue independent peer review and the sign-off step for every new assignment."})
+    nxt.append({"title": "Check links first", "text": "Flag pages we cannot open before extraction starts, so no time is lost on them."})
+    nxt.append({"title": "Share work evenly", "text": "New pulls are spread across the team the day they arrive."})
     return {
         "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,
         "stages": stages_all, "by_category": by_category, "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
-        "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:3], "open_sources": open_sources,
+        "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:4], "open_sources": open_sources, "scope": scope or {"kind": "all", "label": "Whole engagement"},
+        "timing": rt.build(db, scoped),
         "delivered_rows": sorted(({"name": x["name"], "project": x["project"], "item_no": x["item_no"], "records": x["approved"], "approved_at": x["approved_at"], "submitted_at": x["submitted_at"], "batch": r["label"]}
                                   for r in reps for x in r["sources"] if x["stage"] == "delivered"), key=lambda x: x["approved_at"] or "", reverse=True),
     }
