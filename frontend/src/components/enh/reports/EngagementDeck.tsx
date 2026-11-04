@@ -159,6 +159,21 @@ export function EngagementDeck({ e }: { e: any }) {
         </div>
       </Frame>
 
+      {/* 6b. categories */}
+      {(e.by_category ?? []).length > 0 && (
+        <Frame n={next()} project={project} title={`${e.by_category.length} ${e.by_category.length === 1 ? 'category' : 'categories'} of work`} lede="What kind of record each source is, taken from the SOP Xtrium attached. The ring shows how much of each category is delivered.">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 18 }}>
+            {e.by_category.slice(0, 10).map((c: any) => (
+              <div key={c.category} style={{ background: PALE, borderRadius: 14, padding: '26px 8px 20px', textAlign: 'center' }}>
+                <div style={{ display: 'flex', justifyContent: 'center' }}><Ring pct={(100 * c.delivered) / c.total} size={120} stroke={12} color={BLUE} track="#fff" label={`${c.delivered}/${c.total}`} /></div>
+                <div style={{ fontSize: 18, fontWeight: 700, marginTop: 12 }}>{c.category}</div>
+                <div style={{ fontSize: 14, color: MUTE }}>{c.records} {c.records === 1 ? 'record' : 'records'} approved</div>
+              </div>
+            ))}
+          </div>
+        </Frame>
+      )}
+
       {/* 7. challenges */}
       <Frame n={next()} project={project} title="What got in the way, and what we did about it" lede="The response is the same each time: escalate rather than guess, and confirm with the client side before going further.">
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 20 }}>

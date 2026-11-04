@@ -57,6 +57,18 @@ def list_batches(srcs: list) -> list[dict]:
     return sorted(groups.values(), key=lambda g: (g["key"] == "other", g["date"]), reverse=False)
 
 
+def category_of(s) -> str:
+    """What the source is: the category on the source, or, when that is empty or Unclassified, the entity of the SOP Xtrium attached."""
+    c = (getattr(s, "category", None) or "").strip()
+    if c and c.lower() != "unclassified":
+        return c
+    saved = getattr(s, "xtrium_sop", None)
+    saved = saved if isinstance(saved, dict) else {}
+    sop = saved.get("sop") if isinstance(saved.get("sop"), dict) else {}
+    meta = saved.get("meta") if isinstance(saved.get("meta"), dict) else {}
+    return str(sop.get("entity") or meta.get("target_entity") or "").strip() or "Unclassified"
+
+
 def _days(a, b):
     a, b = _aware(a), _aware(b)
     return round((b - a).total_seconds() / 86400, 1) if a and b else None
@@ -144,7 +156,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         end = s.approved_at if s.status == SourceStatus.APPROVED else now
         rows.append({
             "source_id": s.id, "project_id": s.project_id, "name": s.name, "item_no": s.external_ref_id, "url": s.website_url,
-            "type": s.type or (s.schema.name if s.schema else None), "sop": ((s.xtrium_sop or {}).get("meta") or {}).get("sop_code"),
+            "type": s.type or (s.schema.name if s.schema else None), "category": category_of(s), "sop": ((s.xtrium_sop or {}).get("meta") or {}).get("sop_code"),
             "project": s.project.name if s.project else None, "stage": stage, "status": getattr(s.status, "value", s.status),
             "records": n, "approved": ok, "peers_done": sum(1 for p in s.peer_reviews if p.status == "submitted"), "peers_total": len(s.peer_reviews),
             "peers_flagged": len(flagged.get(s.id, set()) & {p.user_id for p in s.peer_reviews}), "pulled_at": s.created_at.isoformat() if s.created_at else None,
@@ -175,7 +187,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
 
     by_type: dict = {}
     for r in rows:
-        t = by_type.setdefault(r["type"] or "Not set", {"type": r["type"] or "Not set", "total": 0, "delivered": 0})
+        t = by_type.setdefault(r["category"], {"type": r["category"], "total": 0, "delivered": 0})     # grouped by category, so the report says Organization or Material, not Unclassified
         t["total"] += 1
         t["delivered"] += 1 if r["stage"] == "delivered" else 0
 
@@ -266,6 +278,15 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
         d["new"] = bool(latest and len(pulled) > 1 and code not in earlier_sops and code != "No SOP saved")
     by_sop = sorted(sop_total.values(), key=lambda d: (d["code"] == "No SOP saved", d["code"]))
 
+    cat_tot: dict = {}
+    for r in reps:
+        for x in r["sources"]:
+            d = cat_tot.setdefault(x["category"], {"category": x["category"], "total": 0, "delivered": 0, "records": 0})
+            d["total"] += 1
+            d["delivered"] += 1 if x["stage"] == "delivered" else 0
+            d["records"] += x["approved"] or 0
+    by_category = sorted(cat_tot.values(), key=lambda d: (d["category"] == "Unclassified", -d["total"], d["category"]))
+
     all_obs = obs.rows_for(db, ids)
     stage_tot: dict = {}
     for r in reps:
@@ -318,7 +339,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
     nxt.append({"title": "Keep the peer-review structure", "text": "Continue independent peer review and the sign-off step for every new assignment."})
     return {
         "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,
-        "stages": stages_all, "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
+        "stages": stages_all, "by_category": by_category, "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
         "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:3], "open_sources": open_sources,
         "delivered_rows": sorted(({"name": x["name"], "project": x["project"], "item_no": x["item_no"], "records": x["approved"], "approved_at": x["approved_at"], "submitted_at": x["submitted_at"], "batch": r["label"]}
                                   for r in reps for x in r["sources"] if x["stage"] == "delivered"), key=lambda x: x["approved_at"] or "", reverse=True),
