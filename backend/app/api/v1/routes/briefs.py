@@ -4,6 +4,7 @@ import io
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
@@ -103,6 +104,30 @@ def summary_text(r: dict) -> str:
         out.append(f"• {t['blocked']} sources are blocked and need a decision")
     out.append("_Times are elapsed clock time from the platform, not hands-on hours._")
     return "\n".join(out)
+
+
+class SubmitBody(BaseModel):
+    scope: str = "all"
+    value: str | None = None
+    count: int = 1
+    project_id: str | None = None
+
+
+@router.post("/submissions")
+def set_submissions(body: SubmitBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Record how many times the sources in a report period were submitted to Xtrium (for work submitted again before this was counted)."""
+    from app.services import quality as _q
+    _need_lead(user)
+    srcs = _visible_sources(db, user, body.project_id).all()
+    keys, _info = _scope(srcs, body.scope, body.value)
+    pb = _q.pull_batches(srcs)
+    n = 0
+    for s in srcs:
+        if s.xtrium_submitted_at and (keys is None or (pb.get(s.id) or {}).get("key") in keys):
+            s.xtrium_submit_count = max(1, min(5, int(body.count)))
+            n += 1
+    db.commit()
+    return {"updated": n}
 
 
 @router.get("/periods")

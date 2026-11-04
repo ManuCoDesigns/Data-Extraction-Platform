@@ -162,6 +162,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
             "peers_flagged": len(flagged.get(s.id, set()) & {p.user_id for p in s.peer_reviews}), "pulled_at": s.created_at.isoformat() if s.created_at else None,
             "days": _net_days(_days(s.created_at, end), held_s.get(s.id)), "on_hold": s.id in held_now and s.status != SourceStatus.APPROVED,
             "submitted_to_xtrium": bool(s.xtrium_submitted_at),
+            "submissions": int(getattr(s, "xtrium_submit_count", 0) or 0) or (1 if s.xtrium_submitted_at else 0),
             "approved_at": s.approved_at.isoformat() if s.approved_at else None, "submitted_at": s.xtrium_submitted_at.isoformat() if s.xtrium_submitted_at else None,
             "fields": qr.get("fields"), "errors": qr.get("errors"), "errors_per_100": qr.get("errors_per_100"),
             "first_pass_accuracy": qr.get("first_pass_accuracy"), "final_accuracy": qr.get("final_accuracy"),
@@ -237,7 +238,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     return {
         "key": key, "label": label, "date": date, "generated_at": now,
         "totals": {"sources": total, "delivered": delivered, "percent": pct, "records": recs_total, "records_approved": recs_ok, "approved": sum(1 for r in rows if r["status"] == "approved"),
-                   "blocked": stages["blocked"], "ready_to_send": ready, "on_hold": sum(1 for r in rows if r.get("on_hold")), "in_progress": inflight, "submitted_to_xtrium": sum(1 for r in rows if r["submitted_to_xtrium"])},
+                   "blocked": stages["blocked"], "ready_to_send": ready, "on_hold": sum(1 for r in rows if r.get("on_hold")), "in_progress": inflight, "submitted_to_xtrium": sum(1 for r in rows if r["submitted_to_xtrium"]), "resubmitted": sum(1 for r in rows if r["submissions"] > 1)},
         "stages": [{"key": k, "label": l, "count": stages[k]} for k, l in STAGES],
         "by_type": sorted(by_type.values(), key=lambda t: -t["total"]),
         "blocked": blocked_groups, "sources": rows, "team": team,
@@ -333,7 +334,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None, keys: list 
     totals = {
         "sources": tot_sources, "delivered": tot_deliv, "batches": len(pulled), "batches_covered": sum(1 for p in phases if p["status"] == "covered" and p["key"] != "other"),
         "batches_open": sum(1 for p in phases if p["status"] != "covered" and p["key"] != "other"), "sops": len([c for c in sop_total if c != "No SOP saved"]),
-        "records_approved": sum(p["records"] for p in phases), "approved": sum(r["totals"].get("approved", 0) for r in reps), "submitted": sum(r["totals"]["submitted_to_xtrium"] for r in reps),
+        "records_approved": sum(p["records"] for p in phases), "approved": sum(r["totals"].get("approved", 0) for r in reps), "submitted": sum(r["totals"]["submitted_to_xtrium"] for r in reps), "resubmitted": sum(r["totals"].get("resubmitted", 0) for r in reps),
         "blocked": sum(p["blocked"] for p in phases), "peer_done": sum(1 for p in peers if p.status == "submitted"), "peer_total": len(peers),
         "questions_asked": len(qs), "questions_answered": sum(1 for x in qs if x.status == "answered"),
         "fields": cum.get("fields"), "errors": cum.get("errors"), "final_accuracy": cum.get("final_accuracy"), "first_pass_accuracy": cum.get("first_pass_accuracy"),

@@ -57,6 +57,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
   const [periods, setPeriods] = useState<any>(null)
   const [scope, setScope] = useState('')            // this_month | last_month | latest | all | month:YYYY-MM | batch:KEY
   const [names, setNames] = useState(false)
+  const [subN, setSubN] = useState(2)
   const fitA = useFit(A4.w), fitD = useFit(SLIDE.w)
   const [list, setList] = useState<any[] | null>(null)
   const [key, setKey] = useState('')
@@ -89,6 +90,15 @@ export function BatchReport({ projectId }: { projectId: string }) {
   const slack = async () => { try { await navigator.clipboard.writeText(eng.summary_text); toast.success('Summary copied for Slack') } catch { toast.error('Could not copy') } }
   const timesCsv = async () => {
     try { downloadText(`times_${(eng?.scope?.value || 'all')}.csv`, await briefsApi.csv(sc, scv, projectId || undefined, !names)) } catch { toast.error('Could not build the times file') }
+  }
+
+  const recordSubs = async () => {
+    if (!window.confirm(`Record every delivered source in this report as sent to Xtrium ${subN === 1 ? 'once' : subN + ' times'}?`)) return
+    try {
+      const r = await briefsApi.setSubmissions(sc, scv, subN, projectId || undefined)
+      toast.success(`${r.updated} sources updated`)
+      setEng(null); setEng(await briefsApi.report(sc, scv, projectId || undefined))
+    } catch { toast.error('Could not record the submissions') }
   }
 
   const shown = useMemo(() => (d?.sources ?? []).filter((s: any) => !stageFilter || s.stage === stageFilter), [d, stageFilter])
@@ -135,6 +145,9 @@ export function BatchReport({ projectId }: { projectId: string }) {
         <div className="ml-auto flex gap-2">
           {mode !== 'brief' && <Button variant="secondary" disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={delivered}>Delivered CSV</Button>}
           {mode === 'deck' && <Button variant="secondary" disabled={!eng || eng.error} onClick={timesCsv}>Times CSV</Button>}
+          {mode === 'deck' && <span className="inline-flex items-center gap-1.5 text-sm text-gray-600">Sent to Xtrium
+            <select className="border rounded-md px-1.5 py-1 text-sm" value={subN} onChange={e => setSubN(Number(e.target.value))}><option value={1}>once</option><option value={2}>twice</option><option value={3}>3 times</option></select>
+            <Button variant="secondary" disabled={!eng || eng.error} onClick={recordSubs}>Record</Button></span>}
           {mode === 'deck' && <Button variant="secondary" disabled={!eng || eng.error} onClick={slack}>Copy for Slack</Button>}
           {(mode === 'page' || mode === 'detail') && <Button variant="secondary" disabled={!d || d.error} onClick={copy}>Copy status text</Button>}
           {mode !== 'brief' && <Button disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={() => window.print()}>Save as PDF</Button>}

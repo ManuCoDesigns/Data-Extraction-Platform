@@ -95,7 +95,7 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
               ))}
             </div>
             <div style={{ display: 'flex', gap: 40, marginTop: 18 }}>
-              <Big v={nf(b.totals.records_approved)} l="records approved" /><Big v={nf(b.totals.submitted_to_xtrium)} l="sent to Xtrium" c={GREEN} />
+              <Big v={nf(b.totals.records_approved)} l="records approved" /><Big v={nf(b.totals.submitted_to_xtrium)} l={b.totals.resubmitted ? `sent to Xtrium, ${b.totals.resubmitted} twice` : 'sent to Xtrium'} c={GREEN} />
               {b.totals.in_progress > 0 && <Big v={nf(b.totals.in_progress)} l="still moving" c={AMBER} />}
               <Big v={nf(b.totals.blocked)} l="needs a decision" c={b.totals.blocked ? RED : GREEN} />
             </div>
@@ -131,7 +131,7 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
             <tr key={s.source_id} style={{ background: i % 2 ? '#f8faff' : '#fff' }}>
               <td style={{ padding: '8px', fontWeight: 600, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</td>
               <td style={{ padding: '8px' }}>{s.category}</td>
-              <td style={{ padding: '8px', whiteSpace: 'nowrap' }}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, background: stageColor[s.stage], marginRight: 7 }} />{b.stages.find((x: any) => x.key === s.stage)?.label}</td>
+              <td style={{ padding: '8px', whiteSpace: 'nowrap' }}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, background: stageColor[s.stage], marginRight: 7 }} />{b.stages.find((x: any) => x.key === s.stage)?.label}{s.submissions > 1 ? ` (sent ${s.submissions}×)` : ''}</td>
               <td style={{ padding: '8px' }}>{per[s.source_id]?.extraction_days != null ? `${per[s.source_id].extraction_days} d` : '–'}</td>
               <td style={{ padding: '8px' }}>{s.approved} of {s.records}</td>
               <td style={{ padding: '8px' }}>{s.peers_done} of {s.peers_total} submitted{s.peers_flagged > 0 && s.peers_done < s.peers_total ? `, ${s.peers_flagged} raised findings` : ''}</td>
@@ -191,7 +191,7 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 20 }}>
           <Panel><Big v={nf(T.sources)} l="sources pulled from Xtrium" /></Panel>
           <Panel><Big v={nf(T.records_approved)} l="records approved" /></Panel>
-          <Panel><Big v={nf(T.submitted)} l="sources submitted back to Xtrium" c={GREEN} /></Panel>
+          <Panel><Big v={nf(T.submitted)} l={`sources submitted back to Xtrium${T.resubmitted ? `, ${T.resubmitted} of them a second time` : ''}`} c={GREEN} /></Panel>
           <Panel><Big v={nf(T.sops)} l={T.sops === 1 ? 'SOP standard in use' : 'SOP standards in use'} c={DEEP} /></Panel>
         </div>
         <div style={{ marginTop: 40, display: 'flex', gap: 5, height: 72, borderRadius: 12, overflow: 'hidden' }}>
@@ -210,7 +210,7 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
             ['Pulled and extracted', `${nf(T.sources)} sources`, 'Each Xtrium item becomes a source with its SOP attached, then an extractor works it.'],
             ['Peer review', T.peer_total ? `${T.peer_done} of ${T.peer_total} reviews` : 'Independent', 'Peer reviewers check the extraction separately. Each must comment before sign-off.'],
             ['Admin sign-off', `${nf(T.approved ?? T.delivered)} approved`, 'An admin checks the reviews and approves the records. Approved records are locked.'],
-            ['Reported to Xtrium', `${nf(T.submitted)} submitted`, 'Approved sources are sent back and the status is checked afterwards.'],
+            ['Reported to Xtrium', `${nf(T.submitted)} submitted`, T.resubmitted ? `${T.resubmitted} were sent a second time with corrected values after the final check. The status is checked afterwards.` : 'Approved sources are sent back and the status is checked afterwards.'],
           ].map(([h, v, s], i) => (
             <div key={h} style={{ position: 'relative', padding: '0 14px 0 0' }}>
               <div style={{ background: i === 3 ? DEEP : i === 2 ? BLUE : i === 1 ? '#6ea8fb' : '#b9cdf3', color: i < 2 ? INK : '#fff', height: 76, display: 'flex', alignItems: 'center', padding: '0 22px', clipPath: 'polygon(0 0, calc(100% - 26px) 0, 100% 50%, calc(100% - 26px) 100%, 0 100%, 26px 50%)', marginLeft: i ? -14 : 0, paddingLeft: i ? 40 : 22 }}>

@@ -360,6 +360,7 @@ async def submit_source_to_xtrium(
         },
     ))
     source.xtrium_submitted_at = datetime.now(timezone.utc)
+    source.xtrium_submit_count = int(source.xtrium_submit_count or 0) + 1
     db.commit()  # audit log + submit time are saved together
     return {**result, "records_submitted": len(approved_records), "bundled": len(approved_records) > 1}
 
@@ -1756,6 +1757,7 @@ async def submit_ready_bulk(
         now = datetime.now(timezone.utc)
         s.external_synced_at = now
         s.xtrium_submitted_at = now
+        s.xtrium_submit_count = int(s.xtrium_submit_count or 0) + 1
         db.add(AuditLog(
             user_id=current_user.id, project_id=s.project_id, source_id=s.id,
             action=AuditAction.SOURCE_STATUS_CHANGED,

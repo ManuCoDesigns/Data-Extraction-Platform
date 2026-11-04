@@ -189,6 +189,10 @@ def build(db: Session, sources: list) -> dict:
     add("peer", "Peer review", min(peer_times) if peer_times else None, f"{len(peer_times)} peer {'review' if len(peer_times) == 1 else 'reviews'} submitted.", max(peer_times) if peer_times else None)
     done = len(apps) == len(sources)
     add("approved", "Approved" if done else "Approved so far", max(apps) if apps else None, f"All {len(sources)} sources approved on the platform." if done else f"{len(apps)} of {len(sources)} sources approved.")
+    sent = [(_aw(s.xtrium_submitted_at), int(getattr(s, "xtrium_submit_count", 0) or 0)) for s in sources if s.xtrium_submitted_at]
+    twice = sum(1 for _, c_ in sent if c_ > 1)
+    add("xtrium", "Reported to Xtrium", min(t_ for t_, _ in sent) if sent else None,
+        f"{len(sent)} {'source' if len(sent) == 1 else 'sources'} sent back" + (f", {twice} of them a second time with corrected values." if twice else "."), max(t_ for t_, _ in sent) if sent else None)
     ms.sort(key=lambda m: m["at"])
     span = _days(min(pulls), max(apps)) if pulls and apps and done else None
 
