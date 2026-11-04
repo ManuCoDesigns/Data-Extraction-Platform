@@ -11,12 +11,12 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from app.models.all_models import (
-    ClientQuestion, ExtractedRecord, ExtractionJob, ReviewStatus, Source, SourceLinkCheck, SourceStatus, User,
+    ClientQuestion, ExtractedRecord, ExtractionJob, QualityFinding, ReviewStatus, Source, SourceLinkCheck, SourceStatus, User,
 )
 from app.services import enh, observations as obs, quality as q
 
 STAGES = [
-    ("delivered", "Delivered"), ("signoff", "Ready for sign-off"), ("peer_review", "In peer review"),
+    ("delivered", "Delivered"), ("ready_to_send", "Approved, not yet sent to Xtrium"), ("signoff", "Ready for sign-off"), ("peer_review", "In peer review"),
     ("needs_fixes", "Needs fixes"), ("extracting", "Extracting"), ("not_started", "Not started"), ("blocked", "Blocked"),
 ]
 LINK_WHY = {"dead": "The link no longer opens", "blocked": "The site blocks automated access", "login": "The page needs a sign-in"}
@@ -29,7 +29,9 @@ def _aware(dt):
 def _stage(s: Source) -> str:
     st = s.status
     if st == SourceStatus.APPROVED:
-        return "delivered"
+        # Delivered means Xtrium has it. A source pulled from Xtrium that is approved but not yet accepted back is waiting to be sent.
+        pulled = bool(getattr(s, "external_ref_id", None) or getattr(s, "external_system", None))
+        return "delivered" if (s.xtrium_submitted_at or not pulled) else "ready_to_send"
     if st == SourceStatus.NOT_STARTED:
         return "not_started"
     if st == SourceStatus.EXTRACTING:
@@ -94,11 +96,13 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
             blocked[s.id] = {"kind": "link", "reason": LINK_WHY[c.status], "detail": c.detail}
     for sid, reason in (db.query(ExtractionJob.source_id, ExtractedRecord.escalation_reason)
                         .join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
-                        .filter(ExtractionJob.source_id.in_(ids), ExtractedRecord.is_escalation_only == True,  # noqa: E712
-                                ExtractedRecord.review_status != ReviewStatus.APPROVED).all()):
+                        .filter(ExtractionJob.source_id.in_(ids), ExtractedRecord.is_escalation_only == True).all()):  # noqa: E712
         src = next(x for x in mine if x.id == sid)
+        # an escalation counts as open until Xtrium has accepted it back, even when it was approved here
         if src.status != SourceStatus.APPROVED:
             blocked[sid] = {"kind": "nodata", "reason": (reason or "No extractable data").strip(), "detail": None}
+        elif not src.xtrium_submitted_at:
+            blocked[sid] = {"kind": "nodata", "reason": (reason or "No extractable data").strip(), "detail": "Escalated here, but Xtrium has not accepted it back yet"}
     asks = {}
     for cq in db.query(ClientQuestion).filter(ClientQuestion.source_id.in_(ids), ClientQuestion.status == "open").all():
         asks.setdefault(cq.source_id, []).append(cq.question)
@@ -123,6 +127,10 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
 
     names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_({s.assigned_extractor_id for s in mine} | {p.user_id for s in mine for p in s.peer_reviews} | {s.assigned_reviewer_id for s in mine if s.assigned_reviewer_id})).all()}
     qrow = {r["source_id"]: r for r in (sc or {}).get("batches", [])}
+    # peer reviewers who raised at least one finding on a source, whether or not they pressed Submit
+    flagged: dict = {}
+    for sid_, uid_ in db.query(QualityFinding.source_id, QualityFinding.raised_by).filter(QualityFinding.source_id.in_(ids), QualityFinding.origin == "reviewer").distinct().all():
+        flagged.setdefault(sid_, set()).add(uid_)
 
     rows, stages = [], {k: 0 for k, _ in STAGES}
     from app.services import holds
@@ -139,6 +147,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
             "type": s.type or (s.schema.name if s.schema else None), "sop": ((s.xtrium_sop or {}).get("meta") or {}).get("sop_code"),
             "project": s.project.name if s.project else None, "stage": stage, "status": getattr(s.status, "value", s.status),
             "records": n, "approved": ok, "peers_done": sum(1 for p in s.peer_reviews if p.status == "submitted"), "peers_total": len(s.peer_reviews),
+            "peers_flagged": len(flagged.get(s.id, set()) & {p.user_id for p in s.peer_reviews}), "pulled_at": s.created_at.isoformat() if s.created_at else None,
             "days": _net_days(_days(s.created_at, end), held_s.get(s.id)), "on_hold": s.id in held_now and s.status != SourceStatus.APPROVED,
             "submitted_to_xtrium": bool(s.xtrium_submitted_at),
             "approved_at": s.approved_at.isoformat() if s.approved_at else None, "submitted_at": s.xtrium_submitted_at.isoformat() if s.xtrium_submitted_at else None,
@@ -182,7 +191,10 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
 
     pct = round(100 * delivered / total) if total else 0
     lines = [f"{delivered} of {total} sources are delivered ({pct}%), with {recs_ok} approved records."]
-    inflight = total - delivered - stages["blocked"]
+    ready = stages["ready_to_send"]
+    inflight = total - delivered - stages["blocked"] - ready
+    if ready:
+        lines.append(f"{ready} approved {'source is' if ready == 1 else 'sources are'} waiting to be sent back to Xtrium.")
     if inflight:
         lines.append(f"{inflight} {'source is' if inflight == 1 else 'sources are'} still moving through extraction and review.")
     if stages["blocked"]:
@@ -202,9 +214,9 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         cards.append({"title": f"{round(quality['final_accuracy'], 1)}% accurate", "text": f"Final accuracy across {quality['fields']} fields checked against the real sources."})
     if len(by_type) > 1 and full_types:
         cards.append({"title": f"{len(full_types)} {'type' if len(full_types) == 1 else 'types'} at 100%", "text": ", ".join(full_types[:3]) + (" are" if len(full_types) > 1 else " is") + " fully delivered."})
-    if delivered and any(r["submitted_to_xtrium"] for r in rows):
+    if (delivered or ready) and any(r["submitted_to_xtrium"] for r in rows):
         n_sub = sum(1 for r in rows if r["submitted_to_xtrium"])
-        cards.append({"title": f"{n_sub} sent to Xtrium", "text": f"{n_sub} of {delivered} delivered sources have been submitted back to Xtrium."})
+        cards.append({"title": f"{n_sub} sent to Xtrium", "text": f"{n_sub} of {delivered + ready} approved sources have been submitted back to Xtrium."})
     if peers_all:
         done = sum(1 for p in peers_all if p.status == "submitted")
         cards.append({"title": f"{done} of {len(peers_all)} peer reviews", "text": "Every source gets independent peer reviews before sign-off." if done == len(peers_all) else "Peer reviews submitted so far across this batch."})
@@ -213,7 +225,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     return {
         "key": key, "label": label, "date": date, "generated_at": now,
         "totals": {"sources": total, "delivered": delivered, "percent": pct, "records": recs_total, "records_approved": recs_ok,
-                   "blocked": stages["blocked"], "on_hold": sum(1 for r in rows if r.get("on_hold")), "in_progress": inflight, "submitted_to_xtrium": sum(1 for r in rows if r["submitted_to_xtrium"])},
+                   "blocked": stages["blocked"], "ready_to_send": ready, "on_hold": sum(1 for r in rows if r.get("on_hold")), "in_progress": inflight, "submitted_to_xtrium": sum(1 for r in rows if r["submitted_to_xtrium"])},
         "stages": [{"key": k, "label": l, "count": stages[k]} for k, l in STAGES],
         "by_type": sorted(by_type.values(), key=lambda t: -t["total"]),
         "blocked": blocked_groups, "sources": rows, "team": team,
@@ -301,8 +313,8 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None) -> dict:
         nxt.append({"title": "Complete the current batch", "text": f"Finish the {latest['totals']['sources'] - latest['totals']['delivered']} remaining sources in {latest['label']}."})
     if totals["blocked"]:
         nxt.append({"title": "Clear what is blocked", "text": f"{totals['blocked']} sources need a decision from the client or the team: a corrected link, an answer, or confirmation to skip."})
-    if totals["submitted"] < tot_deliv:
-        nxt.append({"title": "Send delivered work to Xtrium", "text": f"{tot_deliv - totals['submitted']} approved sources have not been submitted back to Xtrium yet."})
+    if stage_tot.get("ready_to_send"):
+        nxt.append({"title": "Send approved work to Xtrium", "text": f"{stage_tot['ready_to_send']} approved sources have not been submitted back to Xtrium yet."})
     nxt.append({"title": "Keep the peer-review structure", "text": "Continue independent peer review and the sign-off step for every new assignment."})
     return {
         "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,

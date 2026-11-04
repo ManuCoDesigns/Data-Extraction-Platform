@@ -45,7 +45,7 @@ export function EngagementDeck({ e }: { e: any }) {
   const project = e.projects[0] || 'Data extraction'
   const rangeA = e.period_from ? dt(e.period_from) : '', rangeB = dt(e.generated_at)
   const pct = T.sources ? Math.round((100 * T.delivered) / T.sources) : 0
-  const stageColor: Record<string, string> = { delivered: DEEP, signoff: BLUE, peer_review: '#6ea8fb', needs_fixes: AMBER, extracting: '#b9cdf3', not_started: '#d4dbe8', blocked: RED }
+  const stageColor: Record<string, string> = { delivered: DEEP, signoff: BLUE, peer_review: '#6ea8fb', needs_fixes: AMBER, extracting: '#b9cdf3', not_started: '#d4dbe8', blocked: RED, ready_to_send: '#4f86e8' }
   const stages: any[] = e.stages.filter((s: any) => s.count > 0)
   let n = 0
   const next = () => ++n
@@ -240,7 +240,7 @@ export function EngagementDeck({ e }: { e: any }) {
                 <td style={{ padding: '11px 12px' }}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, background: stageColor[s.stage], marginRight: 8 }} />{L.stages.find((x: any) => x.key === s.stage)?.label}</td>
                 <td style={{ padding: '11px 12px' }}>{s.days === null ? '–' : `${s.days} days`}</td>
                 <td style={{ padding: '11px 12px' }}>{s.approved} of {s.records}</td>
-                <td style={{ padding: '11px 12px' }}>{s.peers_done} of {s.peers_total}</td>
+                <td style={{ padding: '11px 12px' }}>{s.peers_done} of {s.peers_total}{s.peers_flagged > 0 && s.peers_done < s.peers_total ? `, ${s.peers_flagged} flagged` : ''}</td>
                 <td style={{ padding: '11px 12px' }}>{p1(s.final_accuracy)}</td>
               </tr>))}</tbody>
           </table>

@@ -9,7 +9,7 @@ import { EngagementDeck, SLIDE, useFit } from '@/components/enh/reports/Engageme
 
 // The report is a fixed light page (it is meant to be printed or sent), so it uses its own colours, not the app theme.
 const STAGE_COLOR: Record<string, string> = {
-  delivered: '#1d4ed8', signoff: '#3b82f6', peer_review: '#93c5fd', needs_fixes: '#f59e0b', extracting: '#a5b4fc', not_started: '#d1d5db', blocked: '#f97316',
+  delivered: '#1d4ed8', signoff: '#3b82f6', peer_review: '#93c5fd', needs_fixes: '#f59e0b', extracting: '#a5b4fc', not_started: '#d1d5db', blocked: '#f97316', ready_to_send: '#60a5fa',
 }
 const BLOCK_STYLE: Record<string, { bg: string; fg: string }> = {
   link: { bg: '#fdf0e6', fg: '#c2410c' }, nodata: { bg: '#f1ebfb', fg: '#6d28d9' }, question: { bg: '#fce8f1', fg: '#be185d' },
@@ -242,7 +242,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
                         <td className="py-1.5 px-2.5"><Link to={`/projects/${s.project_id}/sources/${s.source_id}`} className="no-underline font-medium" style={{ color: '#111827' }}>{s.name}</Link>{s.item_no ? <span style={{ color: '#9ca3af' }}> #{s.item_no}</span> : null}</td>
                         <td className="px-2.5 whitespace-nowrap"><span className="inline-block w-2.5 h-2.5 rounded-full mr-1.5" style={{ background: STAGE_COLOR[s.stage] }} />{d.stages.find((x: any) => x.key === s.stage)?.label}</td>
                         <td className="px-2.5 tabular-nums">{s.approved}/{s.records}</td>
-                        <td className="px-2.5 tabular-nums">{s.peers_done}/{s.peers_total}</td>
+                        <td className="px-2.5 tabular-nums whitespace-nowrap">{s.peers_done}/{s.peers_total}{s.peers_flagged > 0 && s.peers_done < s.peers_total ? <span style={{ color: '#6b7280' }}> · {s.peers_flagged} flagged</span> : null}</td>
                         <td className="px-2.5 tabular-nums whitespace-nowrap">{s.approved_at ? s.approved_at.slice(0, 10) : '–'}</td>
                         <td className="px-2.5 tabular-nums whitespace-nowrap">{s.days ?? '–'}{s.on_hold ? <span style={{ color: '#6b7280' }}> · on hold</span> : null}</td>
                         <td className="px-2.5 tabular-nums">{pct(s.final_accuracy)}</td>
