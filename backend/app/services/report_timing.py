@@ -76,6 +76,8 @@ def build(db: Session, sources: list) -> dict:
         ext = _days(s.extraction_started_at, s.extraction_completed_at)
         if ext is not None and held.get(s.id):
             ext = max(0.0, round(ext - held[s.id] / 86400, 1))
+        if ext is not None and ext < 0.05:
+            ext = None     # a clock that started and stopped in the same moment was not timed: leave it out rather than report 0 days
         approved_at = max([_aw(r.admin_reviewed_at) for r in rs if r.admin_reviewed_at and r.review_status and r.review_status.value == "approved"] or [None]) or _aw(s.approved_at)
         # admin turnaround: each submission to the next decision; correction turnaround: each return to the next submission
         sent_at, ret_at = None, None
@@ -120,7 +122,25 @@ def build(db: Session, sources: list) -> dict:
             "started_at": _iso(s.extraction_started_at), "submitted_at": _iso(s.extraction_completed_at), "approved_at": _iso(approved_at) if s.status == SourceStatus.APPROVED else None,
             "returns": max(returns, 1 if n_ret else 0), "resets": resets_s, "held_days": round(held.get(s.id, 0) / 86400, 1) or None,
             "peers_done": sum(1 for p in s.peer_reviews if p.status == "submitted"), "peers_total": len(s.peer_reviews), "status": s.status.value,
+            "approved_together": False,
         })
+
+    # sources approved within minutes of each other were signed off in one sitting: their review time says nothing about the work
+    stamped = sorted(((datetime.fromisoformat(r["approved_at"]), r) for r in per_source if r["approved_at"]), key=lambda x: x[0])
+    grp, groups = [], []
+    for t_, r_ in stamped:
+        if grp and (t_ - grp[-1][0]).total_seconds() > 600:
+            groups.append(grp)
+            grp = []
+        grp.append((t_, r_))
+    if grp:
+        groups.append(grp)
+    together = 0
+    for g in groups:
+        if len(g) >= 4:
+            for _, r_ in g:
+                r_["approved_together"], r_["review_days"], r_["total_days"] = True, None, None
+                together += 1
 
     # per extractor and per reviewer
     people: dict = {}
@@ -165,16 +185,16 @@ def build(db: Session, sources: list) -> dict:
     add("pulled", "Pulled", min(pulls) if pulls else None, f"{len(sources)} sources arrive from Xtrium.", max(pulls) if pulls else None)
     add("started", "Extraction starts", min(starts) if starts else None, f"{len({s.assigned_extractor_id for s in sources if s.assigned_extractor_id})} extractors begin on their own sources.")
     add("first_sub", "First submission", min(subs) if subs else None, "The first source goes to review.")
-    add("admin", "Admin review", first_adm, (f"First approvals. {len(ret_times)} {'record' if len(ret_times) == 1 else 'records'} returned for correction." if ret_times else "First approvals."), max(ret_times) if ret_times else None)
+    add("admin", "Admin review", first_adm, (f"First approvals. {returned_records or len(ret_times)} {'record' if (returned_records or len(ret_times)) == 1 else 'records'} returned for correction." if ret_times else "First approvals."), max(ret_times) if ret_times else None)
     add("peer", "Peer review", min(peer_times) if peer_times else None, f"{len(peer_times)} peer {'review' if len(peer_times) == 1 else 'reviews'} submitted.", max(peer_times) if peer_times else None)
     done = len(apps) == len(sources)
-    add("approved", "Approved" if done else "Approved so far", max(apps) if apps else None, f"All {len(sources)} sources approved." if done else f"{len(apps)} of {len(sources)} sources approved.")
+    add("approved", "Approved" if done else "Approved so far", max(apps) if apps else None, f"All {len(sources)} sources approved on the platform." if done else f"{len(apps)} of {len(sources)} sources approved.")
     ms.sort(key=lambda m: m["at"])
     span = _days(min(pulls), max(apps)) if pulls and apps and done else None
 
     top_fields = sorted(({"field": k, "count": v} for k, v in fields.items()), key=lambda x: -x["count"])[:8]
     return {
-        "empty": False, "milestones": ms, "span_days": span,
+        "empty": False, "milestones": ms, "span_days": span, "approved_together": together,
         "extraction": _spread([r["extraction_days"] for r in per_source]), "per_source": per_source, "people": plist,
         "validation": {
             "llm": {"timed": len(llm_m), "avg_minutes": round(sum(llm_m) / len(llm_m), 1) if llm_m else None, "max_minutes": max(llm_m) if llm_m else None},

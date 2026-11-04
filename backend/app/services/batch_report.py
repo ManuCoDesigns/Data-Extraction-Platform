@@ -236,7 +236,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         cards.append({"title": f"{round(sum(done_days) / len(done_days), 1)} days average", "text": "From the pull to delivery, for the sources already delivered."})
     return {
         "key": key, "label": label, "date": date, "generated_at": now,
-        "totals": {"sources": total, "delivered": delivered, "percent": pct, "records": recs_total, "records_approved": recs_ok,
+        "totals": {"sources": total, "delivered": delivered, "percent": pct, "records": recs_total, "records_approved": recs_ok, "approved": sum(1 for r in rows if r["status"] == "approved"),
                    "blocked": stages["blocked"], "ready_to_send": ready, "on_hold": sum(1 for r in rows if r.get("on_hold")), "in_progress": inflight, "submitted_to_xtrium": sum(1 for r in rows if r["submitted_to_xtrium"])},
         "stages": [{"key": k, "label": l, "count": stages[k]} for k, l in STAGES],
         "by_type": sorted(by_type.values(), key=lambda t: -t["total"]),
@@ -333,27 +333,46 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None, keys: list 
     totals = {
         "sources": tot_sources, "delivered": tot_deliv, "batches": len(pulled), "batches_covered": sum(1 for p in phases if p["status"] == "covered" and p["key"] != "other"),
         "batches_open": sum(1 for p in phases if p["status"] != "covered" and p["key"] != "other"), "sops": len([c for c in sop_total if c != "No SOP saved"]),
-        "records_approved": sum(p["records"] for p in phases), "submitted": sum(r["totals"]["submitted_to_xtrium"] for r in reps),
+        "records_approved": sum(p["records"] for p in phases), "approved": sum(r["totals"].get("approved", 0) for r in reps), "submitted": sum(r["totals"]["submitted_to_xtrium"] for r in reps),
         "blocked": sum(p["blocked"] for p in phases), "peer_done": sum(1 for p in peers if p.status == "submitted"), "peer_total": len(peers),
         "questions_asked": len(qs), "questions_answered": sum(1 for x in qs if x.status == "answered"),
         "fields": cum.get("fields"), "errors": cum.get("errors"), "final_accuracy": cum.get("final_accuracy"), "first_pass_accuracy": cum.get("first_pass_accuracy"),
         "errors_per_100": cum.get("errors_per_100"), "caught_rate": cum.get("caught_rate"),
     }
+    by_key: dict = {}
+    for s in scoped:
+        k_ = (pb_all.get(s.id) or {}).get("key")
+        if k_:
+            by_key.setdefault(k_, []).append(s)
+    views, n_ord = [], 0
+    for r in reps:
+        if r["key"] != "other":
+            n_ord += 1
+        sop_c: dict = {}
+        for x in r["sources"]:
+            c_ = x["sop"] or "No SOP saved"
+            d_ = sop_c.setdefault(c_, {"code": c_, "total": 0, "delivered": 0})
+            d_["total"] += 1
+            d_["delivered"] += 1 if x["stage"] == "delivered" else 0
+        views.append({**{k_: r[k_] for k_ in ("key", "label", "date", "totals", "stages", "by_type", "blocked", "sources", "quality", "highlights", "team", "timing")},
+                      "ordinal": n_ord if r["key"] != "other" else None,
+                      "sops": sorted(sop_c.values(), key=lambda d: (d["code"] == "No SOP saved", d["code"])), "times": rt.build(db, by_key.get(r["key"], []))})
     firsts = [r["timing"]["pulled_at"] for r in pulled if r["timing"]["pulled_at"]]
     nxt = []
     open_sources = tot_sources - tot_deliv
     if latest and latest["totals"]["sources"] != latest["totals"]["delivered"]:
-        nxt.append({"title": "Complete the current batch", "text": f"Finish the {latest['totals']['sources'] - latest['totals']['delivered']} remaining sources in {latest['label']}."})
+        _n = latest['totals']['sources'] - latest['totals']['delivered']
+        nxt.append({"title": "Complete the current batch", "text": f"Finish the {_n} remaining {'source' if _n == 1 else 'sources'} in {latest['label']}."})
     if totals["blocked"]:
-        nxt.append({"title": "Clear what is blocked", "text": f"{totals['blocked']} sources need a decision from the client or the team: a corrected link, an answer, or confirmation to skip."})
+        nxt.append({"title": "Clear what is blocked", "text": f"{totals['blocked']} {'source needs' if totals['blocked'] == 1 else 'sources need'} a decision from the client or the team: a corrected link, an answer, or confirmation to skip."})
     if stage_tot.get("ready_to_send"):
-        nxt.append({"title": "Send approved work to Xtrium", "text": f"{stage_tot['ready_to_send']} approved sources have not been submitted back to Xtrium yet."})
+        nxt.append({"title": "Send approved work to Xtrium", "text": f"{stage_tot['ready_to_send']} approved {'source has' if stage_tot['ready_to_send'] == 1 else 'sources have'} not been submitted back to Xtrium yet."})
     nxt.append({"title": "Keep the peer-review structure", "text": "Continue independent peer review and the sign-off step for every new assignment."})
     nxt.append({"title": "Check links first", "text": "Flag pages we cannot open before extraction starts, so no time is lost on them."})
     nxt.append({"title": "Share work evenly", "text": "New pulls are spread across the team the day they arrive."})
     return {
         "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,
-        "stages": stages_all, "by_category": by_category, "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
+        "batches": views, "stages": stages_all, "by_category": by_category, "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
         "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:4], "open_sources": open_sources, "scope": scope or {"kind": "all", "label": "Whole engagement"},
         "timing": rt.build(db, scoped),
         "delivered_rows": sorted(({"name": x["name"], "project": x["project"], "item_no": x["item_no"], "records": x["approved"], "approved_at": x["approved_at"], "submitted_at": x["submitted_at"], "batch": r["label"]}

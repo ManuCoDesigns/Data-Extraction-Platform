@@ -41,8 +41,11 @@ const Panel = ({ children, style }: { children: React.ReactNode; style?: React.C
 const Big = ({ v, l, c = BLUE }: { v: string; l: string; c?: string }) => <div><div style={{ fontFamily: SERIF, fontSize: 62, fontWeight: 700, color: c, lineHeight: 1, letterSpacing: -1 }}>{v}</div><div style={{ fontSize: 17, color: MUTE, marginTop: 8, lineHeight: 1.35 }}>{l}</div></div>
 
 export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }) {
-  const T = e.totals, L = e.latest, phases: any[] = e.phases
-  const project = e.projects[0] || 'Data extraction'
+  const T = e.totals, phases: any[] = e.phases
+  const project = e.scope && e.scope.kind !== 'all' ? String(e.scope.label).replace(/\s*\(.*\)/, '') : (e.projects[0] || 'Data extraction')
+  const projLine = e.projects.length > 1 ? `${e.projects.length} projects` : (e.projects[0] || 'Data extraction')
+  const month = e.scope && e.scope.kind === 'month' ? String(e.scope.label).split(' ')[0] : ''
+  const bname = (b: any) => (b.ordinal ? (month ? `${month} batch ${b.ordinal}` : String(b.label).replace(/\s*\(.*\)/, '')) : 'Other sources')
   const rangeA = e.period_from ? dt(e.period_from) : '', rangeB = dt(e.generated_at)
   const pct = T.sources ? Math.round((100 * T.delivered) / T.sources) : 0
   const stageColor: Record<string, string> = { delivered: DEEP, signoff: BLUE, peer_review: '#6ea8fb', needs_fixes: AMBER, extracting: '#b9cdf3', not_started: '#d4dbe8', blocked: RED, ready_to_send: '#4f86e8' }
@@ -50,24 +53,125 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
   let n = 0
   const next = () => ++n
   const hasQuality = T.final_accuracy !== null && T.final_accuracy !== undefined
-  const answered = (e.qa?.items ?? []).filter((x: any) => x.status === 'answered')
+  const answered = (e.qa?.items ?? []).filter((x: any) => x.status === 'answered').map((x: any) => ({ ...x, answer: String(x.answer ?? '').replace(/^FROM CLIENT:\s*/i, '') })).sort((a: any, b: any) => (a.answer.length > 300 ? 1 : 0) - (b.answer.length > 300 ? 1 : 0))
   const CH: Record<string, { title: string; text: string }> = {
     link: { title: 'Pages we could not reach', text: 'Dead links, sites that block automated access and pages behind a sign-in are flagged and escalated, never bypassed.' },
     nodata: { title: 'Nothing to extract', text: 'Sources with no extractable data are escalated with a written reason rather than forced into a schema that does not fit.' },
     question: { title: 'Points only the client can settle', text: 'Entity names, classification and corrected links are logged as questions and tracked until answered.' },
   }
   const ch = ['link', 'nodata', 'question'].map(k => ({ k, c: e.challenges.find((x: any) => x.kind === k) }))
-  const rows: any[] = L ? L.sources.slice(0, 9) : []
   const tm = e.timing && !e.timing.empty ? e.timing : null
   const who = (i: number, name?: string | null) => (names && name ? name : `Extractor ${i + 1}`)
   const hrs = (h: number | null | undefined) => (h === null || h === undefined ? '–' : h < 48 ? `${h} h` : `${Math.round((h / 24) * 10) / 10} days`)
   const dd = (v: number | null | undefined) => (v === null || v === undefined ? '–' : `${v}`)
-  const byId: Record<string, any> = Object.fromEntries((tm?.per_source ?? []).map((x: any) => [x.source_id, x]))
   const people = (tm?.people ?? []).filter((x: any) => x.sources > 0).slice(0, 10)
   const slowest = Math.max(1, ...people.map((x: any) => x.extraction?.max ?? 0))
-  const srcRows = [...(tm?.per_source ?? [])].sort((a: any, b: any) => (b.total_days ?? -1) - (a.total_days ?? -1)).slice(0, 12)
   const extIdx: Record<string, number> = Object.fromEntries((tm?.people ?? []).filter((x: any) => x.sources > 0).map((x: any, i: number) => [x.name, i]))
-  const fieldMax = Math.max(1, ...(tm?.corrections?.top_fields ?? []).map((x: any) => x.count))
+
+  /** One batch on its own: summary, timeline, every source, how review went, and what needs a decision. */
+  const batchSlides = (b: any) => {
+    const tt = b.times && !b.times.empty ? b.times : null
+    const qq = b.quality
+    const sts = b.stages.filter((s: any) => s.count > 0)
+    const per: Record<string, any> = Object.fromEntries((tt?.per_source ?? []).map((x: any) => [x.source_id, x]))
+    const nm = bname(b)
+    const together = tt?.approved_together ?? 0
+    const out: React.ReactNode[] = []
+    out.push(
+      <Frame key={`${b.key}-a`} n={next()} project={project} title={`${nm}: ${b.totals.delivered} of ${b.totals.sources} delivered`} lede={[b.key === 'other' ? '' : `Pulled from Xtrium on ${dt(b.date)}.`, ...b.highlights.slice(1, 3)].filter(Boolean).join(' ') || undefined}>
+        <div style={{ display: 'grid', gridTemplateColumns: '330px 1fr', gap: 44, alignItems: 'center' }}>
+          <Panel style={{ display: 'flex', justifyContent: 'center', padding: 26 }}><Ring pct={b.totals.percent} size={270} stroke={30} /></Panel>
+          <div>
+            <div style={{ display: 'flex', gap: 5, height: 46, borderRadius: 10, overflow: 'hidden' }}>
+              {sts.map((s: any) => <div key={s.key} title={`${s.label}: ${s.count}`} style={{ flex: s.count, background: stageColor[s.key], color: ['extracting', 'not_started', 'peer_review'].includes(s.key) ? INK : '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 18 }}>{s.count}</div>)}
+            </div>
+            <div style={{ display: 'flex', gap: 16, marginTop: 8, flexWrap: 'wrap', fontSize: 14, color: MUTE }}>{sts.map((s: any) => <span key={s.key}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 3, background: stageColor[s.key], marginRight: 6 }} />{s.label}</span>)}</div>
+            <div style={{ marginTop: 22 }}>
+              {b.by_type.slice(0, 4).map((x: any) => (
+                <div key={x.type} style={{ marginBottom: 14 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 17 }}><b>{x.type}</b><span style={{ color: MUTE }}>{x.delivered} of {x.total}</span></div>
+                  <div style={{ height: 12, background: LINE, borderRadius: 6, marginTop: 5, overflow: 'hidden' }}><div style={{ width: `${(100 * x.delivered) / x.total}%`, height: 12, background: x.delivered === x.total ? GREEN : BLUE }} /></div>
+                </div>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 40, marginTop: 18 }}>
+              <Big v={nf(b.totals.records_approved)} l="records approved" /><Big v={nf(b.totals.submitted_to_xtrium)} l="sent to Xtrium" c={GREEN} />
+              {b.totals.in_progress > 0 && <Big v={nf(b.totals.in_progress)} l="still moving" c={AMBER} />}
+              <Big v={nf(b.totals.blocked)} l="needs a decision" c={b.totals.blocked ? RED : GREEN} />
+            </div>
+          </div>
+        </div>
+      </Frame>
+    )
+    if (tt && tt.milestones.length > 1) out.push(
+      <Frame key={`${b.key}-b`} n={next()} project={project} title={`${nm}: ${tt.span_days ? `from first pull to final approval in ${tt.span_days} days` : 'how the work moved through the steps'}`} lede={`${tt.caveat}${together ? ` ${together} sources were approved together in one sitting, so their review times are left out.` : ''}`}>
+        <div style={{ position: 'relative', paddingTop: 30 }}>
+          <div style={{ position: 'absolute', left: 0, right: 0, top: 41, height: 4, background: LINE, borderRadius: 2 }} />
+          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tt.milestones.length},1fr)`, gap: 14 }}>
+            {tt.milestones.map((m: any, i: number) => (
+              <div key={m.key} style={{ position: 'relative' }}>
+                <div style={{ width: 24, height: 24, borderRadius: 12, background: i === tt.milestones.length - 1 ? GREEN : BLUE, border: '4px solid #fff', boxShadow: `0 0 0 2px ${LINE}`, marginBottom: 20 }} />
+                <div style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 700 }}>{dshort(m.at)}{m.at_end ? ` to ${dshort(m.at_end)}` : ''}</div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: BLUE, margin: '6px 0' }}>{m.label}</div>
+                <div style={{ fontSize: 15, color: MUTE, lineHeight: 1.5 }}>{m.detail}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        {qq && qq.fields > 0 && <Panel style={{ marginTop: 46, padding: 22, display: 'flex', gap: 80, alignItems: 'center' }}>
+          <Big v={nf(qq.fields)} l="fields checked against the real sources" /><Big v={p1(qq.first_pass_accuracy)} l="right the first time" c={AMBER} /><Big v={p1(qq.final_accuracy)} l="accurate when delivered" c={GREEN} />
+        </Panel>}
+      </Frame>
+    )
+    out.push(
+      <Frame key={`${b.key}-c`} n={next()} project={project} title={`${nm}: where each source stands`} lede={b.sources.length > 12 ? `Showing 12 of ${b.sources.length} sources.` : undefined}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15.5 }}>
+          <thead><tr style={{ textAlign: 'left', color: MUTE, fontSize: 13.5 }}>{['Source', 'Category', 'Stage', 'Extraction', 'Records approved', 'Peer reviews', 'Accuracy'].map(h => <th key={h} style={{ padding: '0 8px 10px', fontWeight: 600, borderBottom: `2px solid ${INK}` }}>{h}</th>)}</tr></thead>
+          <tbody>{b.sources.slice(0, 12).map((s: any, i: number) => (
+            <tr key={s.source_id} style={{ background: i % 2 ? '#f8faff' : '#fff' }}>
+              <td style={{ padding: '8px', fontWeight: 600, maxWidth: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</td>
+              <td style={{ padding: '8px' }}>{s.category}</td>
+              <td style={{ padding: '8px', whiteSpace: 'nowrap' }}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, background: stageColor[s.stage], marginRight: 7 }} />{b.stages.find((x: any) => x.key === s.stage)?.label}</td>
+              <td style={{ padding: '8px' }}>{per[s.source_id]?.extraction_days != null ? `${per[s.source_id].extraction_days} d` : '–'}</td>
+              <td style={{ padding: '8px' }}>{s.approved} of {s.records}</td>
+              <td style={{ padding: '8px' }}>{s.peers_done} of {s.peers_total} submitted{s.peers_flagged > 0 && s.peers_done < s.peers_total ? `, ${s.peers_flagged} raised findings` : ''}</td>
+              <td style={{ padding: '8px' }}>{p1(s.final_accuracy)}</td>
+            </tr>))}</tbody>
+        </table>
+      </Frame>
+    )
+    if (tt) {
+      const v = tt.validation, c = tt.corrections
+      out.push(
+        <Frame key={`${b.key}-d`} n={next()} project={project} title={`${nm}: how review went`} lede="Peer review, admin sign-off and corrections for this batch alone. Times are measured between recorded steps on the platform.">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 18 }}>
+            <Panel style={{ minHeight: 250 }}><div style={{ fontSize: 19, fontWeight: 700 }}>Peer review</div><div style={{ marginTop: 16 }}><Big v={String(v.peer.submitted)} l={`reviews submitted${v.peer.turnaround_days ? `, ${v.peer.turnaround_days.avg} days on average after submission to review` : ''}`} c={DEEP} /></div></Panel>
+            <Panel style={{ minHeight: 250 }}><div style={{ fontSize: 19, fontWeight: 700 }}>Admin sign-off</div><div style={{ marginTop: 16 }}>{v.admin.hours && v.admin.hours.n >= 3 ? <Big v={hrs(v.admin.hours.avg)} l={`average from sending to a decision, over ${v.admin.hours.n} decisions`} c={GREEN} /> : <Big v={String(v.admin.hours?.n ?? 0)} l="decisions recorded. Too few to average." c={GREEN} />}</div></Panel>
+            <Panel style={{ minHeight: 250 }}><div style={{ fontSize: 19, fontWeight: 700 }}>Returned for correction</div><div style={{ marginTop: 16 }}><Big v={String(c.records_returned)} l={`${c.records_returned === 1 ? 'record' : 'records'} across ${c.sources_returned} ${c.sources_returned === 1 ? 'source' : 'sources'}, with ${c.notes} reviewer notes${c.resets ? `, and ${c.resets} reset to start again` : ''}`} c={c.records_returned ? AMBER : GREEN} /></div></Panel>
+          </div>
+          {c.top_fields.length > 0 && <div style={{ marginTop: 26 }}>
+            <div style={{ fontSize: 17, fontWeight: 700, marginBottom: 10 }}>Fields reviewers commented on most</div>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>{c.top_fields.slice(0, 6).map((f: any) => <span key={f.field} style={{ background: '#fff6e0', border: '1px solid #f3d99a', borderRadius: 20, padding: '7px 16px', fontSize: 15 }}>{f.field.replace(/_/g, ' ')} <b>{f.count}</b></span>)}</div>
+          </div>}
+        </Frame>
+      )
+    }
+    if (b.blocked.length > 0) out.push(
+      <Frame key={`${b.key}-e`} n={next()} project={project} title={`${nm}: ${b.totals.blocked} ${b.totals.blocked === 1 ? 'source needs' : 'sources need'} a decision`} lede="These cannot move as things stand. Each group says what we need.">
+        <div style={{ display: 'grid', gridTemplateColumns: `repeat(${Math.min(3, b.blocked.length)},1fr)`, gap: 18 }}>
+          {b.blocked.slice(0, 3).map((g: any) => (
+            <div key={g.title} style={{ background: '#fff6e0', border: '1px solid #f3d99a', borderRadius: 16, padding: '24px 26px', maxHeight: 440, overflow: 'hidden' }}>
+              <div style={{ fontFamily: SERIF, fontSize: 40, fontWeight: 700, color: AMBER, lineHeight: 1 }}>{g.items.length}</div>
+              <div style={{ fontSize: 21, fontWeight: 700, margin: '8px 0 6px' }}>{g.title}</div>
+              <div style={{ fontSize: 15, color: MUTE, marginBottom: 14 }}><b style={{ color: AMBER }}>We need:</b> {g.need}</div>
+              {g.items.slice(0, 8).map((i: any, j: number) => <div key={j} style={{ fontSize: 15.5, lineHeight: 1.7, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}><b style={{ color: AMBER }}>{i.item_no ? `#${i.item_no}` : '•'}</b> {i.name}</div>)}
+            </div>
+          ))}
+        </div>
+      </Frame>
+    )
+    return out
+  }
 
   return (
     <div className="deck-wrap">
@@ -79,11 +183,11 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
           <h1 style={{ margin: 0, fontFamily: SERIF, fontSize: 66, lineHeight: 1.04, fontWeight: 700, letterSpacing: -1.5, color: '#fff' }}>{e.scope && e.scope.kind !== 'all' ? e.scope.label.replace(/\s*\(.*\)/, '') : 'Engagement report'}</h1>
           <p style={{ margin: '22px 0 0', fontSize: 23, lineHeight: 1.5, opacity: .93 }}>{nf(T.sources)} sources across {T.batches} {T.batches === 1 ? 'batch' : 'batches'}, extracted, peer-reviewed and approved on one auditable platform.</p>
         </div>
-        <div style={{ position: 'absolute', left: 80, bottom: 70, fontSize: 16, lineHeight: 1.7, opacity: .92 }}>{project}<br />{rangeA} to {rangeB}</div>
+        <div style={{ position: 'absolute', left: 80, bottom: 70, fontSize: 16, lineHeight: 1.7, opacity: .92 }}>{projLine}<br />{rangeA} to {rangeB}</div>
       </div>
 
       {/* 2. summary */}
-      <Frame n={next()} project={project} title={`${nf(T.delivered)} of ${nf(T.sources)} sources are delivered, with ${nf(T.records_approved)} approved records`} lede={`${T.batches_covered} of ${T.batches} batches are fully delivered${T.batches_open ? `; ${T.batches_open} ${T.batches_open === 1 ? 'is' : 'are'} still moving` : ''}${T.blocked ? `, and ${T.blocked} ${T.blocked === 1 ? 'source needs' : 'sources need'} a decision` : ''}.`}>
+      <Frame n={next()} project={project} title={`${nf(T.delivered)} of ${nf(T.sources)} sources are delivered, with ${nf(T.records_approved)} approved records`} lede={`${T.batches_covered} of ${T.batches} ${T.batches === 1 ? 'batch is' : 'batches are'} fully delivered${T.blocked ? `, and ${T.blocked} ${T.blocked === 1 ? 'source needs' : 'sources need'} a decision` : ''}. Each batch is reported on its own further on.`}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 20 }}>
           <Panel><Big v={nf(T.sources)} l="sources pulled from Xtrium" /></Panel>
           <Panel><Big v={nf(T.records_approved)} l="records approved" /></Panel>
@@ -105,7 +209,7 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
           {[
             ['Pulled and extracted', `${nf(T.sources)} sources`, 'Each Xtrium item becomes a source with its SOP attached, then an extractor works it.'],
             ['Peer review', T.peer_total ? `${T.peer_done} of ${T.peer_total} reviews` : 'Independent', 'Peer reviewers check the extraction separately. Each must comment before sign-off.'],
-            ['Admin sign-off', `${nf(T.delivered)} approved`, 'An admin checks the reviews and approves the records. Approved records are locked.'],
+            ['Admin sign-off', `${nf(T.approved ?? T.delivered)} approved`, 'An admin checks the reviews and approves the records. Approved records are locked.'],
             ['Reported to Xtrium', `${nf(T.submitted)} submitted`, 'Approved sources are sent back and the status is checked afterwards.'],
           ].map(([h, v, s], i) => (
             <div key={h} style={{ position: 'relative', padding: '0 14px 0 0' }}>
@@ -123,22 +227,34 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
         </Panel>
       </Frame>
 
-      {/* 4. batches */}
-      <Frame n={next()} project={project} title={`${T.batches} ${T.batches === 1 ? 'batch' : 'batches'}, from ${phases[0] ? dshort(phases[0].date) : ''} to ${phases.length ? dshort(phases[phases.length - 1].date) : ''}`} lede="Each batch is the set of sources Xtrium gave us on one day.">
-        <div>
-          {phases.slice(-9).map((p, i) => (
-            <div key={p.key} style={{ display: 'grid', gridTemplateColumns: '200px 1fr 200px 100px', alignItems: 'center', gap: 18, padding: '15px 0', borderTop: i ? `1px solid ${LINE}` : 'none' }}>
-              <div><div style={{ fontWeight: 700, fontSize: 19 }}>{p.key === 'other' ? 'Other sources' : p.label.replace(/\s*\(.*\)/, '')}</div><div style={{ fontSize: 13, color: MUTE }}>{p.key === 'other' ? '' : dshort(p.date)}{p.types.length ? ` · ${p.types.slice(0, 2).join(', ')}` : ''}</div></div>
-              <div style={{ position: 'relative', height: 28, background: LINE, borderRadius: 14, overflow: 'hidden' }}>
-                <div style={{ position: 'absolute', inset: 0, width: `${p.percent}%`, background: p.status === 'covered' ? BLUE : AMBER }} />
-                <span style={{ position: 'absolute', left: 12, top: 4, fontSize: 14, fontWeight: 700, color: '#fff', textShadow: '0 1px 2px rgba(0,0,0,.25)' }}>{p.delivered} of {p.sources} delivered</span>
-              </div>
-              <div style={{ fontSize: 16, color: MUTE }}>{nf(p.records)} records{p.accuracy !== null && p.accuracy !== undefined ? ` · ${p1(p.accuracy)}` : ''}</div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: p.status === 'covered' ? GREEN : AMBER, textAlign: 'right' }}>{p.status === 'covered' ? 'Covered' : 'In progress'}</div>
-            </div>
-          ))}
-        </div>
-        {phases.length > 9 && <div style={{ fontSize: 13, color: MUTE, marginTop: 6 }}>Showing the latest 9 of {phases.length} batches.</div>}
+      {/* 4. batch by batch */}
+      <Frame n={next()} project={project} title={`${(e.batches ?? []).length} ${(e.batches ?? []).length === 1 ? 'batch' : 'batches'}, side by side`} lede="Each batch is the set of sources Xtrium gave us on one day. Every figure below is that batch alone, and each batch has its own pages after the overview.">
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 17 }}>
+          <thead><tr style={{ textAlign: 'left', color: MUTE, fontSize: 14 }}>{['Batch', 'Pulled', 'Sources', 'Delivered', 'Records', 'Right first time', 'Accurate when delivered', 'Days to deliver', 'Needs decision'].map(h => <th key={h} style={{ padding: '0 10px 12px', fontWeight: 600, borderBottom: `2px solid ${INK}` }}>{h}</th>)}</tr></thead>
+          <tbody>{(e.batches ?? []).map((b: any, i: number) => (
+            <tr key={b.key} style={{ background: i % 2 ? '#f8faff' : '#fff' }}>
+              <td style={{ padding: '14px 10px', fontWeight: 700 }}>{bname(b)}</td>
+              <td style={{ padding: '14px 10px' }}>{b.key === 'other' ? '–' : dshort(b.date)}</td>
+              <td style={{ padding: '14px 10px' }}>{b.totals.sources}</td>
+              <td style={{ padding: '14px 10px', fontWeight: 700, color: b.totals.delivered === b.totals.sources ? GREEN : AMBER }}>{b.totals.delivered} of {b.totals.sources}</td>
+              <td style={{ padding: '14px 10px' }}>{nf(b.totals.records_approved)}</td>
+              <td style={{ padding: '14px 10px' }}>{p1(b.quality?.first_pass_accuracy)}</td>
+              <td style={{ padding: '14px 10px' }}>{p1(b.quality?.final_accuracy)}</td>
+              <td style={{ padding: '14px 10px' }}>{b.timing?.avg_days_delivered ?? '–'}</td>
+              <td style={{ padding: '14px 10px', color: b.totals.blocked ? RED : MUTE, fontWeight: b.totals.blocked ? 700 : 400 }}>{b.totals.blocked || '–'}</td>
+            </tr>))}
+            {(e.batches ?? []).length > 1 && (
+              <tr style={{ borderTop: `2px solid ${INK}` }}>
+                <td style={{ padding: '14px 10px', fontWeight: 800 }}>Together</td><td />
+                <td style={{ padding: '14px 10px', fontWeight: 800 }}>{T.sources}</td>
+                <td style={{ padding: '14px 10px', fontWeight: 800 }}>{T.delivered} of {T.sources}</td>
+                <td style={{ padding: '14px 10px', fontWeight: 800 }}>{nf(T.records_approved)}</td>
+                <td style={{ padding: '14px 10px', fontWeight: 800 }}>{p1(T.first_pass_accuracy)}</td>
+                <td style={{ padding: '14px 10px', fontWeight: 800 }}>{p1(T.final_accuracy)}</td>
+                <td /><td style={{ padding: '14px 10px', fontWeight: 800 }}>{T.blocked || '–'}</td>
+              </tr>)}
+          </tbody>
+        </table>
       </Frame>
 
       {/* timing: timeline, per extractor, per source, validation, corrections */}
@@ -176,53 +292,6 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
           </table>
         </Frame>
       )}
-      {tm && srcRows.length > 0 && (
-        <Frame n={next()} project={project} title="Time on each source, longest first" lede={`Extraction is the extractor's working time. Review runs from submission to final approval, and includes peer review and admin sign-off. ${srcRows.length < tm.per_source.length ? `Showing ${srcRows.length} of ${tm.per_source.length} sources.` : ''}`}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 16 }}>
-            <thead><tr style={{ textAlign: 'left', color: MUTE, fontSize: 14 }}>{['Source', 'Extractor', 'Extraction', 'Review', 'Total', 'Returned'].map(h => <th key={h} style={{ padding: '0 10px 10px', fontWeight: 600, borderBottom: `2px solid ${INK}` }}>{h}</th>)}</tr></thead>
-            <tbody>{srcRows.map((s: any, i: number) => (
-              <tr key={s.source_id} style={{ background: i % 2 ? '#f8faff' : '#fff' }}>
-                <td style={{ padding: '7px 10px', fontWeight: 600, maxWidth: 380, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{s.name}</td>
-                <td style={{ padding: '7px 10px' }}>{s.extractor ? who(extIdx[s.extractor] ?? 0, s.extractor) : '–'}</td>
-                <td style={{ padding: '7px 10px' }}>{s.extraction_days === null ? '–' : `${s.extraction_days} d`}</td>
-                <td style={{ padding: '7px 10px' }}>{s.review_days === null ? '–' : `${s.review_days} d`}</td>
-                <td style={{ padding: '7px 10px', fontWeight: 700, color: BLUE }}>{s.total_days === null ? '–' : `${s.total_days} d`}</td>
-                <td style={{ padding: '7px 10px' }}>{s.returns ? `${s.returns}×` : '–'}</td>
-              </tr>))}</tbody>
-          </table>
-        </Frame>
-      )}
-      {tm && (
-        <Frame n={next()} project={project} title="Every source is validated three ways before delivery" lede="AI check, independent peer review, and admin sign-off. Times are measured between recorded steps on the platform.">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 18 }}>
-            <Panel style={{ minHeight: 330 }}><div style={{ fontSize: 19, fontWeight: 700 }}>AI check</div><div style={{ margin: '18px 0 10px' }}><Big v={tm.validation.llm.avg_minutes === null ? '–' : `${tm.validation.llm.avg_minutes} min`} l={tm.validation.llm.timed ? `average over ${tm.validation.llm.timed} sources, longest ${tm.validation.llm.max_minutes} min` : 'not timed for these sources'} /></div></Panel>
-            <Panel style={{ minHeight: 330 }}><div style={{ fontSize: 19, fontWeight: 700 }}>Peer review</div><div style={{ margin: '18px 0 10px' }}><Big v={String(tm.validation.peer.submitted)} l={`reviews submitted${tm.validation.peer.turnaround_days ? `, ${tm.validation.peer.turnaround_days.avg} days on average after submission to review` : ''}`} c={DEEP} /></div></Panel>
-            <Panel style={{ minHeight: 330 }}><div style={{ fontSize: 19, fontWeight: 700 }}>Admin sign-off</div><div style={{ margin: '18px 0 10px' }}><Big v={hrs(tm.validation.admin.hours?.avg)} l={tm.validation.admin.hours ? `average from sending to a decision, over ${tm.validation.admin.hours.n} decisions` : 'no decisions recorded'} c={GREEN} /></div></Panel>
-            <Panel style={{ minHeight: 330 }}><div style={{ fontSize: 19, fontWeight: 700 }}>Fixing corrections</div><div style={{ margin: '18px 0 10px' }}><Big v={hrs(tm.validation.corrections.hours?.avg)} l={tm.validation.corrections.hours ? `average from return to resubmission, over ${tm.validation.corrections.hours.n} returns` : 'nothing was returned'} c={AMBER} /></div></Panel>
-          </div>
-        </Frame>
-      )}
-      {tm && (tm.corrections.records_returned > 0 || tm.corrections.top_fields.length > 0) && (
-        <Frame n={next()} project={project} title={`${tm.corrections.records_returned} ${tm.corrections.records_returned === 1 ? 'record' : 'records'} came back for correction`} lede="Sending work back is the review working. These are the fields reviewers commented on most.">
-          <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 50 }}>
-            <div style={{ display: 'grid', gap: 26 }}>
-              <Big v={String(tm.corrections.sources_returned)} l="sources had records returned" c={AMBER} />
-              <Big v={String(tm.corrections.notes)} l="reviewer notes written" c={DEEP} />
-              <Big v={String(tm.corrections.resets)} l="sources reset to start again" c={tm.corrections.resets ? RED : GREEN} />
-            </div>
-            <div>
-              {tm.corrections.top_fields.map((f: any) => (
-                <div key={f.field} style={{ display: 'grid', gridTemplateColumns: '240px 1fr 50px', alignItems: 'center', gap: 16, marginBottom: 16 }}>
-                  <div style={{ fontSize: 18, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{f.field.replace(/_/g, ' ')}</div>
-                  <div style={{ height: 20, background: LINE, borderRadius: 10 }}><div style={{ height: 20, borderRadius: 10, background: AMBER, width: `${(f.count / fieldMax) * 100}%` }} /></div>
-                  <div style={{ fontSize: 18, fontWeight: 700 }}>{f.count}</div>
-                </div>
-              ))}
-              {!tm.corrections.top_fields.length && <p style={{ fontSize: 19, color: MUTE }}>Reviewers returned work without field-level notes.</p>}
-            </div>
-          </div>
-        </Frame>
-      )}
 
       {/* 5. quality */}
       {hasQuality && (
@@ -232,8 +301,8 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
             <Panel style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', padding: 28 }}><Ring pct={T.final_accuracy || 0} size={230} stroke={24} color={GREEN} /><div style={{ fontSize: 17, fontWeight: 700, marginTop: 14 }}>Accurate when delivered</div><div style={{ fontSize: 14, color: MUTE }}>after review and sign-off</div></Panel>
             <div style={{ display: 'grid', gap: 30 }}>
               <Big v={nf(T.fields)} l="fields checked against the real sources" c={DEEP} />
-              <Big v={T.errors_per_100 === null || T.errors_per_100 === undefined ? '–' : String(T.errors_per_100)} l="errors found per 100 fields" c={AMBER} />
-              <Big v={p1(T.caught_rate)} l="of known errors caught by peer reviewers" />
+              <Big v={T.first_pass_accuracy === null || T.first_pass_accuracy === undefined ? '–' : String(Math.round((100 - T.first_pass_accuracy) * 10) / 10)} l="errors found per 100 fields" c={AMBER} />
+              {T.caught_rate !== null && T.caught_rate !== undefined && <Big v={p1(T.caught_rate)} l="of known errors caught by peer reviewers" />}
             </div>
           </div>
         </Frame>
@@ -317,45 +386,6 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
         </div>
       </Frame>
 
-      {/* 10. current batch */}
-      {L && (
-        <Frame n={next()} project={project} title={`${L.label.replace(/\s*\(.*\)/, '')}: ${L.totals.delivered} of ${L.totals.sources} delivered`} lede={L.highlights.slice(1, 3).join(' ') || undefined}>
-          <div style={{ display: 'grid', gridTemplateColumns: '350px 1fr', gap: 50, alignItems: 'center' }}>
-            <Panel style={{ display: 'flex', justifyContent: 'center', padding: 26 }}><Ring pct={L.totals.percent} size={280} stroke={30} /></Panel>
-            <div>
-              {L.by_type.slice(0, 5).map((t: any) => (
-                <div key={t.type} style={{ marginBottom: 24 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 19 }}><b>{t.type}</b><span style={{ color: MUTE }}>{t.delivered} of {t.total}</span></div>
-                  <div style={{ height: 18, background: LINE, borderRadius: 9, marginTop: 8, overflow: 'hidden' }}><div style={{ width: `${(100 * t.delivered) / t.total}%`, height: 18, background: t.delivered === t.total ? GREEN : BLUE }} /></div>
-                </div>
-              ))}
-              <div style={{ display: 'flex', gap: 44, marginTop: 30 }}>
-                <Big v={nf(L.totals.records_approved)} l="records approved" /><Big v={nf(L.totals.in_progress)} l="still moving" c={AMBER} /><Big v={nf(L.totals.blocked)} l="blocked" c={L.totals.blocked ? RED : GREEN} />
-              </div>
-            </div>
-          </div>
-        </Frame>
-      )}
-
-      {/* 11. live snapshot */}
-      {L && (
-        <Frame n={next()} project={project} title="Where each source in the latest batch stands">
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 17 }}>
-            <thead><tr style={{ textAlign: 'left', color: MUTE, fontSize: 15 }}>{['Source', 'Stage', 'Extraction time', 'Records approved', 'Peer reviews', 'Accuracy'].map(h => <th key={h} style={{ padding: '0 12px 12px', fontWeight: 600, borderBottom: `2px solid ${INK}` }}>{h}</th>)}</tr></thead>
-            <tbody>{rows.map((s: any, i: number) => (
-              <tr key={s.source_id} style={{ background: i % 2 ? '#f8faff' : '#fff' }}>
-                <td style={{ padding: '11px 12px', fontWeight: 600 }}>{s.name}</td>
-                <td style={{ padding: '11px 12px' }}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 5, background: stageColor[s.stage], marginRight: 8 }} />{L.stages.find((x: any) => x.key === s.stage)?.label}</td>
-                <td style={{ padding: '11px 12px' }}>{byId[s.source_id]?.extraction_days != null ? `${byId[s.source_id].extraction_days} days` : s.stage === 'not_started' ? 'Not started' : '–'}</td>
-                <td style={{ padding: '11px 12px' }}>{s.approved} of {s.records}</td>
-                <td style={{ padding: '11px 12px' }}>{s.peers_done} of {s.peers_total}{s.peers_flagged > 0 && s.peers_done < s.peers_total ? `, ${s.peers_flagged} flagged` : ''}</td>
-                <td style={{ padding: '11px 12px' }}>{p1(s.final_accuracy)}</td>
-              </tr>))}</tbody>
-          </table>
-          {L.sources.length > rows.length && <div style={{ fontSize: 13, color: MUTE, marginTop: 8 }}>and {L.sources.length - rows.length} more sources in this batch.</div>}
-        </Frame>
-      )}
-
       {/* 12. open issues (left out when nothing is waiting) */}
       {e.blocked.length > 0 && <Frame n={next()} project={project} title={`${T.blocked} ${T.blocked === 1 ? 'source needs' : 'sources need'} a decision`} lede="These cannot move as things stand. Each group says what we need.">
         {e.blocked.length > 0 && (
@@ -372,6 +402,8 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
           </div>
         )}
       </Frame>}
+
+      {(e.batches ?? []).flatMap((b: any) => batchSlides(b))}
 
       {/* 13. next */}
       <Frame n={next()} project={project} title="What comes next">
