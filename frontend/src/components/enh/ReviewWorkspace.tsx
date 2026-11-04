@@ -735,6 +735,7 @@ function FieldRow({ suggestion, onConfirmSuggestion, rec, f, peers, sopRules, we
   const [truth, setTruth] = useState('')
   const [category, setCategory] = useState('wrong_value')
   const [credit, setCredit] = useState<string[]>([])
+  const [fixCredit, setFixCredit] = useState<string[]>([])
   const [busy, setBusy] = useState(false)
   const [originalOk, setOriginalOk] = useState(false)
   const [cmt, setCmt] = useState(false)
@@ -767,7 +768,7 @@ function FieldRow({ suggestion, onConfirmSuggestion, rec, f, peers, sopRules, we
     const withSame = same && f.same_count > 0
     onLocal(rec.record_id, f.name, v, t); setWrong(false); setTruth('')
     try {
-      const r = await qualityApi.mark({ record_id: rec.record_id, field: f.name, verdict: v, truth_value: t, category, credit: v === 'incorrect' ? credit : [], same_value: withSame, original_ok: v === 'correct' && originalOk })
+      const r = await qualityApi.mark({ record_id: rec.record_id, field: f.name, verdict: v, truth_value: t, category, credit: v === 'incorrect' ? credit : fixCredit, same_value: withSame, original_ok: v === 'correct' && originalOk })
       if (r.fixed_credit) toast.success('Counted as a catch. The reviewer was right and the extractor fixed it.')
       if (withSame) { toast.success(`Also marked ${r.also_marked} other record${r.also_marked === 1 ? '' : 's'} with the same value`); onReload() }
     } catch (e) { toast.error(err(e, "Couldn't save that. Showing the saved state again.")); onReload() }
@@ -851,6 +852,16 @@ function FieldRow({ suggestion, onConfirmSuggestion, rec, f, peers, sopRules, we
             {sopRules.length > 0 && <SelectBox label="SOP rule" value={crule} onChange={setCrule}><option value="">None</option>{sopRules.map(r => <option key={r} value={r}>{r} (required)</option>)}</SelectBox>}
             <span className="ml-auto flex gap-1.5"><Button variant="secondary" onClick={() => setCmt(false)}>Cancel</Button><Button disabled={busy || !ctext.trim()} onClick={saveComment}>Save comment</Button></span>
           </div>
+        </div>
+      )}
+      {pointers.length > 0 && verdict !== 'incorrect' && (
+        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center gap-3 flex-wrap" onClick={e => e.stopPropagation()}>
+          <span className="text-xs text-gray-500">Reviewer was right and the extractor fixed it. Credit the catch to:</span>
+          {pointers.map(([id, name]) => (
+            <label key={id} className="text-sm text-gray-700 inline-flex items-center gap-1.5"><input type="checkbox" checked={fixCredit.includes(id)} onChange={e => setFixCredit(c => (e.target.checked ? [...c, id] : c.filter(x => x !== id)))} />{name}</label>
+          ))}
+          {verdict === 'correct' && <Button variant="secondary" disabled={busy || fixCredit.length === 0} onClick={() => mark('correct')}>Save credit</Button>}
+          {verdict !== 'correct' && <span className="text-xs text-gray-400">Applied when you press Correct.</span>}
         </div>
       )}
       {wrong && (

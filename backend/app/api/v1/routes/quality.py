@@ -1059,19 +1059,27 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
     ulookup = _email_ids(db, {e.get("user") for e in ((rec.reviewer_field_comments or {}).get(body.field) or []) if isinstance(e, dict) and e.get("role") != "admin"})
     commenters = {u.id: u for u in ulookup.values() if u.id in _owner_ids(s) and u.id != s.assigned_extractor_id}
     credit = set(commenters) | {c for c in body.credit if c in _owner_ids(s)}
+    explicit = {c for c in body.credit if c in _owner_ids(s) and c != s.assigned_extractor_id} if not wrong else set()   # the admin says: this reviewer was right and the extractor fixed it
     touched = 0
     existing = db.query(QualityFinding).filter(QualityFinding.record_id == rec.id, QualityFinding.field == body.field, QualityFinding.origin == "reviewer").all()
     fixed_credit = 0
     for f in existing:
         if f.status == "open":
             # The reviewer flagged an earlier value and the extractor has changed it since. The flag was a real catch.
-            fixed = (not wrong) and not body.original_ok and f.extracted_value is not None and not _same(f.extracted_value, value)
+            fixed = (not wrong) and not body.original_ok and (f.raised_by in explicit or (f.extracted_value is not None and not _same(f.extracted_value, value)))
             f.status = "confirmed" if (wrong or fixed) else "dismissed"
             f.fixed_before_final = bool(fixed)
             f.truth_value, f.resolved_by, f.resolved_at = truth, user.id, now
             f.resolve_note = "The reviewer was right. The extractor fixed it before the final review." if fixed else "Settled in the review workspace."
             touched += 1
             fixed_credit += 1 if fixed else 0
+        elif (not wrong) and f.raised_by in explicit and not f.fixed_before_final and not body.original_ok:
+            # Marked Correct earlier with no credit (the flag was counted as a false alarm). The admin now credits it.
+            f.status, f.fixed_before_final, f.category = "confirmed", True, "wrong_value"
+            f.truth_value, f.resolved_by, f.resolved_at = truth, user.id, now
+            f.resolve_note = "The reviewer was right. The extractor fixed it before the final review."
+            touched += 1
+            fixed_credit += 1
     if wrong:
         have = {f.raised_by for f in existing}
         for uid in credit:
@@ -1082,12 +1090,12 @@ def review_mark(body: MarkBody, db: Session = Depends(get_db), user: User = Depe
                 touched += 1
     else:
         have = {f.raised_by for f in existing}
-        for uid in commenters:
+        for uid in set(commenters) | explicit:
             if uid not in have:
                 earlier = _earlier_value(rec, s, uid, body.field)
-                fixed = (not body.original_ok) and earlier is not _MISSING and not _same(earlier, value)
+                fixed = (not body.original_ok) and (uid in explicit or (earlier is not _MISSING and not _same(earlier, value)))
                 db.add(QualityFinding(source_id=s.id, record_id=rec.id, field=body.field, category="wrong_value" if fixed else "other", severity="major" if fixed else "minor", origin="reviewer", raised_by=uid,
-                                      note="A peer reviewer commented on this field.", extracted_value=earlier if fixed else value, status="confirmed" if fixed else "dismissed",
+                                      note="A peer reviewer commented on this field.", extracted_value=(earlier if earlier is not _MISSING else None) if fixed else value, status="confirmed" if fixed else "dismissed",
                                       auto_verdict="supported" if fixed else "needs_human", auto_note="Picked up from the reviewer's comment.", fixed_before_final=bool(fixed),
                                       truth_value=truth if fixed else None, resolved_by=user.id, resolved_at=now,
                                       resolve_note="The reviewer was right. The extractor fixed it before the final review." if fixed else "The source supports the value."))
