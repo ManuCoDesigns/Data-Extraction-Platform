@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 
 /** The full engagement report, as 16:9 slides. One slide per Xtrium batch is not needed: batches are the rows and bars inside.
  *  Every number is read from the platform when the report opens. Names appear only on the timing slides, and only when `names` is on. */
@@ -103,26 +103,48 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
         </div>
       </Frame>
     )
-    if (tt && tt.milestones.length > 1) out.push(
-      <Frame key={`${b.key}-b`} n={next()} project={project} title={`${nm}: ${tt.span_days ? `from first pull to final approval in ${tt.span_days} days` : 'how the work moved through the steps'}`} lede={`${tt.caveat}${together ? ` ${together} sources were approved together in one sitting, so their review times are left out.` : ''}`}>
-        <div style={{ position: 'relative', paddingTop: 30 }}>
-          <div style={{ position: 'absolute', left: 0, right: 0, top: 41, height: 4, background: LINE, borderRadius: 2 }} />
-          <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tt.milestones.length},1fr)`, gap: 14 }}>
-            {tt.milestones.map((m: any, i: number) => (
-              <div key={m.key} style={{ position: 'relative' }}>
-                <div style={{ width: 24, height: 24, borderRadius: 12, background: i === tt.milestones.length - 1 ? GREEN : BLUE, border: '4px solid #fff', boxShadow: `0 0 0 2px ${LINE}`, marginBottom: 20 }} />
-                <div style={{ fontFamily: SERIF, fontSize: 24, fontWeight: 700 }}>{dshort(m.at)}{m.at_end ? ` to ${dshort(m.at_end)}` : ''}</div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: BLUE, margin: '6px 0' }}>{m.label}</div>
-                <div style={{ fontSize: 15, color: MUTE, lineHeight: 1.5 }}>{m.detail}</div>
-              </div>
-            ))}
+    if (tt && tt.milestones.length > 1) {
+      const dts = tt.dates || {}
+      const dr = (x?: string[] | null) => (!x ? '' : dshort(x[0]) === dshort(x[1]) ? dshort(x[0]) : `${dshort(x[0])} to ${dshort(x[1])}`)
+      const dlv = dts.deliver_days ?? tt.span_days
+      const story = [
+        dts.pulled ? `${b.totals.sources} ${b.totals.sources === 1 ? 'source was' : 'sources were'} pulled on ${dr(dts.pulled)}.` : '',
+        dts.started ? `Extraction ran from ${dr(dts.started)}.` : '',
+        dts.submitted ? `The work was submitted for review on ${dr(dts.submitted)}.` : '',
+        dts.xtrium ? `It was sent back to Xtrium on ${dr(dts.xtrium)}.` : dts.approved ? `Approval finished on ${dshort(dts.approved[1])}.` : '',
+      ].filter(Boolean).join(' ')
+      const stat = (v: any, l: string, c = BLUE) => ({ v: v === null || v === undefined ? null : String(v), l, c })
+      const stats = [
+        stat(dts.work_days, 'days from the pull to the last source sent for review'),
+        stat(dlv, dts.xtrium ? 'days from the pull to the last source sent to Xtrium' : 'days from the pull to the last approval', DEEP),
+        stat(tt.extraction?.avg, 'days of extraction per source, on average', DEEP),
+        stat(qq && qq.first_pass_accuracy != null ? Math.round((100 - qq.first_pass_accuracy) * 10) / 10 : null, 'errors per 100 fields, before review', AMBER),
+        stat(qq?.first_pass_accuracy != null ? p1(qq.first_pass_accuracy) : null, 'right the first time', AMBER),
+        stat(qq?.final_accuracy != null ? p1(qq.final_accuracy) : null, 'accurate when delivered', GREEN),
+        stat(tt.corrections.records_returned, `${tt.corrections.records_returned === 1 ? 'record' : 'records'} returned for correction`, tt.corrections.records_returned ? AMBER : GREEN),
+        stat(tt.validation.peer.submitted, 'peer reviews submitted', DEEP),
+      ].filter(x => x.v !== null)
+      out.push(
+        <Frame key={`${b.key}-b`} n={next()} project={project} title={`${nm}: ${dlv != null ? `${dlv} days from pull to delivery` : 'how the work moved'}`} lede={`${story}${together ? ` ${together} sources were approved together in one sitting, so their review times are left out.` : ''}`}>
+          <div style={{ position: 'relative', paddingTop: 12 }}>
+            <div style={{ position: 'absolute', left: 0, right: 0, top: 23, height: 4, background: LINE, borderRadius: 2 }} />
+            <div style={{ display: 'grid', gridTemplateColumns: `repeat(${tt.milestones.length},1fr)`, gap: 12 }}>
+              {tt.milestones.map((m: any, i: number) => (
+                <div key={m.key}>
+                  <div style={{ width: 22, height: 22, borderRadius: 11, background: i === tt.milestones.length - 1 ? GREEN : BLUE, border: '4px solid #fff', boxShadow: `0 0 0 2px ${LINE}`, marginBottom: 12 }} />
+                  <div style={{ fontFamily: SERIF, fontSize: 21, fontWeight: 700 }}>{dshort(m.at)}{m.at_end ? ` to ${dshort(m.at_end)}` : ''}</div>
+                  <div style={{ fontSize: 16, fontWeight: 700, color: BLUE, margin: '3px 0' }}>{m.label}</div>
+                  <div style={{ fontSize: 13.5, color: MUTE, lineHeight: 1.4 }}>{m.detail}</div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-        {qq && qq.fields > 0 && <Panel style={{ marginTop: 46, padding: 22, display: 'flex', gap: 80, alignItems: 'center' }}>
-          <Big v={nf(qq.fields)} l="fields checked against the real sources" /><Big v={p1(qq.first_pass_accuracy)} l="right the first time" c={AMBER} /><Big v={p1(qq.final_accuracy)} l="accurate when delivered" c={GREEN} />
-        </Panel>}
-      </Frame>
-    )
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginTop: 26 }}>
+            {stats.slice(0, 8).map((s, i) => <Panel key={i} style={{ padding: '14px 18px' }}><div style={{ fontFamily: SERIF, fontSize: 40, fontWeight: 700, color: s.c, lineHeight: 1 }}>{s.v}</div><div style={{ fontSize: 14, color: MUTE, marginTop: 6, lineHeight: 1.3 }}>{s.l}</div></Panel>)}
+          </div>
+        </Frame>
+      )
+    }
     out.push(
       <Frame key={`${b.key}-c`} n={next()} project={project} title={`${nm}: where each source stands`} lede={b.sources.length > 12 ? `Showing 12 of ${b.sources.length} sources.` : undefined}>
         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 15.5 }}>
@@ -275,6 +297,43 @@ export function EngagementDeck({ e, names = false }: { e: any; names?: boolean }
           </div>
         </Frame>
       )}
+      {/* 4b. the batches on one time line */}
+      {(e.batches ?? []).filter((b: any) => b.key !== 'other' && b.times?.dates?.pulled).length > 0 && (() => {
+        const bs = (e.batches ?? []).filter((b: any) => b.key !== 'other' && b.times?.dates?.pulled)
+        const ts = (x?: string | null) => (x ? +new Date(x) : NaN)
+        const ends = (b: any) => ts(b.times.dates.xtrium?.[1] ?? b.times.dates.approved?.[1] ?? b.times.dates.submitted?.[1] ?? b.times.dates.pulled[1])
+        const lo = Math.min(...bs.map((b: any) => ts(b.times.dates.pulled[0]))), hi = Math.max(...bs.map(ends))
+        const pos = (v: number) => (hi > lo ? ((v - lo) / (hi - lo)) * 100 : 0)
+        const dayn = (a: number, z: number) => Math.round(((z - a) / 86400000) * 10) / 10
+        const all = dayn(lo, hi)
+        return (
+          <Frame n={next()} project={project} title={`${bs.length} ${bs.length === 1 ? 'batch' : 'batches'} over ${all} days, from the first pull to the last source sent back`} lede="Each bar runs from the day a batch was pulled to the day its last source went back to Xtrium. The dark mark is when its first source went to review.">
+            <div style={{ display: 'grid', gridTemplateColumns: '230px 1fr 170px', gap: 18, alignItems: 'center' }}>
+              {bs.map((b: any) => {
+                const d = b.times.dates, s0 = ts(d.pulled[0]), e0 = ends(b), f0 = ts(d.submitted?.[0])
+                return (
+                  <Fragment key={b.key}>
+                    <div><div style={{ fontWeight: 700, fontSize: 19 }}>{bname(b)}</div><div style={{ fontSize: 14, color: MUTE }}>{b.totals.sources} sources, pulled {dshort(d.pulled[0])}</div></div>
+                    <div style={{ position: 'relative', height: 34, background: PALE, borderRadius: 17 }}>
+                      <div style={{ position: 'absolute', left: `${pos(s0)}%`, width: `${Math.max(2, pos(e0) - pos(s0))}%`, top: 6, height: 22, borderRadius: 11, background: b.totals.delivered === b.totals.sources ? BLUE : AMBER }} />
+                      {!isNaN(f0) && <div title="First source sent for review" style={{ position: 'absolute', left: `${pos(f0)}%`, top: 3, width: 6, height: 28, borderRadius: 3, background: INK }} />}
+                    </div>
+                    <div style={{ fontSize: 16 }}><b>{d.deliver_days ?? dayn(s0, e0)} days</b><div style={{ fontSize: 13, color: MUTE }}>{dshort(d.pulled[0])} to {dshort(new Date(e0).toISOString())}</div></div>
+                  </Fragment>
+                )
+              })}
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginLeft: 248, marginRight: 188, marginTop: 8, fontSize: 13, color: MUTE }}><span>{dshort(new Date(lo).toISOString())}</span><span>{dshort(new Date(hi).toISOString())}</span></div>
+            <Panel style={{ marginTop: 34, padding: 22, display: 'flex', gap: 70, alignItems: 'center' }}>
+              <Big v={String(all)} l="days from the first pull to the last source sent back" />
+              <Big v={nf(T.sources)} l="sources across all batches" c={DEEP} />
+              {T.first_pass_accuracy != null && <Big v={String(Math.round((100 - T.first_pass_accuracy) * 10) / 10)} l="errors per 100 fields, before review" c={AMBER} />}
+              {T.final_accuracy != null && <Big v={p1(T.final_accuracy)} l="accurate when delivered" c={GREEN} />}
+            </Panel>
+          </Frame>
+        )
+      })()}
+
       {tm && people.length > 0 && (
         <Frame n={next()} project={project} title={tm.extraction ? `Extraction took ${tm.extraction.avg} days on average per source` : 'Time per extractor'} lede={`Days from starting a source to sending it for review, as elapsed time. ${names ? '' : 'Names are left out of this version.'}`}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 18 }}>

@@ -193,12 +193,18 @@ def build(db: Session, sources: list) -> dict:
     twice = sum(1 for _, c_ in sent if c_ > 1)
     add("xtrium", "Reported to Xtrium", min(t_ for t_, _ in sent) if sent else None,
         f"{len(sent)} {'source' if len(sent) == 1 else 'sources'} sent back" + (f", {twice} of them a second time with corrected values." if twice else "."), max(t_ for t_, _ in sent) if sent else None)
+    rng = lambda xs: [_iso(min(xs)), _iso(max(xs))] if xs else None
+    sent_t = [t_ for t_, _ in sent]
+    end_ = max(sent_t) if sent_t else (max(apps) if apps else None)
+    dates = {"pulled": rng(pulls), "started": rng(starts), "submitted": rng(subs), "approved": rng(apps), "xtrium": rng(sent_t),
+             "work_days": _days(min(pulls), max(subs)) if pulls and subs else None,            # pull to the last source sent for review
+             "deliver_days": _days(min(pulls), end_) if pulls and end_ and (done or sent_t) else None}    # pull to the last source sent back or approved
     ms.sort(key=lambda m: m["at"])
     span = _days(min(pulls), max(apps)) if pulls and apps and done else None
 
     top_fields = sorted(({"field": k, "count": v} for k, v in fields.items()), key=lambda x: -x["count"])[:8]
     return {
-        "empty": False, "milestones": ms, "span_days": span, "approved_together": together,
+        "empty": False, "milestones": ms, "span_days": span, "approved_together": together, "dates": dates,
         "extraction": _spread([r["extraction_days"] for r in per_source]), "per_source": per_source, "people": plist,
         "validation": {
             "llm": {"timed": len(llm_m), "avg_minutes": round(sum(llm_m) / len(llm_m), 1) if llm_m else None, "max_minutes": max(llm_m) if llm_m else None},
