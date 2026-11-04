@@ -99,6 +99,17 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
                        .group_by(ExtractionJob.source_id).all()):
         counts[sid] = [int(n or 0), int(ok or 0)]
 
+    # A source escalated to Xtrium is not delivered, whatever its status here or whether it was reported: Xtrium has to decide.
+    # Its records, accuracy and clock stay out of the delivered figures.
+    esc = {sid for (sid,) in db.query(ExtractionJob.source_id).join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
+           .filter(ExtractionJob.source_id.in_(ids), ExtractedRecord.is_escalation_only == True).distinct().all()}  # noqa: E712
+    for (sid,) in (db.query(ExtractionJob.source_id).join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
+                   .filter(ExtractionJob.source_id.in_(ids), ExtractedRecord.is_escalation_only == False, ExtractedRecord.review_status == ReviewStatus.ESCALATED).distinct().all()):  # noqa: E712
+        if counts.get(sid, [0, 0])[1] == 0:
+            esc.add(sid)
+    for sid in esc:
+        counts[sid] = [0, 0]
+
     # why a source is blocked
     blocked: dict = {}   # source_id -> {kind, reason}
     checks = {c.source_id: c for c in db.query(SourceLinkCheck).filter(SourceLinkCheck.source_id.in_(ids)).all()}
@@ -111,10 +122,10 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
                         .filter(ExtractionJob.source_id.in_(ids), ExtractedRecord.is_escalation_only == True).all()):  # noqa: E712
         src = next(x for x in mine if x.id == sid)
         # an escalation counts as open until Xtrium has accepted it back, even when it was approved here
-        if src.status != SourceStatus.APPROVED:
-            blocked[sid] = {"kind": "nodata", "reason": (reason or "No extractable data").strip(), "detail": None}
-        elif not src.xtrium_submitted_at:
-            blocked[sid] = {"kind": "nodata", "reason": (reason or "No extractable data").strip(), "detail": "Escalated here, but Xtrium has not accepted it back yet"}
+        blocked[sid] = {"kind": "nodata", "reason": (reason or "No extractable data").strip(),
+                        "detail": "Escalated to Xtrium: waiting for their decision" if src.status == SourceStatus.APPROVED else None}
+    for sid in esc:
+        blocked.setdefault(sid, {"kind": "nodata", "reason": "Escalated by the extractor", "detail": "Escalated to Xtrium: waiting for their decision"})
     asks = {}
     for cq in db.query(ClientQuestion).filter(ClientQuestion.source_id.in_(ids), ClientQuestion.status == "open").all():
         asks.setdefault(cq.source_id, []).append(cq.question)
@@ -161,7 +172,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
             "records": n, "approved": ok, "peers_done": sum(1 for p in s.peer_reviews if p.status == "submitted"), "peers_total": len(s.peer_reviews),
             "peers_flagged": len(flagged.get(s.id, set()) & {p.user_id for p in s.peer_reviews}), "pulled_at": s.created_at.isoformat() if s.created_at else None,
             "days": _net_days(_days(s.created_at, end), held_s.get(s.id)), "on_hold": s.id in held_now and s.status != SourceStatus.APPROVED,
-            "submitted_to_xtrium": bool(s.xtrium_submitted_at),
+            "submitted_to_xtrium": bool(s.xtrium_submitted_at) and s.id not in esc, "escalated": s.id in esc,
             "submissions": int(getattr(s, "xtrium_submit_count", 0) or 0) or (1 if s.xtrium_submitted_at else 0),
             "approved_at": s.approved_at.isoformat() if s.approved_at else None, "submitted_at": s.xtrium_submitted_at.isoformat() if s.xtrium_submitted_at else None,
             "fields": qr.get("fields"), "errors": qr.get("errors"), "errors_per_100": qr.get("errors_per_100"),
@@ -201,6 +212,13 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
     quality = None
     if pull and pull.get("fields"):
         quality = {k: pull.get(k) for k in ("fields", "errors", "errors_per_100", "first_pass_accuracy", "final_accuracy", "caught_rate", "rework_rate", "audited")}
+        if esc:     # work Xtrium has not accepted does not count towards accuracy
+            rs_ = [qrow[s.id] for s in mine if s.id not in esc and s.id in qrow]
+            if rs_:
+                t_ = q._finish({**{k: sum((r.get(k) or 0) for r in rs_) for k in q._ZERO}, "sources": len(rs_)})
+                quality = {k: t_.get(k) for k in quality}
+            else:
+                quality = None
 
     pct = round(100 * delivered / total) if total else 0
     lines = [f"{delivered} of {total} sources are delivered ({pct}%), with {recs_ok} approved records."]
@@ -212,6 +230,8 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         lines.append(f"{inflight} {'source is' if inflight == 1 else 'sources are'} still moving through extraction and review.")
     if stages["blocked"]:
         lines.append(f"{stages['blocked']} {'source is' if stages['blocked'] == 1 else 'sources are'} blocked and need a decision.")
+    if esc:
+        lines.append(f"{len(esc)} {'source was' if len(esc) == 1 else 'sources were'} escalated to Xtrium, so {'it is' if len(esc) == 1 else 'they are'} not counted as delivered.")
     if done_days:
         lines.append(f"Delivered sources took {round(sum(done_days) / len(done_days), 1)} days on average from the pull.")
     if quality and quality["final_accuracy"] is not None:
@@ -237,7 +257,7 @@ def assemble(db: Session, user: User, srcs: list, key: str, sc: dict | None) -> 
         cards.append({"title": f"{round(sum(done_days) / len(done_days), 1)} days average", "text": "From the pull to delivery, for the sources already delivered."})
     return {
         "key": key, "label": label, "date": date, "generated_at": now,
-        "totals": {"sources": total, "delivered": delivered, "percent": pct, "records": recs_total, "records_approved": recs_ok, "approved": sum(1 for r in rows if r["status"] == "approved"),
+        "totals": {"sources": total, "delivered": delivered, "percent": pct, "records": recs_total, "records_approved": recs_ok, "approved": sum(1 for r in rows if r["status"] == "approved" and r["stage"] != "blocked"), "escalated": len(esc),
                    "blocked": stages["blocked"], "ready_to_send": ready, "on_hold": sum(1 for r in rows if r.get("on_hold")), "in_progress": inflight, "submitted_to_xtrium": sum(1 for r in rows if r["submitted_to_xtrium"]), "resubmitted": sum(1 for r in rows if r["submissions"] > 1)},
         "stages": [{"key": k, "label": l, "count": stages[k]} for k, l in STAGES],
         "by_type": sorted(by_type.values(), key=lambda t: -t["total"]),
@@ -335,7 +355,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None, keys: list 
         "sources": tot_sources, "delivered": tot_deliv, "batches": len(pulled), "batches_covered": sum(1 for p in phases if p["status"] == "covered" and p["key"] != "other"),
         "batches_open": sum(1 for p in phases if p["status"] != "covered" and p["key"] != "other"), "sops": len([c for c in sop_total if c != "No SOP saved"]),
         "records_approved": sum(p["records"] for p in phases), "approved": sum(r["totals"].get("approved", 0) for r in reps), "submitted": sum(r["totals"]["submitted_to_xtrium"] for r in reps), "resubmitted": sum(r["totals"].get("resubmitted", 0) for r in reps),
-        "blocked": sum(p["blocked"] for p in phases), "peer_done": sum(1 for p in peers if p.status == "submitted"), "peer_total": len(peers),
+        "blocked": sum(p["blocked"] for p in phases), "escalated": sum(r["totals"].get("escalated", 0) for r in reps), "peer_done": sum(1 for p in peers if p.status == "submitted"), "peer_total": len(peers),
         "questions_asked": len(qs), "questions_answered": sum(1 for x in qs if x.status == "answered"),
         "fields": cum.get("fields"), "errors": cum.get("errors"), "final_accuracy": cum.get("final_accuracy"), "first_pass_accuracy": cum.get("first_pass_accuracy"),
         "errors_per_100": cum.get("errors_per_100"), "caught_rate": cum.get("caught_rate"),
@@ -346,6 +366,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None, keys: list 
         if k_:
             by_key.setdefault(k_, []).append(s)
     views, n_ord = [], 0
+    esc_ids = {x["source_id"] for r in reps for x in r["sources"] if x.get("escalated")}
     for r in reps:
         if r["key"] != "other":
             n_ord += 1
@@ -357,17 +378,19 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None, keys: list 
             d_["delivered"] += 1 if x["stage"] == "delivered" else 0
         views.append({**{k_: r[k_] for k_ in ("key", "label", "date", "totals", "stages", "by_type", "blocked", "sources", "quality", "highlights", "team", "timing")},
                       "ordinal": n_ord if r["key"] != "other" else None,
-                      "sops": sorted(sop_c.values(), key=lambda d: (d["code"] == "No SOP saved", d["code"])), "times": rt.build(db, by_key.get(r["key"], []))})
+                      "sops": sorted(sop_c.values(), key=lambda d: (d["code"] == "No SOP saved", d["code"])), "times": rt.build(db, by_key.get(r["key"], []), esc_ids)})
     firsts = [r["timing"]["pulled_at"] for r in pulled if r["timing"]["pulled_at"]]
     nxt = []
     open_sources = tot_sources - tot_deliv
-    if latest and latest["totals"]["sources"] != latest["totals"]["delivered"]:
-        _n = latest['totals']['sources'] - latest['totals']['delivered']
+    if latest and latest["totals"]["sources"] - latest["totals"]["delivered"] - latest["totals"].get("escalated", 0) > 0:
+        _n = latest['totals']['sources'] - latest['totals']['delivered'] - latest['totals'].get('escalated', 0)
         _lv = next((v for v in reversed(views) if v["key"] == latest["key"]), None)
         _lab = f"{str((scope or {}).get('label', '')).split()[0]} batch {_lv['ordinal']}" if (scope or {}).get("kind") == "month" and _lv and _lv["ordinal"] else latest["label"]
         nxt.append({"title": "Complete the current batch", "text": f"Finish the {_n} remaining {'source' if _n == 1 else 'sources'} in {_lab}."})
-    if totals["blocked"]:
-        nxt.append({"title": "Clear what is blocked", "text": f"{totals['blocked']} {'source needs' if totals['blocked'] == 1 else 'sources need'} a decision from the client or the team: a corrected link, an answer, or confirmation to skip."})
+    if esc_ids:
+        nxt.append({"title": "Xtrium to decide on escalations", "text": f"{len(esc_ids)} {'source was' if len(esc_ids) == 1 else 'sources were'} escalated and {'is' if len(esc_ids) == 1 else 'are'} not counted as delivered. We need Xtrium to reassign, correct or remove {'it' if len(esc_ids) == 1 else 'them'}."})
+    if totals["blocked"] - len(esc_ids) > 0:
+        nxt.append({"title": "Clear what is blocked", "text": f"{totals['blocked'] - len(esc_ids)} {'source needs' if totals['blocked'] - len(esc_ids) == 1 else 'sources need'} a decision from the client or the team: a corrected link, an answer, or confirmation to skip."})
     if stage_tot.get("ready_to_send"):
         nxt.append({"title": "Send approved work to Xtrium", "text": f"{stage_tot['ready_to_send']} approved {'source has' if stage_tot['ready_to_send'] == 1 else 'sources have'} not been submitted back to Xtrium yet."})
     nxt.append({"title": "Keep the peer-review structure", "text": "Continue independent peer review and the sign-off step for every new assignment."})
@@ -377,7 +400,7 @@ def engagement(db: Session, user: User, srcs: list, sc: dict | None, keys: list 
         "generated_at": enh.now_utc(), "projects": sorted({p for r in reps for p in r["projects"]}), "period_from": min(firsts) if firsts else None,
         "batches": views, "stages": stages_all, "by_category": by_category, "observations": obs.counts(all_obs), "qa": qa, "totals": totals, "phases": phases, "by_sop": by_sop, "challenges": sorted(kinds.values(), key=lambda k: -k["count"]),
         "blocked": sorted(merged.values(), key=lambda g: -len(g["items"])), "latest": latest, "next": nxt[:4], "open_sources": open_sources, "scope": scope or {"kind": "all", "label": "Whole engagement"},
-        "timing": rt.build(db, scoped),
+        "timing": rt.build(db, scoped, esc_ids),
         "delivered_rows": sorted(({"name": x["name"], "project": x["project"], "item_no": x["item_no"], "records": x["approved"], "approved_at": x["approved_at"], "submitted_at": x["submitted_at"], "batch": r["label"]}
                                   for r in reps for x in r["sources"] if x["stage"] == "delivered"), key=lambda x: x["approved_at"] or "", reverse=True),
     }

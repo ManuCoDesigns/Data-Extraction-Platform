@@ -41,11 +41,13 @@ def _iso(dt):
     return _aw(dt).isoformat() if dt else None
 
 
-def build(db: Session, sources: list) -> dict:
+def build(db: Session, sources: list, not_delivered=None) -> dict:
     if not sources:
         return {"empty": True}
     ids = [s.id for s in sources]
     by_id = {s.id: s for s in sources}
+    nd = set(not_delivered or ())      # escalated sources: pulled and worked on, but never approved or delivered
+    dsrc = [s for s in sources if s.id not in nd]
     uids = {s.assigned_extractor_id for s in sources if s.assigned_extractor_id} | {p.user_id for s in sources for p in s.peer_reviews}
     names = {u.id: u.full_name for u in db.query(User).filter(User.id.in_(uids)).all()} if uids else {}
     held = holds.held_seconds(db, sources)
@@ -117,9 +119,9 @@ def build(db: Session, sources: list) -> dict:
         resets += resets_s
         per_source.append({
             "source_id": s.id, "project_id": s.project_id, "name": s.name, "item_no": s.external_ref_id, "extractor": names.get(s.assigned_extractor_id),
-            "records": len(rs), "extraction_days": ext, "review_days": _days(s.extraction_completed_at, approved_at) if s.status == SourceStatus.APPROVED else None,
-            "total_days": _days(s.created_at, approved_at) if s.status == SourceStatus.APPROVED else None,
-            "started_at": _iso(s.extraction_started_at), "submitted_at": _iso(s.extraction_completed_at), "approved_at": _iso(approved_at) if s.status == SourceStatus.APPROVED else None,
+            "records": len(rs), "extraction_days": ext, "review_days": _days(s.extraction_completed_at, approved_at) if s.status == SourceStatus.APPROVED and s.id not in nd else None,
+            "total_days": _days(s.created_at, approved_at) if s.status == SourceStatus.APPROVED and s.id not in nd else None,
+            "started_at": _iso(s.extraction_started_at), "submitted_at": _iso(s.extraction_completed_at), "approved_at": _iso(approved_at) if s.status == SourceStatus.APPROVED and s.id not in nd else None,
             "returns": max(returns, 1 if n_ret else 0), "resets": resets_s, "held_days": round(held.get(s.id, 0) / 86400, 1) or None,
             "peers_done": sum(1 for p in s.peer_reviews if p.status == "submitted"), "peers_total": len(s.peer_reviews), "status": s.status.value,
             "approved_together": False,
@@ -172,7 +174,7 @@ def build(db: Session, sources: list) -> dict:
     starts = [_aw(s.extraction_started_at) for s in sources if s.extraction_started_at]
     subs = [_aw(s.extraction_completed_at) for s in sources if s.extraction_completed_at]
     pulls = [_aw(s.created_at) for s in sources if s.created_at]
-    apps = [_aw(s.approved_at) for s in sources if s.approved_at and s.status == SourceStatus.APPROVED]
+    apps = [_aw(s.approved_at) for s in dsrc if s.approved_at and s.status == SourceStatus.APPROVED]
     first_adm = min([_aw(r.admin_reviewed_at) for rs in rec_by_src.values() for r in rs if r.admin_reviewed_at] or [None])
     peer_times = [_aw(p.submitted_at) for s in sources for p in s.peer_reviews if p.status == "submitted" and p.submitted_at]
     ret_times = [ts for evs in ev.values() for ts, a in evs if a == AuditAction.RECORD_RETURNED_FOR_CORRECTION]
@@ -187,9 +189,9 @@ def build(db: Session, sources: list) -> dict:
     add("first_sub", "First submission", min(subs) if subs else None, "The first source goes to review.")
     add("admin", "Admin review", first_adm, (f"First approvals. {returned_records or len(ret_times)} {'record' if (returned_records or len(ret_times)) == 1 else 'records'} returned for correction." if ret_times else "First approvals."), max(ret_times) if ret_times else None)
     add("peer", "Peer review", min(peer_times) if peer_times else None, f"{len(peer_times)} peer {'review' if len(peer_times) == 1 else 'reviews'} submitted.", max(peer_times) if peer_times else None)
-    done = len(apps) == len(sources)
-    add("approved", "Approved" if done else "Approved so far", max(apps) if apps else None, f"All {len(sources)} sources approved on the platform." if done else f"{len(apps)} of {len(sources)} sources approved.")
-    sent = [(_aw(s.xtrium_submitted_at), int(getattr(s, "xtrium_submit_count", 0) or 0)) for s in sources if s.xtrium_submitted_at]
+    done = len(apps) == len(sources) and not nd
+    add("approved", "Approved" if done else "Approved so far", max(apps) if apps else None, f"All {len(sources)} sources approved on the platform." if done else f"{len(apps)} of {len(sources)} sources approved" + (f"; {len(nd)} escalated to Xtrium for a decision." if nd else "."))
+    sent = [(_aw(s.xtrium_submitted_at), int(getattr(s, "xtrium_submit_count", 0) or 0)) for s in dsrc if s.xtrium_submitted_at]
     twice = sum(1 for _, c_ in sent if c_ > 1)
     add("xtrium", "Reported to Xtrium", min(t_ for t_, _ in sent) if sent else None,
         f"{len(sent)} {'source' if len(sent) == 1 else 'sources'} sent back" + (f", {twice} of them a second time with corrected values." if twice else "."), max(t_ for t_, _ in sent) if sent else None)
