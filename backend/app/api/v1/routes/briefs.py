@@ -311,17 +311,18 @@ def flag_sources(body: FlagIn, db: Session = Depends(get_db), user: User = Depen
 
 
 class SlackIn(BaseModel):
-    project_id: str
+    project_id: str | None = None
 
 
 @router.post("/escalations/import-slack")
 def import_slack(body: SlackIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    """Load the escalations raised with Xtrium in the project chat, with their real Slack times. Repeating it adds nothing twice."""
+    """Load the escalations raised with Xtrium in the project chat, with their real Slack times, each in the project of the source it concerns. It clears the ones loaded before and loads them again, so it is safe to repeat."""
     _need_lead(user)
-    if body.project_id not in _project_ids_for(db, user):
-        raise HTTPException(status_code=403, detail="You are not on this project.")
     from app.services import slack_escalations as se
-    return se.load(db, body.project_id, user.id)
+    r = se.load(db, _project_ids_for(db, user), user.id, body.project_id)
+    if r.get("error"):
+        raise HTTPException(status_code=404, detail=r["error"])
+    return r
 
 
 @router.post("/escalations", status_code=201)

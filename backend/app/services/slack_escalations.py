@@ -36,24 +36,30 @@ ENTRIES = [
 ]
 
 
-def load(db, project_id: str, user_id: str) -> dict:
+def load(db, project_ids: set, user_id: str, default_project_id: str | None = None) -> dict:
+    """Clear any Slack escalations loaded before, then load them again. Each one goes into the project of the source it concerns; the rest go to the default project."""
+    from collections import Counter
     from app.models.all_models import ClientQuestion, Source
 
-    by_item = {s.external_ref_id: s.id for s in db.query(Source).filter(Source.project_id == project_id, Source.external_ref_id.isnot(None)).all()}
-    made = skipped = 0
-    have = {(q.asked_at, q.question) for q in db.query(ClientQuestion).filter(ClientQuestion.project_id == project_id, ClientQuestion.kind != "question").all() if q.asked_at}
+    texts = {e[6] for e in ENTRIES}
+    gone = db.query(ClientQuestion).filter(ClientQuestion.project_id.in_(project_ids), ClientQuestion.kind != "question", ClientQuestion.question.in_(texts)).delete(synchronize_session=False)
+    srcs = db.query(Source).filter(Source.project_id.in_(project_ids), Source.external_ref_id.isnot(None)).order_by(Source.created_at).all()
+    by_item = {s.external_ref_id: s for s in srcs}
+    default = default_project_id if default_project_id in project_ids else (Counter(s.project_id for s in srcs).most_common(1)[0][0] if srcs else None)
+    if not default:
+        db.rollback()
+        return {"removed": 0, "added": 0, "linked": 0, "error": "No project to load into."}
+    added = linked = 0
     for raised, reply, answered, item, blocks, topic, text in ENTRIES:
-        at = _t(raised)
-        if any(a == at and txt == text for a, txt in have):
-            skipped += 1
-            continue
-        q = ClientQuestion(project_id=project_id, source_id=by_item.get(str(item)) if item else None, question=text, asked_by=user_id,
-                           kind="blocker" if blocks else "escalation", blocks_clock=blocks, topic=topic, asked_at=at, sent_to_client_at=at, first_reply_at=_t(reply))
+        src = by_item.get(str(item)) if item else None
+        q = ClientQuestion(project_id=src.project_id if src else default, source_id=src.id if src else None, question=text, asked_by=user_id,
+                           kind="blocker" if blocks else "escalation", blocks_clock=blocks, topic=topic, asked_at=_t(raised), sent_to_client_at=_t(raised), first_reply_at=_t(reply))
         if answered:
             q.status, q.answered_at, q.answered_by, q.answer = "answered", _t(answered), user_id, "Answered in the project chat."
         else:
             q.status = "open"
         db.add(q)
-        made += 1
+        added += 1
+        linked += 1 if src else 0
     db.commit()
-    return {"added": made, "already_there": skipped, "linked_items": [str(i) for _, _, _, i, *_ in ENTRIES if i and str(i) not in by_item]}
+    return {"removed": gone, "added": added, "linked": linked, "unlinked_items": sorted({str(e[3]) for e in ENTRIES if e[3] and str(e[3]) not in by_item})}

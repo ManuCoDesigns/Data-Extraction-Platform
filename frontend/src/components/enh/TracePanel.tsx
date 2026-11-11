@@ -100,7 +100,7 @@ export function TracePanel({ scope, value, projectId, onClose }: { scope: string
             <div className="flex gap-2"><Button disabled={busy || !esc.question.trim() || (!esc.id && !canLog)} onClick={saveEsc}>Save</Button><Button variant="secondary" onClick={() => setEsc(null)}>Cancel</Button></div>
           </div>
         ) : <div className="flex flex-wrap items-center gap-2"><Button variant="secondary" disabled={!canLog} onClick={() => setEsc({ ...blank })}>Log an escalation</Button>
-          <Button variant="secondary" disabled={!canLog || busy} onClick={() => run(async () => { const r = await briefsApi.importSlack(projectId!); toast.success(`${r.added} added, ${r.already_there} already there`) }, 'Slack escalations loaded')}>Load the Slack escalations</Button>{!canLog && <span className="ml-2 text-xs text-gray-600">Pick one project to log new items.</span>}</div>}
+          <Button variant="secondary" disabled={busy} onClick={() => run(async () => { const r = await briefsApi.importSlack(projectId); toast.success(`${r.added} loaded (${r.linked} tied to their sources), ${r.removed} earlier ones replaced`) }, 'Slack escalations loaded')}>Load the Slack escalations</Button>{!canLog && <span className="ml-2 text-xs text-gray-600">Pick one project to log new items.</span>}</div>}
       </section>
 
       <section className="grid gap-2">
