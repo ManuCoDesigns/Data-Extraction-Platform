@@ -225,7 +225,10 @@ def batches_for(db: Session, r: dict, sources: dict, anon: bool = False) -> list
             if x["stage"] == "blocked" or x.get("escalated"):
                 sm["approved"] = sm["review_days"] = sm["total_days"] = None      # escalated: not delivered, so it has no approval and no delivery clock
             sm["escalated"] = bool(sm["escalated"] or x.get("escalated"))
-            items.append({"source_id": x["source_id"], "name": x["name"], "item_no": x.get("item_no"), "stage": x["stage"], "status": _STAGE_LABEL.get(x["stage"], x["stage"]),
+            status = _STAGE_LABEL.get(x["stage"], x["stage"])
+            if x["stage"] == "ready_to_send" and sm.get("sent_to_xtrium"):
+                status = "Approved; a send to Xtrium is in the activity log but it was not marked delivered"
+            items.append({"source_id": x["source_id"], "name": x["name"], "item_no": x.get("item_no"), "stage": x["stage"], "status": status,
                           "extractor": x.get("extractor") if not anon else None, "events": t["events"], "summary": sm})
         items.sort(key=lambda i: (i["summary"]["pulled"] or "", i["item_no"] or ""))
         avg = lambda k: (round(sum(i["summary"][k] for i in items if i["summary"][k] is not None) / n, 1) if (n := sum(1 for i in items if i["summary"][k] is not None)) else None)  # noqa: E731

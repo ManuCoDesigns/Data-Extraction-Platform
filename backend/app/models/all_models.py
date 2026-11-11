@@ -363,6 +363,7 @@ class Source(Base):
     # this is set ONLY on a successful submit, so we can reliably tell
     # whether a source has been submitted before, to warn on resubmission.
     xtrium_submitted_at = Column(DateTime(timezone=True), nullable=True)
+    trace_flag = Column(String(12), nullable=True)   # 'test' (used while linking the tool) or 'covered' (delivered earlier by Google Drive): left out of the batch clock and active days
     # how many times the source has been submitted to Xtrium (a resubmission after a correction counts again)
     xtrium_submit_count = Column(Integer, default=0, nullable=False, server_default="0")
     # Xtrium's SOP for this item, saved so extractors can read it even when Xtrium is unreachable

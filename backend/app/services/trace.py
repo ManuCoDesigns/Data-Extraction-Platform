@@ -109,7 +109,10 @@ def escalation_rows(db: Session, project_ids: set, project_id: str | None = None
             continue
         end = aw(q.answered_at) if q.status == "answered" and q.answered_at else t
         s = q.source
-        out.append({
+        ans_at = aw(q.answered_at)
+        # an answer stamped within two minutes of the question, with no chat time given, was filled in later in one go: the wait was never recorded
+        untimed = q.asked_at is None and q.status == "answered" and ans_at is not None and abs((ans_at - start).total_seconds()) < 120
+        out.append({"timing_recorded": not untimed,
             "id": q.id, "project_id": q.project_id, "source_id": q.source_id, "source": s.name if s else None,
             "item_no": s.external_ref_id if s else None, "kind": q.kind or "question", "topic": q.topic,
             "question": q.question, "answer": q.answer, "status": "answered" if q.status == "answered" else "open",
@@ -120,12 +123,12 @@ def escalation_rows(db: Session, project_ids: set, project_id: str | None = None
     return sorted(out, key=lambda r: r["raised_at"])
 
 
-def escalation_summary(rows: list) -> dict:
-    ans = [r for r in rows if r["status"] == "answered"]
+def escalation_summary(rows: list, questions_logged: int = 0, untimed: int = 0) -> dict:
+    ans = [r for r in rows if r["status"] == "answered" and r.get("timing_recorded", True)]
     opn = [r for r in rows if r["status"] == "open"]
     hrs = sorted((aw(r["answered_at"]) - r["raised_at"]).total_seconds() / 3600 for r in ans if r["answered_at"])
     return {
-        "total": len(rows), "answered": len(ans), "open": len(opn),
+        "total": len(rows), "answered": len([r for r in rows if r["status"] == "answered"]), "open": len(opn), "questions_logged": questions_logged, "untimed": untimed,
         "within_2h": sum(1 for h in hrs if h < 2), "within_2d": sum(1 for h in hrs if h < 48), "longer_than_2d": sum(1 for h in hrs if h >= 48),
         "median_days": round(statistics.median(hrs) / 24, 1) if hrs else None,
         "longest_days": round(max(hrs) / 24, 1) if hrs else None,
@@ -150,6 +153,9 @@ def wait_rows(db: Session, project_ids: set, project_id: str | None = None) -> l
 
 
 # ─── Batch clock ─────────────────────────────────────────────────────────────
+
+_FLAG_WHY = {"test": "Test source, used while linking the tool to Xtrium", "covered": "Delivered earlier through Google Drive, before the tool"}
+
 
 def _escalated_only(db: Session, ids: list) -> set:
     if not ids:
@@ -191,7 +197,10 @@ def batch_clock(db: Session, sources: list, rows: list, batches: dict) -> list:
             due = add_wd(start, WINDOW_WD + math.ceil(paused))
             row = {"source_id": s.id, "name": s.name, "item_no": s.external_ref_id, "paused_working_days": round(paused, 1),
                    "due": due.isoformat(), "submitted_at": sub}
-            if not sub and s.id in esc_only:
+            flag = getattr(s, "trace_flag", None)
+            if flag:
+                row.update(state="set_aside", reason=_FLAG_WHY.get(flag, "Not counted"), flagged=flag)
+            elif not sub and s.id in esc_only:
                 row.update(state="set_aside", reason="Escalated: nothing to extract at the source")
             elif not sub and open_block:
                 row.update(state="set_aside", reason=f"Waiting on Xtrium: {open_block['question'][:140]}")
@@ -210,6 +219,8 @@ def batch_clock(db: Session, sources: list, rows: list, batches: dict) -> list:
         late_n = sum(1 for r in counted if r["state"] in ("late", "overdue"))
         if counted and len(submitted) == len(counted):
             status = "Delivered on time" if late_n == 0 else f"Delivered, {late_n} source{'s' if late_n != 1 else ''} late"
+        elif not counted and any(r.get("flagged") for r in srcs):
+            status = "Not counted: test or earlier-covered sources"
         elif not counted:
             status = "Nothing to deliver yet"
         elif any(r["state"] == "overdue" for r in counted):
@@ -283,6 +294,8 @@ def active_days(db: Session, sources: list, batches: dict) -> dict:
         m[kind] += logged_minutes(times)
     rows = []
     for s in sources:
+        if getattr(s, "trace_flag", None):
+            continue
         e, r = ext[s.id], rev[s.id]
         allp = e | r
         if not allp:
@@ -312,15 +325,18 @@ def active_days(db: Session, sources: list, batches: dict) -> dict:
     return {"sources": sorted(rows, key=lambda r: (r["batch"] or "", r["first"])), "by_size": by_size,
             "all": {"sources": len(done), "avg_active_days": round(sum(r["active_days"] for r in done) / len(done), 1) if done else None,
                     "avg_idle_working_days": round(sum(r["idle_working_days"] for r in done) / len(done), 1) if done else None},
-            "caveat": "Active days are days with logged work on the source. Idle days are working days between the first and last work day when nothing was logged, which is waiting. Logged hours add up work sessions (logged actions less than 30 minutes apart, plus 5 minutes per session) per person; work done outside the platform, such as reading sites or running scripts, is not logged, so logged hours are a minimum and not a timesheet."}
+            "caveat": "Active days are days with logged work on the source. Idle days are working days between the first and last work day when nothing was logged, which is waiting. Logged hours add up work sessions (logged actions less than 30 minutes apart, plus 5 minutes per session) per person. Extraction itself happens on the source websites, outside the platform, so logged hours mostly show uploading and review and are far below the real effort. They are not a timesheet."}
 
 
 # ─── Everything together ─────────────────────────────────────────────────────
 
 def build(db: Session, sources: list, batches: dict, project_ids: set, project_id: str | None = None) -> dict:
-    rows = escalation_rows(db, project_ids, project_id)
+    allrows = escalation_rows(db, project_ids, project_id)
+    rows = [r for r in allrows if r["kind"] in ("escalation", "blocker")]
+    others = [r for r in allrows if r["kind"] not in ("escalation", "blocker")]
     waits = wait_rows(db, project_ids, project_id)
-    return {"as_of": _iso(now()), "escalations": {"summary": escalation_summary(rows), "items": rows},
+    return {"as_of": _iso(now()), "escalations": {"summary": escalation_summary(rows, len(others), sum(1 for r in others if not r["timing_recorded"])), "items": rows},
+            "questions": others,
             "clock": batch_clock(db, sources, rows, batches), "active": active_days(db, sources, batches),
             "waits": {"items": waits, "working_days": round(sum(w["working_days"] for w in waits), 1), "open": sum(1 for w in waits if w["open"])}}
 
@@ -351,6 +367,10 @@ def workbook(t: dict, label: str) -> bytes:
           [[f"#{r['item_no']}" if r["item_no"] else "", r["source"] or "", r["kind"], r["question"], _iso(r["raised_at"]), _iso(r["first_reply_at"]) or "",
             _iso(r["answered_at"]) or "No answer yet", r["status"], r["waited_days"], r["waited_working_days"], "yes" if r["blocks_clock"] else ""] for r in t["escalations"]["items"]],
           [9, 26, 12, 60, 17, 17, 17, 10, 11, 12, 14])
+    ws = wb.create_sheet("Questions in the tool")
+    sheet(ws, ["Item", "Source", "What was asked", "Raised", "Answered", "Status", "Wait recorded"],
+          [[f"#{r['item_no']}" if r["item_no"] else "", r["source"] or "", r["question"], _iso(r["raised_at"]), _iso(r["answered_at"]) or "No answer yet", r["status"],
+            "yes" if r["timing_recorded"] else "no: answered later in one go"] for r in t.get("questions", [])], [9, 26, 70, 17, 17, 10, 26])
     ws = wb.create_sheet("Batch clock")
     data = []
     for b in t["clock"]:

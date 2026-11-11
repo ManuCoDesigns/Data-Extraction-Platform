@@ -67,6 +67,7 @@ export function TracePanel({ scope, value, projectId, onClose }: { scope: string
 
       <section className="grid gap-2">
         <b>What we asked Xtrium</b>
+        {S.questions_logged > 0 && <p className="m-0 text-xs text-gray-600">{S.questions_logged} other question{S.questions_logged === 1 ? '' : 's'} from the Questions page {S.questions_logged === 1 ? 'is' : 'are'} kept apart in the Excel file{S.untimed ? `; ${S.untimed} of them were answered later in one go, so their waits were never recorded` : ''}.</p>}
         <p className="m-0">{S.total} logged. {S.answered} answered ({S.within_2h} within 2 hours, {S.within_2d} within 2 days, {S.longer_than_2d} took longer). {S.open} open{S.longest_open_days ? `, the longest waiting ${days(S.longest_open_days)}` : ''}. {S.median_days !== null ? `Median wait ${days(S.median_days)}.` : ''}</p>
         <div className="grid gap-2">
           {t.escalations.items.map((r: any) => (
@@ -98,7 +99,8 @@ export function TracePanel({ scope, value, projectId, onClose }: { scope: string
             <p className="m-0 text-xs text-gray-600">Times are Nairobi time, as shown in Slack. Leave Answered empty while Xtrium has not answered.</p>
             <div className="flex gap-2"><Button disabled={busy || !esc.question.trim() || (!esc.id && !canLog)} onClick={saveEsc}>Save</Button><Button variant="secondary" onClick={() => setEsc(null)}>Cancel</Button></div>
           </div>
-        ) : <div><Button variant="secondary" disabled={!canLog} onClick={() => setEsc({ ...blank })}>Log an escalation</Button>{!canLog && <span className="ml-2 text-xs text-gray-600">Pick one project to log new items.</span>}</div>}
+        ) : <div className="flex flex-wrap items-center gap-2"><Button variant="secondary" disabled={!canLog} onClick={() => setEsc({ ...blank })}>Log an escalation</Button>
+          <Button variant="secondary" disabled={!canLog || busy} onClick={() => run(async () => { const r = await briefsApi.importSlack(projectId!); toast.success(`${r.added} added, ${r.already_there} already there`) }, 'Slack escalations loaded')}>Load the Slack escalations</Button>{!canLog && <span className="ml-2 text-xs text-gray-600">Pick one project to log new items.</span>}</div>}
       </section>
 
       <section className="grid gap-2">
@@ -107,6 +109,13 @@ export function TracePanel({ scope, value, projectId, onClose }: { scope: string
         {t.clock.map((b: any) => (
           <div key={b.key} className="bg-white rounded-lg border border-emerald-100 p-3 grid gap-1.5">
             <p className="m-0"><b>{b.label}: {b.status}.</b> Pulled {b.pulled}, due {fmtDay(b.due)}{b.latest_due !== b.due ? ` (up to ${fmtDay(b.latest_due)} for sources that were paused)` : ''}. {b.submitted} of {b.counted} counted sources submitted{b.set_aside ? `, ${b.set_aside} set aside` : ''}{b.late ? `, ${b.late} late` : ''}.</p>
+            {canLog && b.key && (
+              <p className="m-0 text-xs text-gray-600 flex items-center gap-2">Count this batch as:
+                <select className={inp} disabled={busy} defaultValue="" onChange={e => { const v = e.target.value; if (v === '') return; run(() => briefsApi.flagBatch({ project_id: projectId, batch_key: b.key, flag: v === 'normal' ? '' : v }), 'Saved'); e.target.value = '' }}>
+                  <option value="">Change...</option><option value="normal">A normal batch</option><option value="test">Test sources (linking the tool)</option><option value="covered">Covered earlier through Google Drive</option>
+                </select>
+              </p>
+            )}
             {b.items.map((s: any) => (
               <p key={s.source_id} className="m-0 flex flex-wrap gap-x-2 items-baseline">
                 <span className={`text-xs px-1.5 py-0.5 rounded ${STATE[s.state]?.cls}`}>{STATE[s.state]?.label}</span>

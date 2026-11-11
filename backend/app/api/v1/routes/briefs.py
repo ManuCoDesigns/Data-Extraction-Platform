@@ -286,6 +286,44 @@ def _kind(k: str | None) -> str:
     return k
 
 
+class FlagIn(BaseModel):
+    project_id: str | None = None
+    batch_key: str | None = None
+    source_ids: list[str] | None = None
+    flag: str = ""
+
+
+@router.post("/trace/flag")
+def flag_sources(body: FlagIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Mark a whole pulled batch (or chosen sources) as test sources or as covered earlier, so the delivery clock and active days leave them out. An empty flag clears it."""
+    _need_lead(user)
+    if body.flag not in ("", "test", "covered"):
+        raise HTTPException(status_code=422, detail="Flag must be test, covered, or empty to clear.")
+    srcs = _visible_sources(db, user, body.project_id).all()
+    batches = qsvc.pull_batches(srcs)
+    pick = [s for s in srcs if (body.batch_key and (batches.get(s.id) or {}).get("key") == body.batch_key and body.batch_key != "other") or (body.source_ids and s.id in body.source_ids)]
+    if not pick:
+        raise HTTPException(status_code=404, detail="No matching sources.")
+    for s in pick:
+        s.trace_flag = body.flag or None
+    db.commit()
+    return {"updated": len(pick)}
+
+
+class SlackIn(BaseModel):
+    project_id: str
+
+
+@router.post("/escalations/import-slack")
+def import_slack(body: SlackIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Load the escalations raised with Xtrium in the project chat, with their real Slack times. Repeating it adds nothing twice."""
+    _need_lead(user)
+    if body.project_id not in _project_ids_for(db, user):
+        raise HTTPException(status_code=403, detail="You are not on this project.")
+    from app.services import slack_escalations as se
+    return se.load(db, body.project_id, user.id)
+
+
 @router.post("/escalations", status_code=201)
 def add_escalation(body: EscIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     """Log an escalation or question with its real times (from the chat), so the days waited are right."""
