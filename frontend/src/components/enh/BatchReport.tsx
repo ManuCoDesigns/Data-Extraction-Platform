@@ -175,6 +175,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
           {mode === 'deck' && <Button variant="secondary" onClick={findMissing}>Find missing source</Button>}
           {mode === 'deck' && <Button variant="secondary" onClick={openTimelines}>Source timelines</Button>}
           {mode === 'deck' && <Button variant="secondary" onClick={() => setTrace(v => !v)}>Delivery trace</Button>}
+          {mode === 'deck' && <Link to="/delivery-insights"><Button variant="primary">Delivery insights</Button></Link>}
           {mode === 'deck' && <span className="inline-flex items-center gap-1.5 text-sm text-gray-600">Sent to Xtrium
             <select className="border rounded-md px-1.5 py-1 text-sm" value={subN} onChange={e => setSubN(Number(e.target.value))}><option value={1}>once</option><option value={2}>twice</option><option value={3}>3 times</option></select>
             <Button variant="secondary" disabled={!eng || eng.error} onClick={recordSubs}>Record</Button></span>}
