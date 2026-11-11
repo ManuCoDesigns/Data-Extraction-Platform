@@ -124,7 +124,7 @@ export function TracePanel({ scope, value, projectId, onClose }: { scope: string
       <section className="grid gap-2">
         <b>Days work really happened (waiting left out)</b>
         {t.active.by_size.length === 0 ? <p className="m-0">No delivered sources with logged work in this period yet.</p> : t.active.by_size.map((z: any) => (
-          <p key={z.size} className="m-0"><b>{z.size} ({z.records} records):</b> {z.sources} source{z.sources === 1 ? '' : 's'}, average {z.avg_active_days} active days (median {z.median_active_days}, most {z.max_active_days}). Between first and last work there were on average {z.avg_span_working_days} working days, of which {z.avg_idle_working_days} had no work logged.</p>
+          <p key={z.size} className="m-0"><b>{z.size} ({z.records} records):</b> {z.sources} source{z.sources === 1 ? '' : 's'}, average {z.avg_active_days} active days (median {z.median_active_days}, most {z.max_active_days}) and about {z.avg_logged_hours} logged hours. Between first and last work there were on average {z.avg_span_working_days} working days, of which {z.avg_idle_working_days} had no work logged.</p>
         ))}
         {t.active.all.sources > 0 && <p className="m-0">All delivered sources: {t.active.all.sources}, average {t.active.all.avg_active_days} active days.</p>}
         <p className="m-0 text-xs text-gray-600">{t.active.caveat} Per-source detail is in the Excel file.</p>

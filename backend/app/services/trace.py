@@ -225,30 +225,62 @@ def batch_clock(db: Session, sources: list, rows: list, batches: dict) -> list:
 
 # ─── Active days ─────────────────────────────────────────────────────────────
 
+SESSION_GAP_MIN = 30
+SESSION_LEAD_MIN = 5
+
+
+def logged_minutes(times: list) -> float:
+    """Minutes of logged work: actions less than SESSION_GAP_MIN apart form one session; each session counts its length plus a short lead-in."""
+    ts = sorted(t for t in times if t)
+    if not ts:
+        return 0.0
+    total, start, prev = 0.0, ts[0], ts[0]
+    for t in ts[1:]:
+        if (t - prev).total_seconds() > SESSION_GAP_MIN * 60:
+            total += (prev - start).total_seconds() / 60 + SESSION_LEAD_MIN
+            start = t
+        prev = t
+    return total + (prev - start).total_seconds() / 60 + SESSION_LEAD_MIN
+
+
 def active_days(db: Session, sources: list, batches: dict) -> dict:
     """Days a source really had work done on it (Nairobi days), from the audit log and the record, review and peer timestamps."""
     ids = [s.id for s in sources]
     ext: dict = {i: set() for i in ids}
     rev: dict = {i: set() for i in ids}
+    ev: dict = {}
+
+    def note(sid, kind, who, t):
+        if t:
+            ev.setdefault((sid, kind, who), []).append(aw(t))
     if ids:
-        for sid, ts, act in db.query(AuditLog.source_id, AuditLog.timestamp, AuditLog.action).filter(AuditLog.source_id.in_(ids)).all():
+        for sid, ts, act, uid in db.query(AuditLog.source_id, AuditLog.timestamp, AuditLog.action, AuditLog.user_id).filter(AuditLog.source_id.in_(ids)).all():
             d = day_of(ts)
             if d and act in EXTRACT_ACTIONS:
                 ext[sid].add(d)
+                note(sid, "x", uid, ts)
             elif d and act in REVIEW_ACTIONS:
                 rev[sid].add(d)
+                note(sid, "r", uid, ts)
         q = db.query(ExtractionJob.source_id, ExtractedRecord.created_at, ExtractedRecord.review_started_at, ExtractedRecord.reviewed_at,
                      ExtractedRecord.admin_review_started_at, ExtractedRecord.admin_reviewed_at).join(
             ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id).filter(ExtractionJob.source_id.in_(ids))
         for sid, c, rs, ra, ars, ara in q.all():
             if day_of(c):
                 ext[sid].add(day_of(c))
+                note(sid, "x", "rec", c)
             for x in (rs, ra, ars, ara):
                 if day_of(x):
                     rev[sid].add(day_of(x))
+                    note(sid, "r", "rec", x)
         for sid, sub in db.query(SourcePeerReview.source_id, SourcePeerReview.submitted_at).filter(SourcePeerReview.source_id.in_(ids)).all():
             if day_of(sub):
                 rev[sid].add(day_of(sub))
+                note(sid, "r", "peer", sub)
+    mins: dict = {}
+    for (sid, kind, _who), times in ev.items():
+        m = mins.setdefault(sid, {"x": 0.0, "r": 0.0})
+        m[kind] += logged_minutes(times)
     rows = []
     for s in sources:
         e, r = ext[s.id], rev[s.id]
@@ -261,7 +293,8 @@ def active_days(db: Session, sources: list, batches: dict) -> dict:
         n = int(s.total_records or 0)
         b = batches.get(s.id) or {}
         done = bool(s.xtrium_submitted_at) or s.status == SourceStatus.APPROVED
-        rows.append({"source_id": s.id, "name": s.name, "item_no": s.external_ref_id, "batch": b.get("label"), "records": n, "size": _size(n), "done": done,
+        m = mins.get(s.id, {"x": 0.0, "r": 0.0})
+        rows.append({"logged_hours_extraction": round(m["x"] / 60, 1), "logged_hours_review": round(m["r"] / 60, 1), "logged_hours": round((m["x"] + m["r"]) / 60, 1), "source_id": s.id, "name": s.name, "item_no": s.external_ref_id, "batch": b.get("label"), "records": n, "size": _size(n), "done": done,
                      "extraction_days": len(e), "review_days": len(r), "active_days": len(allp), "weekend_days": len(allp) - act_wd,
                      "first": first.isoformat(), "last": last.isoformat(), "span_working_days": span_wd, "idle_working_days": max(0, span_wd - act_wd)})
     by_size = []
@@ -272,13 +305,14 @@ def active_days(db: Session, sources: list, batches: dict) -> dict:
         a = sorted(r["active_days"] for r in g)
         by_size.append({"size": name, "records": {"Small": f"1 to {SMALL}", "Medium": f"{SMALL + 1} to {MEDIUM}", "Large": f"over {MEDIUM}"}[name], "sources": len(g),
                         "avg_active_days": round(sum(a) / len(a), 1), "median_active_days": round(statistics.median(a), 1), "max_active_days": max(a),
+                        "avg_logged_hours": round(sum(r["logged_hours"] for r in g) / len(g), 1),
                         "avg_idle_working_days": round(sum(r["idle_working_days"] for r in g) / len(g), 1),
                         "avg_span_working_days": round(sum(r["span_working_days"] for r in g) / len(g), 1)})
     done = [r for r in rows if r["done"]]
     return {"sources": sorted(rows, key=lambda r: (r["batch"] or "", r["first"])), "by_size": by_size,
             "all": {"sources": len(done), "avg_active_days": round(sum(r["active_days"] for r in done) / len(done), 1) if done else None,
                     "avg_idle_working_days": round(sum(r["idle_working_days"] for r in done) / len(done), 1) if done else None},
-            "caveat": "Active days are days with logged work on the source. Idle days are working days between the first and last work day when nothing was logged, which is waiting. Hours are not measured."}
+            "caveat": "Active days are days with logged work on the source. Idle days are working days between the first and last work day when nothing was logged, which is waiting. Logged hours add up work sessions (logged actions less than 30 minutes apart, plus 5 minutes per session) per person; work done outside the platform, such as reading sites or running scripts, is not logged, so logged hours are a minimum and not a timesheet."}
 
 
 # ─── Everything together ─────────────────────────────────────────────────────
@@ -326,14 +360,14 @@ def workbook(t: dict, label: str) -> bytes:
     sheet(ws, ["Batch", "Pulled", "Due (5 working days)", "Item", "Source", "State", "Submitted to Xtrium", "Due for this source", "Paused working days", "Set aside because"], data,
           [22, 17, 18, 9, 30, 12, 19, 18, 14, 50])
     ws = wb.create_sheet("Active days")
-    sheet(ws, ["Batch", "Item", "Source", "Records", "Size", "Done", "Extraction days", "Review days", "Active days", "Weekend days", "First work", "Last work", "Working days from first to last", "Idle working days"],
+    sheet(ws, ["Batch", "Item", "Source", "Records", "Size", "Done", "Extraction days", "Review days", "Active days", "Weekend days", "First work", "Last work", "Working days from first to last", "Idle working days", "Logged hours (extraction)", "Logged hours (review)", "Logged hours (total)"],
           [[r["batch"] or "", f"#{r['item_no']}" if r["item_no"] else "", r["name"], r["records"], r["size"], "yes" if r["done"] else "no", r["extraction_days"], r["review_days"],
-            r["active_days"], r["weekend_days"], r["first"], r["last"], r["span_working_days"], r["idle_working_days"]] for r in t["active"]["sources"]],
-          [22, 9, 30, 9, 9, 7, 10, 10, 10, 10, 12, 12, 14, 10])
+            r["active_days"], r["weekend_days"], r["first"], r["last"], r["span_working_days"], r["idle_working_days"], r["logged_hours_extraction"], r["logged_hours_review"], r["logged_hours"]] for r in t["active"]["sources"]],
+          [22, 9, 30, 9, 9, 7, 10, 10, 10, 10, 12, 12, 14, 10, 12, 12, 12])
     ws = wb.create_sheet("By size")
-    sheet(ws, ["Size", "Records", "Sources done", "Average active days", "Median active days", "Most active days", "Average idle working days", "Average working days first to last"],
-          [[r["size"], r["records"], r["sources"], r["avg_active_days"], r["median_active_days"], r["max_active_days"], r["avg_idle_working_days"], r["avg_span_working_days"]] for r in t["active"]["by_size"]],
-          [10, 12, 12, 14, 14, 12, 16, 20])
+    sheet(ws, ["Size", "Records", "Sources done", "Average active days", "Median active days", "Most active days", "Average idle working days", "Average working days first to last", "Average logged hours"],
+          [[r["size"], r["records"], r["sources"], r["avg_active_days"], r["median_active_days"], r["max_active_days"], r["avg_idle_working_days"], r["avg_span_working_days"], r["avg_logged_hours"]] for r in t["active"]["by_size"]],
+          [10, 12, 12, 14, 14, 12, 16, 20, 14])
     ws = wb.create_sheet("Waiting")
     sheet(ws, ["Kind", "Reason", "From", "To", "Days", "Working days"],
           [[w["kind"], w["reason"], _iso(w["started_at"]), _iso(w["ended_at"]) or "Still waiting", w["days"], w["working_days"]] for w in t["waits"]["items"]], [12, 60, 17, 17, 8, 12])
