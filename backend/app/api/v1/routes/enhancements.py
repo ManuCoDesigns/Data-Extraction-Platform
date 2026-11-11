@@ -290,6 +290,7 @@ def _q_out(q: ClientQuestion) -> dict:
         "asked_by": q.asker.full_name if q.asker else None, "asked_by_id": q.asked_by,
         "answered_by": q.answerer.full_name if q.answerer else None, "answered_by_name": q.answered_by_name, "topic": q.topic,
         "sent_to_client_at": q.sent_to_client_at, "created_at": q.created_at, "answered_at": q.answered_at,
+        "kind": q.kind or "question", "blocks_clock": bool(q.blocks_clock), "asked_at": q.asked_at, "first_reply_at": q.first_reply_at,
     }
 
 

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { qualityApi, xtriumApi } from '@/api/client'
 import { briefsApi } from '@/api/briefs'
 import { LeadBrief } from '@/components/enh/LeadBrief'
+import { TracePanel } from '@/components/enh/TracePanel'
 import { Blank, Skeletons } from '@/components/enh/kit'
 import { Button, toast } from '@/components/ui'
 import { A4, OnePager } from '@/components/enh/reports/OnePager'
@@ -61,6 +62,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
   const [miss, setMiss] = useState<any>(null)
   const [tl, setTl] = useState<any>(null)
   const [tlSel, setTlSel] = useState('')
+  const [trace, setTrace] = useState(false)
   const fitA = useFit(A4.w), fitD = useFit(SLIDE.w)
   const [list, setList] = useState<any[] | null>(null)
   const [key, setKey] = useState('')
@@ -172,6 +174,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
           {mode === 'deck' && <Button variant="secondary" disabled={!eng || eng.error} onClick={timesCsv}>Times CSV</Button>}
           {mode === 'deck' && <Button variant="secondary" onClick={findMissing}>Find missing source</Button>}
           {mode === 'deck' && <Button variant="secondary" onClick={openTimelines}>Source timelines</Button>}
+          {mode === 'deck' && <Button variant="secondary" onClick={() => setTrace(v => !v)}>Delivery trace</Button>}
           {mode === 'deck' && <span className="inline-flex items-center gap-1.5 text-sm text-gray-600">Sent to Xtrium
             <select className="border rounded-md px-1.5 py-1 text-sm" value={subN} onChange={e => setSubN(Number(e.target.value))}><option value={1}>once</option><option value={2}>twice</option><option value={3}>3 times</option></select>
             <Button variant="secondary" disabled={!eng || eng.error} onClick={recordSubs}>Record</Button></span>}
@@ -181,6 +184,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
         </div>
       </div>
       {(mode === 'page' || mode === 'deck') && <p className="no-print text-xs text-gray-500 m-0">{mode === 'page' ? 'One A4 page. In the print window choose "Save as PDF", with margins set to None.' : 'Pick what to cover and the report builds itself from live data. In the print window choose "Save as PDF", with margins set to None. Times are elapsed clock time.'}</p>}
+      {trace && mode === 'deck' && <TracePanel scope={sc} value={scv} projectId={projectId || undefined} onClose={() => setTrace(false)} />}
       {tl && (() => {
         const all = (tl.batches || []).flatMap((b: any) => b.sources.map((s: any) => ({ ...s, batch: b.label })))
         const sel = all.find((s: any) => s.source_id === tlSel)

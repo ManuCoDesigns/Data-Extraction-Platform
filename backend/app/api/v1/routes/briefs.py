@@ -8,13 +8,15 @@ from pydantic import BaseModel
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
-from app.api.v1.routes.enhancements import _need_lead, _visible_sources
+from app.api.v1.routes.enhancements import _need_lead, _project_ids_for, _visible_sources
 from app.core.security import get_current_user
 from app.db.session import get_db
-from app.models.all_models import User
+from app.models.all_models import ClientQuestion, Source, User, WaitPeriod
 from app.services import batch_report as br
 from app.services import lead_brief as lb
 from app.services import source_timeline as stl
+from app.services import trace as tr
+from app.services import quality as qsvc
 
 router = APIRouter(prefix="/briefs", tags=["briefs"])
 
@@ -205,3 +207,207 @@ def lead(project_id: str | None = None, db: Session = Depends(get_db), user: Use
     b = lb.build(db, srcs)
     b["text"] = lb.text(b)
     return b
+
+
+# ─── Delivery trace: escalations, batch clock, active days, waiting periods ──
+
+def _trace(db: Session, user: User, project_id, scope: str, value):
+    _need_lead(user)
+    srcs = _visible_sources(db, user, project_id).all()
+    if not srcs:
+        raise HTTPException(status_code=404, detail="No sources yet.")
+    keys, sc_info = _scope(srcs, scope, value)
+    batches = qsvc.pull_batches(srcs)
+    pick = [s for s in srcs if keys is None or (batches.get(s.id) or {}).get("key") in keys]
+    return sc_info, tr.build(db, pick, batches, _project_ids_for(db, user), project_id)
+
+
+@router.get("/trace")
+def trace(scope: str = "latest", value: str | None = None, project_id: str | None = None,
+          db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """What we asked and waited on, the 5-working-day batch clock, and the days work really happened, from the platform's own records."""
+    sc, t = _trace(db, user, project_id, scope, value)
+    t["scope"] = sc
+    return t
+
+
+@router.get("/trace.xlsx")
+def trace_xlsx(scope: str = "latest", value: str | None = None, project_id: str | None = None,
+               db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    sc, t = _trace(db, user, project_id, scope, value)
+    data = tr.workbook(t, sc.get("label") or "Whole engagement")
+    name = f"delivery_trace_{(sc.get('value') or 'all').replace(' ', '_')}.xlsx"
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+def _when(v: datetime | None):
+    """A time typed in the form has no zone: it is Nairobi time."""
+    if v is None:
+        return None
+    return v.replace(tzinfo=tr.NAIROBI) if v.tzinfo is None else v
+
+
+class EscIn(BaseModel):
+    project_id: str
+    source_id: str | None = None
+    question: str
+    kind: str = "escalation"
+    blocks_clock: bool = False
+    topic: str | None = None
+    raised_at: datetime | None = None
+    first_reply_at: datetime | None = None
+    answered_at: datetime | None = None
+    answer: str | None = None
+
+
+class EscPatch(BaseModel):
+    question: str | None = None
+    kind: str | None = None
+    blocks_clock: bool | None = None
+    topic: str | None = None
+    raised_at: datetime | None = None
+    first_reply_at: datetime | None = None
+    answered_at: datetime | None = None
+    answer: str | None = None
+    reopen: bool = False
+    answered_now: bool = False
+
+
+def _own_q(db: Session, user: User, qid: str) -> ClientQuestion:
+    q = db.query(ClientQuestion).filter(ClientQuestion.id == qid, ClientQuestion.project_id.in_(_project_ids_for(db, user))).first()
+    if not q:
+        raise HTTPException(status_code=404, detail="Escalation not found")
+    return q
+
+
+def _kind(k: str | None) -> str:
+    if k not in ("question", "escalation", "blocker"):
+        raise HTTPException(status_code=422, detail="Type must be question, escalation or blocker.")
+    return k
+
+
+@router.post("/escalations", status_code=201)
+def add_escalation(body: EscIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Log an escalation or question with its real times (from the chat), so the days waited are right."""
+    _need_lead(user)
+    if body.project_id not in _project_ids_for(db, user):
+        raise HTTPException(status_code=403, detail="You are not on this project.")
+    text = (body.question or "").strip()
+    if len(text) < 5:
+        raise HTTPException(status_code=422, detail="Write what was asked.")
+    if body.source_id and not db.query(Source.id).filter(Source.id == body.source_id, Source.project_id == body.project_id).first():
+        raise HTTPException(status_code=404, detail="Source not found in this project.")
+    q = ClientQuestion(project_id=body.project_id, source_id=body.source_id, question=text, asked_by=user.id, status="open", kind=_kind(body.kind),
+                       blocks_clock=body.blocks_clock, topic=body.topic, asked_at=_when(body.raised_at) or tr.now(), first_reply_at=_when(body.first_reply_at))
+    q.sent_to_client_at = q.asked_at
+    if body.answered_at or (body.answer or "").strip():
+        q.status, q.answered_at, q.answered_by = "answered", _when(body.answered_at) or tr.now(), user.id
+        q.answer = (body.answer or "").strip() or "Answered in the chat."
+    db.add(q)
+    db.commit()
+    return {"id": q.id}
+
+
+@router.patch("/escalations/{qid}")
+def edit_escalation(qid: str, body: EscPatch, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    q = _own_q(db, user, qid)
+    if body.question is not None and len(body.question.strip()) >= 5:
+        q.question = body.question.strip()
+    if body.kind is not None:
+        q.kind = _kind(body.kind)
+    if body.blocks_clock is not None:
+        q.blocks_clock = body.blocks_clock
+    if body.topic is not None:
+        q.topic = body.topic or None
+    if body.raised_at is not None:
+        q.asked_at = _when(body.raised_at)
+        q.sent_to_client_at = q.asked_at
+    if body.first_reply_at is not None:
+        q.first_reply_at = _when(body.first_reply_at)
+    if body.reopen:
+        q.status, q.answered_at, q.answer, q.answered_by = "open", None, None, None
+    elif body.answered_now or body.answered_at is not None:
+        q.status, q.answered_by = "answered", user.id
+        q.answered_at = _when(body.answered_at) if body.answered_at is not None else tr.now()
+        q.answer = (body.answer or "").strip() or q.answer or "Answered in the chat."
+    elif body.answer is not None and q.status == "answered":
+        q.answer = body.answer.strip() or q.answer
+    db.commit()
+    return {"id": q.id, "status": q.status}
+
+
+class WaitIn(BaseModel):
+    project_id: str
+    kind: str = "links"
+    reason: str
+    started_at: datetime
+    ended_at: datetime | None = None
+
+
+class WaitPatch(BaseModel):
+    reason: str | None = None
+    kind: str | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    end_now: bool = False
+    reopen: bool = False
+
+
+def _own_w(db: Session, user: User, wid: str) -> WaitPeriod:
+    w = db.query(WaitPeriod).filter(WaitPeriod.id == wid, WaitPeriod.project_id.in_(_project_ids_for(db, user))).first()
+    if not w:
+        raise HTTPException(status_code=404, detail="Waiting period not found")
+    return w
+
+
+def _wkind(k: str | None) -> str:
+    if k not in ("links", "decision", "access", "other"):
+        raise HTTPException(status_code=422, detail="Kind must be links, decision, access or other.")
+    return k
+
+
+@router.post("/waits", status_code=201)
+def add_wait(body: WaitIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Log a stretch where the team could not work, for example no links assigned."""
+    _need_lead(user)
+    if body.project_id not in _project_ids_for(db, user):
+        raise HTTPException(status_code=403, detail="You are not on this project.")
+    if len((body.reason or "").strip()) < 3:
+        raise HTTPException(status_code=422, detail="Say what we were waiting for.")
+    start, end = _when(body.started_at), _when(body.ended_at)
+    if end and end <= start:
+        raise HTTPException(status_code=422, detail="The end must be after the start.")
+    w = WaitPeriod(project_id=body.project_id, kind=_wkind(body.kind), reason=body.reason.strip(), started_at=start, ended_at=end, created_by=user.id)
+    db.add(w)
+    db.commit()
+    return {"id": w.id}
+
+
+@router.patch("/waits/{wid}")
+def edit_wait(wid: str, body: WaitPatch, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    w = _own_w(db, user, wid)
+    if body.reason is not None and len(body.reason.strip()) >= 3:
+        w.reason = body.reason.strip()
+    if body.kind is not None:
+        w.kind = _wkind(body.kind)
+    if body.started_at is not None:
+        w.started_at = _when(body.started_at)
+    if body.reopen:
+        w.ended_at = None
+    elif body.end_now:
+        w.ended_at = tr.now()
+    elif body.ended_at is not None:
+        w.ended_at = _when(body.ended_at)
+    if w.ended_at and tr.aw(w.ended_at) <= tr.aw(w.started_at):
+        raise HTTPException(status_code=422, detail="The end must be after the start.")
+    db.commit()
+    return {"id": w.id}
+
+
+@router.delete("/waits/{wid}", status_code=204)
+def delete_wait(wid: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    _need_lead(user)
+    db.delete(_own_w(db, user, wid))
+    db.commit()

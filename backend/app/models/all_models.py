@@ -699,6 +699,10 @@ class ClientQuestion(Base):
     answered_at = Column(DateTime(timezone=True), nullable=True)
     topic = Column(String(40), nullable=True)                 # SOP and schema | Classification | Submission | Access | Process
     answered_by_name = Column(String(160), nullable=True)     # who on the client side gave the answer, when it was brought in from their chat
+    kind = Column(String(16), nullable=False, default="question", server_default="question")   # question | escalation | blocker
+    blocks_clock = Column(Boolean, nullable=False, default=False, server_default="false")    # the source cannot be worked until this is answered
+    asked_at = Column(DateTime(timezone=True), nullable=True)         # when it was really raised (chat time), when that differs from when it was entered
+    first_reply_at = Column(DateTime(timezone=True), nullable=True)   # first reply that did not yet answer it ("I will check")
 
     asker = relationship("User", foreign_keys=[asked_by])
     answerer = relationship("User", foreign_keys=[answered_by])
@@ -710,6 +714,20 @@ class ReminderLog(Base):
     __tablename__ = "reminder_log"
 
     key = Column(String(200), primary_key=True)
+    created_at = Column(DateTime(timezone=True), default=now_utc)
+
+
+class WaitPeriod(Base):
+    """A stretch where the team could not work because it was waiting on someone: no links assigned, a decision, access."""
+    __tablename__ = "wait_periods"
+
+    id = Column(String(36), primary_key=True, default=new_uuid)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind = Column(String(16), nullable=False, default="links", server_default="links")   # links | decision | access | other
+    reason = Column(Text, nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    ended_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(String(36), ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=now_utc)
 
 
