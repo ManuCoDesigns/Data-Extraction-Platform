@@ -9,5 +9,9 @@ export const briefsApi = {
   csv: (scope: string, value: string | undefined, projectId: string | undefined, anon: boolean) =>
     api.get('/briefs/report.csv', { params: { ...p(scope, value, projectId), anon }, responseType: 'text', transformResponse: x => x }).then(r => r.data as string),
   setSubmissions: (scope: string, value: string | undefined, count: number, projectId?: string) => api.post('/briefs/submissions', { scope, value, count, project_id: projectId }).then(r => r.data),
+  timelines: (scope: string, value: string | undefined, projectId: string | undefined, anon: boolean) =>
+    api.get('/briefs/timelines', { params: { ...p(scope, value, projectId), anon } }).then(r => r.data),
+  timelinesXlsx: (scope: string, value: string | undefined, projectId: string | undefined, anon: boolean) =>
+    api.get('/briefs/timelines.xlsx', { params: { ...p(scope, value, projectId), anon }, responseType: 'blob' }).then(r => r.data as Blob),
   lead: (projectId?: string) => api.get('/briefs/lead', { params: { project_id: projectId } }).then(r => r.data),
 }

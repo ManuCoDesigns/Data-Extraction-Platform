@@ -59,6 +59,8 @@ export function BatchReport({ projectId }: { projectId: string }) {
   const [names, setNames] = useState(false)
   const [subN, setSubN] = useState(2)
   const [miss, setMiss] = useState<any>(null)
+  const [tl, setTl] = useState<any>(null)
+  const [tlSel, setTlSel] = useState('')
   const fitA = useFit(A4.w), fitD = useFit(SLIDE.w)
   const [list, setList] = useState<any[] | null>(null)
   const [key, setKey] = useState('')
@@ -107,6 +109,23 @@ export function BatchReport({ projectId }: { projectId: string }) {
     try { setMiss(await xtriumApi.missingCheck(45)) } catch { setMiss({ error: 'Could not run the check. Try again in a moment.' }) }
   }
 
+  const openTimelines = async () => {
+    setTl({ loading: true })
+    try {
+      const r = await briefsApi.timelines(sc, scv, projectId || undefined, !names)
+      setTl(r); setTlSel(r.batches?.[0]?.sources?.[0]?.source_id || '')
+    } catch { setTl({ error: 'Could not read the timelines. Try again in a moment.' }) }
+  }
+  const downloadTimelines = async () => {
+    try {
+      const url = URL.createObjectURL(await briefsApi.timelinesXlsx(sc, scv, projectId || undefined, !names))
+      const a = document.createElement('a'); a.href = url; a.download = `source_timelines_${eng?.scope?.value || 'all'}.xlsx`; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url)
+    } catch { toast.error('Could not build the timelines file') }
+  }
+  const fmtT = (iso: string) => new Date(iso).toLocaleString('en-GB', { timeZone: 'Africa/Nairobi', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
+  const dur = (h: number) => h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 48 ? `${h} h` : `${(h / 24).toFixed(1)} days`
+  const nz = (v: any, u = '') => (v === null || v === undefined ? 'not recorded' : `${v}${u}`)
+
   const shown = useMemo(() => (d?.sources ?? []).filter((s: any) => !stageFilter || s.stage === stageFilter), [d, stageFilter])
   const delivered = () => {
     const rows = mode === 'deck' ? (eng?.delivered_rows ?? []) : (d?.sources ?? []).filter((s: any) => s.stage === 'delivered').map((s: any) => ({ name: s.name, project: s.project, item_no: s.item_no, records: s.approved, approved_at: s.approved_at, submitted_at: s.submitted_at, batch: d.label }))
@@ -152,6 +171,7 @@ export function BatchReport({ projectId }: { projectId: string }) {
           {mode !== 'brief' && <Button variant="secondary" disabled={mode === 'deck' ? !eng || eng.error : !d || d.error} onClick={delivered}>Delivered CSV</Button>}
           {mode === 'deck' && <Button variant="secondary" disabled={!eng || eng.error} onClick={timesCsv}>Times CSV</Button>}
           {mode === 'deck' && <Button variant="secondary" onClick={findMissing}>Find missing source</Button>}
+          {mode === 'deck' && <Button variant="secondary" onClick={openTimelines}>Source timelines</Button>}
           {mode === 'deck' && <span className="inline-flex items-center gap-1.5 text-sm text-gray-600">Sent to Xtrium
             <select className="border rounded-md px-1.5 py-1 text-sm" value={subN} onChange={e => setSubN(Number(e.target.value))}><option value={1}>once</option><option value={2}>twice</option><option value={3}>3 times</option></select>
             <Button variant="secondary" disabled={!eng || eng.error} onClick={recordSubs}>Record</Button></span>}
@@ -161,6 +181,39 @@ export function BatchReport({ projectId }: { projectId: string }) {
         </div>
       </div>
       {(mode === 'page' || mode === 'deck') && <p className="no-print text-xs text-gray-500 m-0">{mode === 'page' ? 'One A4 page. In the print window choose "Save as PDF", with margins set to None.' : 'Pick what to cover and the report builds itself from live data. In the print window choose "Save as PDF", with margins set to None. Times are elapsed clock time.'}</p>}
+      {tl && (() => {
+        const all = (tl.batches || []).flatMap((b: any) => b.sources.map((s: any) => ({ ...s, batch: b.label })))
+        const sel = all.find((s: any) => s.source_id === tlSel)
+        return (
+          <div className="no-print rounded-xl border border-blue-200 bg-blue-50 p-4 text-sm text-gray-800 grid gap-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <b>Source timelines</b>
+              <span className="flex items-center gap-3"><Button variant="secondary" onClick={downloadTimelines}>Download Excel</Button><button className="text-xs underline" onClick={() => setTl(null)}>Close</button></span>
+            </div>
+            {tl.loading ? <p className="m-0">Reading the timelines from the platform.</p> : tl.error ? <p className="m-0">{tl.error}</p> : (<>
+              <div className="grid gap-1">
+                {tl.batches.map((b: any) => <p key={b.key} className="m-0"><b>{b.label}:</b> {b.totals.sources} sources, {b.totals.delivered} delivered. Average {nz(b.totals.avg_days_to_start, ' days')} to start, {nz(b.totals.avg_extraction_days, ' days')} extracting, {nz(b.totals.avg_review_days, ' days')} in review, {nz(b.totals.avg_total_days, ' days')} from pull to approval.</p>)}
+              </div>
+              <select className="border rounded-md px-2 py-1.5 text-sm bg-white max-w-full" value={tlSel} onChange={e => setTlSel(e.target.value)}>
+                {tl.batches.map((b: any) => <optgroup key={b.key} label={`${b.label} (${b.sources.length})`}>{b.sources.map((s: any) => <option key={s.source_id} value={s.source_id}>{s.item_no ? `#${s.item_no} ` : ''}{s.name}</option>)}</optgroup>)}
+              </select>
+              {sel && (
+                <div className="grid gap-2 bg-white rounded-lg border border-blue-100 p-3">
+                  <p className="m-0"><b>{sel.name}</b>{sel.item_no ? ` (#${sel.item_no})` : ''}. {sel.batch}. {sel.status}.</p>
+                  <p className="m-0 text-gray-600">To start {nz(sel.summary.days_to_start, ' days')}. Extraction {nz(sel.summary.extraction_days, ' days')}. In review {nz(sel.summary.review_days, ' days')}. Pull to approval {nz(sel.summary.total_days, ' days')}. Returned {sel.summary.returns} {sel.summary.returns === 1 ? 'time' : 'times'}. Peer reviews {sel.summary.peer_reviews}. Sent to Xtrium {sel.summary.sends_to_xtrium} {sel.summary.sends_to_xtrium === 1 ? 'time' : 'times'}.</p>
+                  <div className="grid gap-1.5">
+                    {sel.events.map((e: any, i: number) => (
+                      <p key={i} className="m-0 border-l-2 border-blue-300 pl-3">
+                        <span className="text-gray-500">{fmtT(e.at)}</span> <b>{e.label}</b>{e.detail ? `. ${e.detail}` : ''}{e.by ? <span className="text-gray-500"> ({e.by})</span> : null}{e.since_previous_hours != null ? <span className="text-gray-400"> +{dur(e.since_previous_hours)}</span> : null}
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>)}
+          </div>
+        )
+      })()}
       {miss && (
         <div className="no-print rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-gray-800 grid gap-3">
           <div className="flex items-center justify-between"><b>Where could the missing source be?</b><button className="text-xs underline" onClick={() => setMiss(null)}>Close</button></div>

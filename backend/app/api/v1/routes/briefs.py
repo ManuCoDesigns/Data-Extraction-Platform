@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.models.all_models import User
 from app.services import batch_report as br
 from app.services import lead_brief as lb
+from app.services import source_timeline as stl
 
 router = APIRouter(prefix="/briefs", tags=["briefs"])
 
@@ -172,6 +173,29 @@ def report_csv(scope: str = "latest", value: str | None = None, project_id: str 
     w.writerow([tm.get("caveat", "")])
     name = f"report_{(r['scope'].get('value') or 'all').replace(' ', '_')}.csv"
     return Response(content=buf.getvalue(), media_type="text/csv", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+def _timelines(db: Session, user: User, project_id, scope: str, value, anon: bool):
+    r = _report(db, user, project_id, scope, value)
+    srcs = {s.id: s for s in _visible_sources(db, user, project_id).all()}
+    return r, stl.batches_for(db, r, srcs, anon)
+
+
+@router.get("/timelines")
+def timelines(scope: str = "latest", value: str | None = None, project_id: str | None = None, anon: bool = False,
+              db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Every dated step of every source in the report, grouped by batch."""
+    r, b = _timelines(db, user, project_id, scope, value, anon)
+    return {"scope": r["scope"], "batches": b}
+
+
+@router.get("/timelines.xlsx")
+def timelines_xlsx(scope: str = "latest", value: str | None = None, project_id: str | None = None, anon: bool = False,
+                   db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    r, b = _timelines(db, user, project_id, scope, value, anon)
+    data = stl.workbook(b, r["scope"].get("label") or "Whole engagement")
+    name = f"source_timelines_{(r['scope'].get('value') or 'all').replace(' ', '_')}.xlsx"
+    return Response(content=data, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
 
 @router.get("/lead")
