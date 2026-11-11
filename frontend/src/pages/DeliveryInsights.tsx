@@ -99,6 +99,13 @@ export function DeliveryInsightsPage() {
           ))}
         </section>
 
+        <section className="rounded-xl border border-gray-200 bg-white p-4 grid gap-1.5 text-sm text-gray-700">
+          <h2 className="text-base font-bold m-0 text-gray-900">How to read this</h2>
+          <p className="m-0">Days are elapsed clock time, so they include nights, weekends and any waiting. Working days leave out weekends. The 5-working-day window runs from the day a batch is pulled to submission to Xtrium.</p>
+          <p className="m-0">Extraction happens on the source websites, outside the platform, so extraction days run from when the batch was assigned to when the data was uploaded. They are not hands-on time.</p>
+          <p className="m-0">A wait on Xtrium is only counted against a source when the question is tied to that source. Test batches and batches covered earlier are left out once they are marked.</p>
+        </section>
+
         <section className="rounded-xl border border-gray-200 bg-white p-4 grid gap-2">
           <h2 className="text-base font-bold m-0">Where the days went, by batch</h2>
           <p className="text-xs text-gray-600 m-0">Average days per delivered source. Extraction includes any time a source waited on an answer.</p>
