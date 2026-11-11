@@ -28,6 +28,7 @@ import { ObservationsPage } from '@/pages/Observations'
 import { SopAssignPage } from '@/pages/SopAssign'
 import { LinkTriagePage } from '@/pages/LinkTriage'
 import { InsightsPage } from '@/pages/Insights'
+import { DeliveryInsightsPage } from '@/pages/DeliveryInsights'
 import { MessagesPage } from '@/pages/Messages'
 import { QualityPage } from '@/pages/Quality'
 import { useAuthStore } from '@/store/auth'
@@ -156,6 +157,7 @@ export function App() {
           <Route path="data-health" element={<DataHealthPage />} />
           <Route path="client-questions" element={<ClientQuestionsPage />} />
           <Route path="insights" element={<InsightsPage />} />
+          <Route path="delivery-insights" element={<RequireTeamLead><DeliveryInsightsPage /></RequireTeamLead>} />
           <Route path="messages" element={<MessagesPage />} />
           <Route path="quality" element={<RequireTeamLead><QualityPage /></RequireTeamLead>} />
           <Route path="digest" element={<RequireTeamLead><DigestPage /></RequireTeamLead>} />

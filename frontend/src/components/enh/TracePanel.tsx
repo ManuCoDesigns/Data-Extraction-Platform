@@ -22,7 +22,7 @@ const inp = 'border border-gray-300 rounded-md px-2 py-1.5 text-sm bg-white text
 type EscForm = { id?: string; question: string; kind: string; blocks: boolean; source_id: string; raised: string; reply: string; answered: string }
 const blank: EscForm = { question: '', kind: 'escalation', blocks: false, source_id: '', raised: '', reply: '', answered: '' }
 
-export function TracePanel({ scope, value, projectId, onClose }: { scope: string; value?: string; projectId?: string; onClose: () => void }) {
+export function TracePanel({ scope, value, projectId, onClose, onChanged }: { scope: string; value?: string; projectId?: string; onClose: () => void; onChanged?: () => void }) {
   const [t, setT] = useState<any>(null)
   const [esc, setEsc] = useState<EscForm | null>(null)
   const [wf, setWf] = useState<{ kind: string; reason: string; from: string; to: string } | null>(null)
@@ -34,7 +34,7 @@ export function TracePanel({ scope, value, projectId, onClose }: { scope: string
   const sources: { id: string; label: string }[] = (t?.clock || []).flatMap((b: any) => b.items.map((s: any) => ({ id: s.source_id, label: `${s.item_no ? `#${s.item_no} ` : ''}${s.name}` })))
   const run = async (fn: () => Promise<any>, ok: string) => {
     setBusy(true)
-    try { await fn(); toast.success(ok); await load() } catch (e: any) { toast.error(e?.response?.data?.detail || 'That did not save') } finally { setBusy(false) }
+    try { await fn(); toast.success(ok); await load(); onChanged?.() } catch (e: any) { toast.error(e?.response?.data?.detail || 'That did not save') } finally { setBusy(false) }
   }
   const download = async () => {
     try {

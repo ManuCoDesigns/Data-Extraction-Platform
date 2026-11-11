@@ -200,6 +200,7 @@ export function AppLayout() {
     ] },
     { key: 'reports', label: isTeamLead ? 'Reports' : 'My stats', icon: ChartColumn, items: [
       { to: '/insights', icon: ChartColumn, label: isTeamLead ? 'Insights' : 'My Stats', show: true },
+      { to: '/delivery-insights', icon: ChartColumn, label: 'Delivery insights', show: isTeamLead },
       { to: '/digest', icon: CalendarCheck, label: 'Daily digest', show: isTeamLead },
     ] },
     { key: 'setup', label: 'Xtrium & setup', icon: Zap, items: [

@@ -231,6 +231,26 @@ def trace(scope: str = "latest", value: str | None = None, project_id: str | Non
     return t
 
 
+@router.get("/insights")
+def insights(scope: str = "all", value: str | None = None, project_id: str | None = None,
+             db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """The delivery trace explained in plain language: batch turnaround, where the time went, waits on Xtrium, and what still needs checking."""
+    _need_lead(user)
+    srcs = _visible_sources(db, user, project_id).all()
+    if not srcs:
+        raise HTTPException(status_code=404, detail="No sources yet.")
+    keys, sc_info = _scope(srcs, scope, value)
+    batches = qsvc.pull_batches(srcs)
+    pick = [s for s in srcs if keys is None or (batches.get(s.id) or {}).get("key") in keys]
+    t = tr.build(db, pick, batches, _project_ids_for(db, user), project_id)
+    from app.services import insights as ins
+    out = ins.build(db, pick, batches, t)
+    out["scope"], out["as_of"] = sc_info, t["as_of"]
+    out["escalation_summary"] = t["escalations"]["summary"]
+    out["active"] = {"by_size": t["active"]["by_size"], "all": t["active"]["all"]}
+    return out
+
+
 @router.get("/trace.xlsx")
 def trace_xlsx(scope: str = "latest", value: str | None = None, project_id: str | None = None,
                db: Session = Depends(get_db), user: User = Depends(get_current_user)):
