@@ -525,6 +525,14 @@ export const qualityApi = {
     if (o.sourceId) fd.append('source_id', o.sourceId)
     return api.post('/quality/answer-key', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 }).then(r => r.data)
   },
+  verdictsPreview: (file: File, projectId?: string) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    if (projectId) fd.append('project_id', projectId)
+    return api.post('/quality/verdicts/preview', fd, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 300000 }).then(r => r.data)
+  },
+  verdictsSendBack: (items: { source_id: string; record_id: string; comment: string }[]) =>
+    api.post('/quality/verdicts/send-back', { items }, { timeout: 300000 }).then(r => r.data),
   answerKeyDownload: async (file: File, o: { format: 'xlsx' | 'json' | 'llm' | 'llm_zip'; apply?: boolean; projectId?: string; sourceId?: string; decisions?: Record<string, string> }) => {
     const fd = new FormData()
     fd.append('file', file)

@@ -1867,5 +1867,66 @@ def engagement_report(project_id: str | None = None, db: Session = Depends(get_d
 
 
 # Checked fields sent back to extractors (/quality/audit-challenges/...). Included last so every helper above exists.
+
+# ─── verdicts from a review package ──────────────────────────────────────────
+
+class SendBackItem(BaseModel):
+    source_id: str
+    record_id: str
+    comment: str
+
+
+class SendBackBody(BaseModel):
+    items: list[SendBackItem]
+
+
+@router.post("/verdicts/preview")
+async def verdicts_preview(file: UploadFile = File(...), project_id: str = Form(""), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Read the verdicts in a review package and say what they would decide and which records they would send back. Nothing is saved."""
+    _need_lead(user)
+    from app.services import verdicts as vd
+    content = await file.read()
+    if len(content) > 40 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="That file is too large.")
+    try:
+        verdicts = vd.read_verdicts(file.filename or "", content)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    sources = _visible_sources(db, user, project_id or None).all()
+    cache: dict = {}
+    def records_of(sid):
+        if sid not in cache:
+            cache[sid] = _records(db, sid)
+        return cache[sid]
+    return vd.plan(sources, records_of, verdicts)
+
+
+@router.post("/verdicts/send-back")
+def verdicts_send_back(body: SendBackBody, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    """Send the listed records back to their extractor with the comment. A record that is already returned, approved or submitted is skipped. Admins only."""
+    from app.services import record_locks as rl
+    from app.api.v1.routes import sources as S
+    from app.schemas.api_schemas import SourceRecordReview
+    if not rl.is_admin(user):
+        raise HTTPException(status_code=403, detail="Only admins can send records back in bulk.")
+    out = {"sent": 0, "skipped": [], "failed": []}
+    for it in body.items:
+        rec = db.query(ExtractedRecord).filter(ExtractedRecord.id == it.record_id).first()
+        if not rec:
+            out["failed"].append({"record_id": it.record_id, "why": "Record not found"})
+            continue
+        status = getattr(rec.review_status, "value", str(rec.review_status))
+        if rec.is_submitted or status in ("rejected", "approved"):
+            out["skipped"].append({"record_id": it.record_id, "why": "Already submitted" if rec.is_submitted else f"Already {status}"})
+            continue
+        try:
+            S.review_source_record(it.source_id, it.record_id, SourceRecordReview(action="reject", note=it.comment[:1000]), db, user)
+            out["sent"] += 1
+        except HTTPException as e:
+            db.rollback()
+            out["failed"].append({"record_id": it.record_id, "why": str(e.detail)})
+    return out
+
+
 from app.api.v1.routes.audit_challenges import router as _challenge_router  # noqa: E402
 router.include_router(_challenge_router)

@@ -5,6 +5,7 @@ import { Button, toast } from '@/components/ui'
 import { ask } from '@/lib/confirm'
 import { adminUploadApi } from '@/api/adminUpload'
 import { AdminChallenges } from '@/components/enh/AuditChallenges'
+import { VerdictLoader } from '@/components/enh/VerdictLoader'
 
 /**
  * Upload the final records, see them against what the extractor delivered and what the reviewers flagged, with error % and accuracy %
@@ -153,6 +154,7 @@ export function FinalCheck({ projectId, sourceId }: { projectId: string; sourceI
             </select>
           </div>
         )}
+        <VerdictLoader projectId={projectId} onDecisions={d => setDec(prev => ({ ...prev, ...d }))} />
         {!fromSaved && <label className="flex items-center gap-2 text-xs text-gray-600 mt-2"><input type="checkbox" checked={keep} onChange={e => setKeep(e.target.checked)} /> Keep a private copy for next time. Only admins can see it, and it is saved by source name.</label>}
         {sourceId && <p className="text-xs text-gray-500 mt-2 mb-0">A single list of records will be checked against the source picked above.</p>}
       </Panel>
