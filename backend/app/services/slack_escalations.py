@@ -31,8 +31,11 @@ ENTRIES = [
     ("2026-10-19 11:54", None, "2026-10-20 18:46", None, False, "Process", "Question about 12 items found at the sync."),
     ("2026-10-23 11:57", None, "2026-10-29 01:36", None, False, "Process", "Asked for the next batch of sources."),
     ("2026-10-29 18:07", "2026-11-02 20:06", "2026-11-02 20:08", None, False, "Classification", "Batch 2 sources that were unclassified. Chased on 2 Nov at 20:06."),
-    ("2026-10-29 18:07", None, None, 1051, True, "SOP and schema", "#1051 Espacenet and #1052 Google Patents have no applicable SOP. Chased on 2 Nov at 20:09, #1052 escalated as nothing to extract on 4 Nov, asked again on 11 Nov at 08:21."),
-    ("2026-11-11 08:21", None, None, 1172, True, "Access", "#1172 MPDS needs a login and #1173 Matmatch has closed. Asked for a decision."),
+    ("2026-10-29 18:07", None, None, 1051, True, "SOP and schema", "#1051 Espacenet has no applicable SOP. Chased on 2 Nov at 20:09 and asked again on 11 Nov at 08:21."),
+    ("2026-10-29 18:07", None, "2026-11-12 22:24", 1052, True, "SOP and schema", "#1052 Google Patents has no applicable SOP, and nothing was found to extract. Chased on 2 Nov, escalated as nothing to extract on 4 Nov, asked again on 11 Nov at 08:21. Xtrium archived the source on 12 Nov at 22:24."),
+    ("2026-11-11 08:21", None, None, 1172, True, "Access", "#1172 MPDS: property values, datasheets and the API need a login or subscription. Asked whether an account is available or the open-access scope is fine."),
+    ("2026-11-11 08:21", None, "2026-11-12 22:24", 1173, True, "Access", "#1173 Matmatch: the site is down and the company is listed as permanently closed. Suggested closing it as unavailable. Xtrium archived the source on 12 Nov at 22:24."),
+    ("2026-11-11 08:21", "2026-11-12 22:27", "2026-11-12 22:36", None, False, "Process", "Asked for more links to keep the momentum going. Xtrium lined up links on 12 Nov at 22:27, one was visible at 22:29 and 20 after a refresh at 22:36."),
 ]
 
 
