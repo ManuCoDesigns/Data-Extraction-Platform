@@ -126,12 +126,31 @@ export function EscalationsPage() {
 
   const copy = async (key: string, only?: string) => {
     const { html, text } = buildSlack(only)
+    let done = false
+    // 1) modern rich copy
     try {
       await navigator.clipboard.write([new ClipboardItem({
         'text/html': new Blob([html], { type: 'text/html' }),
         'text/plain': new Blob([text], { type: 'text/plain' }),
       })])
-    } catch {
+      done = true
+    } catch { /* browser blocks it (e.g. Firefox): use the selection method */ }
+    // 2) rich copy through a selected, rendered block: works in every browser
+    if (!done) {
+      try {
+        const box = document.createElement('div')
+        box.contentEditable = 'true'
+        box.style.cssText = 'position:fixed;left:0;top:0;opacity:0;pointer-events:none;'
+        box.innerHTML = html
+        document.body.appendChild(box)
+        const range = document.createRange(); range.selectNodeContents(box)
+        const sel = window.getSelection(); sel?.removeAllRanges(); sel?.addRange(range)
+        done = document.execCommand('copy')
+        sel?.removeAllRanges(); document.body.removeChild(box)
+      } catch { /* fall through */ }
+    }
+    // 3) plain text
+    if (!done) {
       try { await navigator.clipboard.writeText(text) }
       catch {
         const ta = document.createElement('textarea'); ta.value = text
