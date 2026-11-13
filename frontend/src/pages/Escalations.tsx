@@ -70,72 +70,83 @@ export function EscalationsPage() {
   }
   const shorten = (v: string) => {
     const items = v.split(/;\s*/)
-    return items.length > 6 ? `${items.slice(0, 6).join('; ')}; +${items.length - 6} more` : v
+    let out = items.length > 6 ? `${items.slice(0, 6).join('; ')}; +${items.length - 6} more` : v
+    if (out.length > 180) out = out.slice(0, 180).trimEnd() + '… (full text in the record)'
+    return out
   }
   const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 
-  // Rich copy: Slack pastes the HTML as bold headings and real bullet lists.
-  // Records needing the same short fix are merged into one line, so a source with
-  // 40 records all needing is_supplier = True is one line, not forty.
-  const buildSlack = (only?: string) => {
-    const byX: Record<string, Record<string, any[]>> = {}
-    for (const e of escalations) {
-      const x = e.extractor_name || 'Unassigned'
-      if (only && x !== only) continue
-      ;((byX[x] ||= {})[e.source_name] ||= []).push(e)
-    }
-    let html = '', text = ''
-    for (const x of Object.keys(byX).sort()) {
-      const srcs = byX[x]
-      const n = Object.values(srcs).reduce((a, b) => a + b.length, 0)
-      html += `<p><b>${esc(x)}</b> (${n} record${n === 1 ? '' : 's'} sent back)</p>`
-      text += `*${x}* (${n} record${n === 1 ? '' : 's'} sent back)\n`
-      for (const [src, recs] of Object.entries(srcs)) {
-        const groups: Record<string, string[]> = {}
-        const single: { label: string; fixes: any[]; raw: string }[] = []
-        for (const r of recs) {
-          const fixes = parseFixes(r.message)
-          if (fixes.length === 1 && fixes[0].field && fixes[0].value.length <= 40) {
-            ;(groups[`${fixes[0].field}\u0000${fixes[0].value}`] ||= []).push(r.record_label)
-          } else single.push({ label: r.record_label, fixes, raw: r.message })
-        }
-        html += `<p><b>${esc(src)}</b></p><ul>`
-        text += `\n*${src}*\n`
-        for (const [k, labels] of Object.entries(groups)) {
-          const [f, v] = k.split('\u0000')
-          html += `<li><b>${esc(f)}</b> should be <b>${esc(v)}</b> (${labels.length}): ${esc(labels.join(', '))}</li>`
-          text += `• ${f} should be ${v} (${labels.length}): ${labels.join(', ')}\n`
-        }
-        for (const s of single) {
-          html += `<li><b>${esc(s.label)}</b><ul>`
-          text += `• ${s.label}\n`
-          if (!s.fixes.length) { html += `<li>${esc(s.raw || 'See the record for the feedback')}</li>`; text += `    ◦ ${s.raw || 'See the record for the feedback'}\n` }
-          for (const f of s.fixes) {
+  // One extractor's feedback as Slack-sized parts (each under ~3000 characters, since
+  // Slack turns very long posts into snippets). Records needing the same short fix
+  // are merged into one line.
+  const MAX_PART = 3000
+  const buildParts = (x: string) => {
+    type Item = { src: string; html: string; text: string }
+    const items: Item[] = []
+    const bySrc: Record<string, any[]> = {}
+    for (const e of escalations) if ((e.extractor_name || 'Unassigned') === x) (bySrc[e.source_name] ||= []).push(e)
+    for (const [src, recs] of Object.entries(bySrc)) {
+      const groups: Record<string, string[]> = {}
+      for (const r of recs) {
+        const fixes = parseFixes(r.message)
+        if (fixes.length === 1 && fixes[0].field && fixes[0].value.length <= 40) {
+          ;(groups[`${fixes[0].field}\u0000${fixes[0].value}`] ||= []).push(r.record_label)
+        } else {
+          let h = `<li><b>${esc(r.record_label)}</b><ul>`, t = `• ${r.record_label}\n`
+          if (!fixes.length) { const m = r.message || 'See the record for the feedback'; h += `<li>${esc(m)}</li>`; t += `    ◦ ${m}\n` }
+          for (const f of fixes) {
             const val = shorten(f.value)
-            html += `<li>${f.field ? `<b>${esc(f.field)}</b> should be ` : ''}${esc(val)}${f.url ? ` (<a href="${f.url}">source</a>)` : ''}</li>`
-            text += `    ◦ ${f.field ? f.field + ' should be ' : ''}${val}${f.url ? ' ' + f.url : ''}\n`
+            h += `<li>${f.field ? `<b>${esc(f.field)}</b> should be ` : ''}${esc(val)}${f.url ? ` (<a href="${f.url}">source</a>)` : ''}</li>`
+            t += `    ◦ ${f.field ? f.field + ' should be ' : ''}${val}${f.url ? ' ' + f.url : ''}\n`
           }
-          html += `</ul></li>`
+          items.push({ src, html: h + '</ul></li>', text: t })
         }
-        html += `</ul>`
       }
-      text += '\n'
+      for (const [k, labels] of Object.entries(groups)) {
+        const [f, v] = k.split('\u0000')
+        items.unshift({ src, html: `<li><b>${esc(f)}</b> should be <b>${esc(v)}</b> (${labels.length}): ${esc(labels.join(', '))}</li>`,
+          text: `• ${f} should be ${v} (${labels.length}): ${labels.join(', ')}\n` })
+      }
     }
-    return { html, text: text.trim() }
+    items.sort((p, q) => p.src.localeCompare(q.src))
+    const chunks: Item[][] = []
+    let cur: Item[] = [], len = 0
+    for (const it of items) {
+      if (cur.length && len + it.text.length > MAX_PART) { chunks.push(cur); cur = []; len = 0 }
+      cur.push(it); len += it.text.length
+    }
+    if (cur.length) chunks.push(cur)
+    const total = items.length ? escalations.filter((e: any) => (e.extractor_name || 'Unassigned') === x).length : 0
+    return chunks.map((c, i) => {
+      const tag = chunks.length > 1 ? ` (part ${i + 1} of ${chunks.length})` : ''
+      let html = `<p><b>${esc(x)}</b> · ${total} record${total === 1 ? '' : 's'} sent back${tag}</p>`
+      let text = `*${x}* · ${total} record${total === 1 ? '' : 's'} sent back${tag}\n`
+      let last = ''
+      for (const it of c) {
+        if (it.src !== last) {
+          if (last) html += '</ul>'
+          html += `<p><b>${esc(it.src)}</b></p><ul>`; text += `\n*${it.src}*\n`; last = it.src
+        }
+        html += it.html; text += it.text
+      }
+      return { html: html + '</ul>', text: text.trim() }
+    })
   }
 
-  const copy = async (key: string, only?: string) => {
-    const { html, text } = buildSlack(only)
+  const [partIdx, setPartIdx] = useState<Record<string, number>>({})
+  const copy = async (key: string, x: string) => {
+    const parts = buildParts(x)
+    if (!parts.length) return
+    const i = (partIdx[key] ?? 0) % parts.length
+    const { html, text } = parts[i]
     let done = false
-    // 1) modern rich copy
     try {
       await navigator.clipboard.write([new ClipboardItem({
         'text/html': new Blob([html], { type: 'text/html' }),
         'text/plain': new Blob([text], { type: 'text/plain' }),
       })])
       done = true
-    } catch { /* browser blocks it (e.g. Firefox): use the selection method */ }
-    // 2) rich copy through a selected, rendered block: works in every browser
+    } catch { /* e.g. Firefox: use the selection method */ }
     if (!done) {
       try {
         const box = document.createElement('div')
@@ -149,7 +160,6 @@ export function EscalationsPage() {
         sel?.removeAllRanges(); document.body.removeChild(box)
       } catch { /* fall through */ }
     }
-    // 3) plain text
     if (!done) {
       try { await navigator.clipboard.writeText(text) }
       catch {
@@ -157,7 +167,15 @@ export function EscalationsPage() {
         document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
       }
     }
-    setCopied(key); setTimeout(() => setCopied(''), 2000)
+    setCopied(key); setTimeout(() => setCopied(''), 2500)
+    setPartIdx(p => ({ ...p, [key]: (i + 1) % parts.length }))
+  }
+  const partLabel = (x: string) => {
+    const n = buildParts(x).length
+    const i = (partIdx[x] ?? 0) % Math.max(n, 1)
+    const first = x.split(' ')[0]
+    if (copied === x) return n > 1 ? `Copied part ${((i + n - 1) % n) + 1} of ${n}. Click for the next` : 'Copied'
+    return n > 1 ? `Copy ${first}'s part ${i + 1} of ${n}` : `Copy ${first}'s for Slack`
   }
   const extractorNames = Array.from(new Set(escalations.map((e: any) => e.extractor_name || 'Unassigned'))).sort()
 
@@ -187,13 +205,6 @@ export function EscalationsPage() {
               cursor: 'pointer', fontSize: 13, color: showAll ? 'var(--tx-2563eb)' : 'var(--tx-64748b)', fontWeight: 600, transition: 'all 0.15s' }}>
             {showAll ? 'Showing all extractors' : 'Showing mine only. Click for all'}
           </button>
-          {escalations.length > 0 && (
-            <button onClick={() => copy('all')}
-              style={{ padding: '8px 16px', background: 'var(--bg-eff6ff)', border: '1px solid var(--bd-bfdbfe)', borderRadius: 10,
-                cursor: 'pointer', fontSize: 13, color: 'var(--tx-2563eb)', fontWeight: 600 }}>
-              {copied === 'all' ? 'Copied' : 'Copy all for Slack'}
-            </button>
-          )}
           <button onClick={() => load({ silent: true })}
             style={{ padding: '8px 16px', background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 10,
               cursor: 'pointer', fontSize: 13, color: 'var(--tx-64748b)', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s' }}>
@@ -231,7 +242,7 @@ export function EscalationsPage() {
                 <button onClick={() => copy(x, x)}
                   style={{ padding: '6px 14px', background: 'var(--bg-eff6ff)', border: '1px solid var(--bd-bfdbfe)', borderRadius: 10,
                     cursor: 'pointer', fontSize: 12, color: 'var(--tx-2563eb)', fontWeight: 700 }}>
-                  {copied === x ? 'Copied' : `Copy ${x.split(' ')[0]}'s for Slack`}
+                  {partLabel(x)}
                 </button>
               </div>
           {mine.map((e: any) => (
