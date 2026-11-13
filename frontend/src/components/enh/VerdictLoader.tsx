@@ -47,6 +47,25 @@ export function VerdictLoader({ projectId, onDecisions }: { projectId: string; o
     finally { setBusy('') }
   }
 
+  const flat = (x: any) => x === null || x === undefined || x === '' ? '' : Array.isArray(x) ? x.join('; ') : typeof x === 'object' ? JSON.stringify(x) : String(x)
+  const filtered = () => {
+    const ql = q.trim().toLowerCase()
+    return ((plan?.rows ?? []) as any[]).filter(r => (!fSrc || r.source === fSrc) && (!fKind || (fKind === 'held' ? !r.decision : r.decision === fKind)) && (!ql || `${r.record} ${r.field}`.toLowerCase().includes(ql)))
+  }
+  const download = (all: boolean, format: 'csv' | 'json') => {
+    const rows = (all ? (plan.rows as any[]) : filtered()).map(r => ({ source: r.source, record: r.record, field: r.field, package_verdict: r.verdict, your_decision: (r.key && dec[r.key]) || '', saved_value: flat(r.saved), should_be: flat(r.should_be), page_says: flat(r.quote), why: r.note || '', page_url: r.url || '', record_status: r.status || '' }))
+    if (!rows.length) { toast.error('Nothing to download with these filters'); return }
+    let body: string, type: string
+    if (format === 'json') { body = JSON.stringify(rows, null, 2); type = 'application/json' }
+    else {
+      const cols = Object.keys(rows[0])
+      const cell = (v: string) => `"${String(v).replace(/"/g, '""')}"`
+      body = '\ufeff' + [cols.join(','), ...rows.map(r => cols.map(c => cell((r as any)[c])).join(','))].join('\r\n'); type = 'text/csv;charset=utf-8'
+    }
+    const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([body], { type })); a.download = `verdicts_${new Date().toISOString().slice(0, 10)}.${format}`
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000)
+  }
+
   return (
     <div className="mt-4 pt-3 border-t border-gray-200 text-sm space-y-3">
       <div className="flex items-center gap-3 flex-wrap">
@@ -132,7 +151,7 @@ export function VerdictLoader({ projectId, onDecisions }: { projectId: string; o
                 </>
               )
             })()}
-            <div className="flex gap-2"><Button onClick={() => { use(); setView(false) }} disabled={!Object.keys(dec).length}>Use these decisions</Button><Button variant="secondary" onClick={() => setView(false)}>Close</Button></div>
+            <div className="flex gap-2 flex-wrap"><Button onClick={() => { use(); setView(false) }} disabled={!Object.keys(dec).length}>Use these decisions</Button><Button variant="secondary" onClick={() => download(false, 'csv')}>Download these as CSV</Button><Button variant="secondary" onClick={() => download(true, 'csv')}>Download all as CSV</Button><Button variant="secondary" onClick={() => download(true, 'json')}>Download all as JSON</Button><Button variant="secondary" onClick={() => setView(false)}>Close</Button></div>
           </div>
         </Modal>
       )}
