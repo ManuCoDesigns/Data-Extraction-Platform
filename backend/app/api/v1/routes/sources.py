@@ -687,6 +687,8 @@ def list_escalations(
             "project_id": source.project_id,
             "project_name": project_name(source.project_id),
             "record_label": record_label,
+            "extractor_id": source.assigned_extractor_id,
+            "extractor_name": (source.extractor.full_name if getattr(source, "extractor", None) else None) or "Unassigned",
             "correction_count": r.correction_count or 0,
             "message": latest_message,
             "by": latest_by,

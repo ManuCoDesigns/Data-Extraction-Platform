@@ -56,6 +56,44 @@ export function EscalationsPage() {
   }, [load])
 
   const escalations: any[] = data?.escalations ?? []
+  const [copied, setCopied] = useState('')
+
+  // Slack-ready text: one block per extractor, then per source, then per record.
+  // Slack renders *bold* and bullets, so the text pastes straight in.
+  const slackText = (only?: string) => {
+    const byX: Record<string, Record<string, any[]>> = {}
+    for (const e of escalations) {
+      const x = e.extractor_name || 'Unassigned'
+      if (only && x !== only) continue
+      ;(byX[x] ||= {})[e.source_name] ||= []
+      byX[x][e.source_name].push(e)
+    }
+    const names = Object.keys(byX).sort()
+    const lines: string[] = []
+    for (const x of names) {
+      const n = Object.values(byX[x]).reduce((a, b) => a + b.length, 0)
+      lines.push(`*${x}* (${n} record${n === 1 ? '' : 's'} sent back)`)
+      for (const [src, recs] of Object.entries(byX[x])) {
+        lines.push(`*${src}*`)
+        for (const r of recs) {
+          const msg = (r.message || '').replace(/\s+/g, ' ').trim() || 'See the record for the feedback'
+          lines.push(`• ${r.record_label}: ${msg}`)
+        }
+      }
+      lines.push('')
+    }
+    return lines.join('\n').trim()
+  }
+
+  const copy = async (key: string, text: string) => {
+    try { await navigator.clipboard.writeText(text) }
+    catch {
+      const ta = document.createElement('textarea'); ta.value = text
+      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
+    }
+    setCopied(key); setTimeout(() => setCopied(''), 2000)
+  }
+  const extractorNames = Array.from(new Set(escalations.map((e: any) => e.extractor_name || 'Unassigned'))).sort()
 
   return (
     <div style={{ padding: '24px 28px', maxWidth: 900, margin: '0 auto' }}>
@@ -81,8 +119,15 @@ export function EscalationsPage() {
             style={{ padding: '8px 16px', background: showAll ? 'var(--bg-eff6ff)' : 'var(--bg-fff)',
               border: `1px solid ${showAll ? 'var(--bd-bfdbfe)' : 'var(--bd-e2e8f0)'}`, borderRadius: 10,
               cursor: 'pointer', fontSize: 13, color: showAll ? 'var(--tx-2563eb)' : 'var(--tx-64748b)', fontWeight: 600, transition: 'all 0.15s' }}>
-            {showAll ? 'Showing All' : 'Show Mine Only'}
+            {showAll ? 'Showing all extractors' : 'Showing mine only. Click for all'}
           </button>
+          {escalations.length > 0 && (
+            <button onClick={() => copy('all', slackText())}
+              style={{ padding: '8px 16px', background: 'var(--bg-eff6ff)', border: '1px solid var(--bd-bfdbfe)', borderRadius: 10,
+                cursor: 'pointer', fontSize: 13, color: 'var(--tx-2563eb)', fontWeight: 600 }}>
+              {copied === 'all' ? 'Copied' : 'Copy all for Slack'}
+            </button>
+          )}
           <button onClick={() => load({ silent: true })}
             style={{ padding: '8px 16px', background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 10,
               cursor: 'pointer', fontSize: 13, color: 'var(--tx-64748b)', display: 'flex', alignItems: 'center', gap: 6, transition: 'all 0.15s' }}>
@@ -108,6 +153,19 @@ export function EscalationsPage() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <span style={{ fontSize: 12, color: '#94a3b8' }}>Copy for Slack, one extractor at a time:</span>
+            {extractorNames.map(x => {
+              const n = escalations.filter((e: any) => (e.extractor_name || 'Unassigned') === x).length
+              return (
+                <button key={x} onClick={() => copy(x, slackText(x))}
+                  style={{ padding: '5px 12px', background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 20,
+                    cursor: 'pointer', fontSize: 12, color: 'var(--tx-475569)', fontWeight: 600 }}>
+                  {copied === x ? 'Copied' : `${x} (${n})`}
+                </button>
+              )
+            })}
+          </div>
           {escalations.map((e: any) => (
             <div key={e.record_id} className="relative overflow-hidden" style={{
               background: 'var(--bg-fff)', border: '1px solid var(--bd-fecaca)', borderRadius: 14,
@@ -118,7 +176,7 @@ export function EscalationsPage() {
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tx-1e293b)' }}>{e.source_name}</span>
-                    <span style={{ fontSize: 11, color: '#94a3b8' }}>· {e.project_name}</span>
+                    <span style={{ fontSize: 11, color: '#94a3b8' }}>· {e.project_name} · {e.extractor_name}</span>
                     {e.correction_count > 1 && (
                       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
                         background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff' }}>
