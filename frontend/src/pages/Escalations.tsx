@@ -58,38 +58,85 @@ export function EscalationsPage() {
   const escalations: any[] = data?.escalations ?? []
   const [copied, setCopied] = useState('')
 
-  // Slack-ready text: one block per extractor, then per source, then per record.
-  // Slack renders *bold* and bullets, so the text pastes straight in.
-  const slackText = (only?: string) => {
+  // Turn "Please fix: field: should be X (url) | field2: ..." into separate fixes.
+  const parseFixes = (msg: string) => {
+    const body = (msg || '').replace(/^Please fix:\s*/i, '').trim()
+    if (!body) return []
+    return body.split(/\s+\|\s+/).map(part => {
+      const m = part.match(/^([A-Za-z0-9_ .-]+?):\s*(?:should be\s*)?([\s\S]*?)(?:\s*\((https?:\/\/[^)\s]+)\))?\s*$/)
+      return m ? { field: m[1].trim(), value: m[2].trim(), url: m[3] || '' }
+               : { field: '', value: part.trim(), url: '' }
+    })
+  }
+  const shorten = (v: string) => {
+    const items = v.split(/;\s*/)
+    return items.length > 6 ? `${items.slice(0, 6).join('; ')}; +${items.length - 6} more` : v
+  }
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  // Rich copy: Slack pastes the HTML as bold headings and real bullet lists.
+  // Records needing the same short fix are merged into one line, so a source with
+  // 40 records all needing is_supplier = True is one line, not forty.
+  const buildSlack = (only?: string) => {
     const byX: Record<string, Record<string, any[]>> = {}
     for (const e of escalations) {
       const x = e.extractor_name || 'Unassigned'
       if (only && x !== only) continue
-      ;(byX[x] ||= {})[e.source_name] ||= []
-      byX[x][e.source_name].push(e)
+      ;((byX[x] ||= {})[e.source_name] ||= []).push(e)
     }
-    const names = Object.keys(byX).sort()
-    const lines: string[] = []
-    for (const x of names) {
-      const n = Object.values(byX[x]).reduce((a, b) => a + b.length, 0)
-      lines.push(`*${x}* (${n} record${n === 1 ? '' : 's'} sent back)`)
-      for (const [src, recs] of Object.entries(byX[x])) {
-        lines.push(`*${src}*`)
+    let html = '', text = ''
+    for (const x of Object.keys(byX).sort()) {
+      const srcs = byX[x]
+      const n = Object.values(srcs).reduce((a, b) => a + b.length, 0)
+      html += `<p><b>${esc(x)}</b> (${n} record${n === 1 ? '' : 's'} sent back)</p>`
+      text += `*${x}* (${n} record${n === 1 ? '' : 's'} sent back)\n`
+      for (const [src, recs] of Object.entries(srcs)) {
+        const groups: Record<string, string[]> = {}
+        const single: { label: string; fixes: any[]; raw: string }[] = []
         for (const r of recs) {
-          const msg = (r.message || '').replace(/\s+/g, ' ').trim() || 'See the record for the feedback'
-          lines.push(`• ${r.record_label}: ${msg}`)
+          const fixes = parseFixes(r.message)
+          if (fixes.length === 1 && fixes[0].field && fixes[0].value.length <= 40) {
+            ;(groups[`${fixes[0].field}\u0000${fixes[0].value}`] ||= []).push(r.record_label)
+          } else single.push({ label: r.record_label, fixes, raw: r.message })
         }
+        html += `<p><b>${esc(src)}</b></p><ul>`
+        text += `\n*${src}*\n`
+        for (const [k, labels] of Object.entries(groups)) {
+          const [f, v] = k.split('\u0000')
+          html += `<li><b>${esc(f)}</b> should be <b>${esc(v)}</b> (${labels.length}): ${esc(labels.join(', '))}</li>`
+          text += `• ${f} should be ${v} (${labels.length}): ${labels.join(', ')}\n`
+        }
+        for (const s of single) {
+          html += `<li><b>${esc(s.label)}</b><ul>`
+          text += `• ${s.label}\n`
+          if (!s.fixes.length) { html += `<li>${esc(s.raw || 'See the record for the feedback')}</li>`; text += `    ◦ ${s.raw || 'See the record for the feedback'}\n` }
+          for (const f of s.fixes) {
+            const val = shorten(f.value)
+            html += `<li>${f.field ? `<b>${esc(f.field)}</b> should be ` : ''}${esc(val)}${f.url ? ` (<a href="${f.url}">source</a>)` : ''}</li>`
+            text += `    ◦ ${f.field ? f.field + ' should be ' : ''}${val}${f.url ? ' ' + f.url : ''}\n`
+          }
+          html += `</ul></li>`
+        }
+        html += `</ul>`
       }
-      lines.push('')
+      text += '\n'
     }
-    return lines.join('\n').trim()
+    return { html, text: text.trim() }
   }
 
-  const copy = async (key: string, text: string) => {
-    try { await navigator.clipboard.writeText(text) }
-    catch {
-      const ta = document.createElement('textarea'); ta.value = text
-      document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
+  const copy = async (key: string, only?: string) => {
+    const { html, text } = buildSlack(only)
+    try {
+      await navigator.clipboard.write([new ClipboardItem({
+        'text/html': new Blob([html], { type: 'text/html' }),
+        'text/plain': new Blob([text], { type: 'text/plain' }),
+      })])
+    } catch {
+      try { await navigator.clipboard.writeText(text) }
+      catch {
+        const ta = document.createElement('textarea'); ta.value = text
+        document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta)
+      }
     }
     setCopied(key); setTimeout(() => setCopied(''), 2000)
   }
@@ -122,7 +169,7 @@ export function EscalationsPage() {
             {showAll ? 'Showing all extractors' : 'Showing mine only. Click for all'}
           </button>
           {escalations.length > 0 && (
-            <button onClick={() => copy('all', slackText())}
+            <button onClick={() => copy('all')}
               style={{ padding: '8px 16px', background: 'var(--bg-eff6ff)', border: '1px solid var(--bd-bfdbfe)', borderRadius: 10,
                 cursor: 'pointer', fontSize: 13, color: 'var(--tx-2563eb)', fontWeight: 600 }}>
               {copied === 'all' ? 'Copied' : 'Copy all for Slack'}
@@ -153,20 +200,22 @@ export function EscalationsPage() {
         </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: '#94a3b8' }}>Copy for Slack, one extractor at a time:</span>
-            {extractorNames.map(x => {
-              const n = escalations.filter((e: any) => (e.extractor_name || 'Unassigned') === x).length
-              return (
-                <button key={x} onClick={() => copy(x, slackText(x))}
-                  style={{ padding: '5px 12px', background: 'var(--bg-fff)', border: '1px solid var(--bd-e2e8f0)', borderRadius: 20,
-                    cursor: 'pointer', fontSize: 12, color: 'var(--tx-475569)', fontWeight: 600 }}>
-                  {copied === x ? 'Copied' : `${x} (${n})`}
+          {extractorNames.map(x => {
+            const mine = escalations.filter((e: any) => (e.extractor_name || 'Unassigned') === x)
+            return (
+            <div key={x} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                marginTop: 8, padding: '8px 4px', borderBottom: '1px solid var(--bd-e2e8f0)' }}>
+                <span style={{ fontSize: 15, fontWeight: 800, color: 'var(--tx-1e293b)' }}>
+                  {x} <span style={{ fontSize: 12, fontWeight: 600, color: '#94a3b8' }}>{mine.length} sent back</span>
+                </span>
+                <button onClick={() => copy(x, x)}
+                  style={{ padding: '6px 14px', background: 'var(--bg-eff6ff)', border: '1px solid var(--bd-bfdbfe)', borderRadius: 10,
+                    cursor: 'pointer', fontSize: 12, color: 'var(--tx-2563eb)', fontWeight: 700 }}>
+                  {copied === x ? 'Copied' : `Copy ${x.split(' ')[0]}'s for Slack`}
                 </button>
-              )
-            })}
-          </div>
-          {escalations.map((e: any) => (
+              </div>
+          {mine.map((e: any) => (
             <div key={e.record_id} className="relative overflow-hidden" style={{
               background: 'var(--bg-fff)', border: '1px solid var(--bd-fecaca)', borderRadius: 14,
               padding: '16px 18px 16px 21px', boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
@@ -241,6 +290,9 @@ export function EscalationsPage() {
               )}
             </div>
           ))}
+            </div>
+            )
+          })}
         </div>
       )}
     </div>
