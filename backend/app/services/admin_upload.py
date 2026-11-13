@@ -31,7 +31,7 @@ from app.models.all_models import AdminCopy, AuditAction, AuditLog, ExtractedRec
 from app.services import record_locks as rl
 
 MODES = ("draft", "reference", "submit")
-NAME_KEYS = ("canonical_name", "company_name", "segment_name", "regulation_name", "product_name", "material_name", "name")
+NAME_KEYS = ("canonical_name", "company_name", "segment_name", "regulation_name", "product_name", "material_name", "lab_name", "name")
 
 
 def resolve(user, mode: str | None) -> str | None:

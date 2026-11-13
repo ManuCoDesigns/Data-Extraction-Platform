@@ -10,7 +10,7 @@ import json
 import re
 import zipfile
 
-NAME_KEYS = ("canonical_name", "company_name", "material_name", "segment_name", "supplier_name", "name", "title")
+NAME_KEYS = ("canonical_name", "company_name", "material_name", "segment_name", "supplier_name", "lab_name", "regulation_name", "product_name", "name", "title")
 IGNORE_DEFAULT = ("retrieved_at",)  # a timestamp changes every time someone re-checks; it is not an accuracy error
 
 
