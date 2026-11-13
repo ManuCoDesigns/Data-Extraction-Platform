@@ -82,6 +82,7 @@ def plan(sources: list, records_of, verdicts: list[dict]) -> dict:
     per_source: dict = {}
     per_record: dict = {}
     unmatched: list = []
+    rows: list = []
     for v in verdicts:
         cands = by_name.get(_norm(v["source"]), [])
         s = max(cands, key=lambda x: len(records_of(x.id))) if cands else None
@@ -104,6 +105,10 @@ def plan(sources: list, records_of, verdicts: list[dict]) -> dict:
             st["unmatched"] += 1
             unmatched.append({"source": v["source"], "record": v.get("record"), "field": field, "why": "Record not found on the platform"})
             continue
+        rows.append({"key": None if field.startswith("(") else f"{rec.id}|{field}", "source": s.name, "record": v.get("record"), "record_id": rec.id, "field": field, "verdict": verdict,
+                     "saved": (rec.extracted_fields or {}).get(field) if not field.startswith("(") else v.get("saved"), "should_be": v.get("correct_value"), "url": v.get("evidence_url"),
+                     "quote": v.get("quote"), "note": v.get("note") or "", "decision": "wrong" if verdict in WRONG else "right" if verdict in RIGHT else None,
+                     "status": getattr(rec.review_status, "value", str(rec.review_status))})
         if field.startswith("("):      # a record-level verdict, such as a hold: it has no field to decide
             continue
         if verdict in WRONG:
@@ -130,6 +135,6 @@ def plan(sources: list, records_of, verdicts: list[dict]) -> dict:
             skip = "Already returned" if slot["status"] == "rejected" else "Already approved"
         send_back.append({**slot, "fields": [i["field"] for i in slot["items"]], "comment": comment[:1000], "skip": skip})
     send_back.sort(key=lambda x: (x["source"], x["record"] or ""))
-    return {"decisions": decisions, "sources": list(per_source.values()), "send_back": send_back, "unmatched": unmatched,
+    return {"rows": rows, "decisions": decisions, "sources": list(per_source.values()), "send_back": send_back, "unmatched": unmatched,
             "totals": {"verdicts": len(verdicts), "wrong": sum(1 for d in decisions.values() if d == "wrong"), "right": sum(1 for d in decisions.values() if d == "right"),
                        "records_to_send_back": sum(1 for x in send_back if not x["skip"]), "records_skipped": sum(1 for x in send_back if x["skip"]), "unmatched": len(unmatched)}}
