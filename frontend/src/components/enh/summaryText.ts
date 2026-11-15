@@ -11,7 +11,7 @@ export interface SummaryInput {
   /** Sums of the activity series over the chosen period. */
   activity?: { extracted: number; peers: number; sentBack: number; delivered: number }
   /** Every source not yet delivered, so the reader sees which ones are behind the stage counts. */
-  sources?: { name: string; extractor: string | null; stage: string; peersDone: number; peersTotal: number; records: number; sentBack: number; days: number | null }[]
+  sources?: { name: string; extractor: string | null; stage: string; peersDone: number; peersTotal: number; records: number; sentBack: number; toFix?: number; days: number | null }[]
   now?: Date
 }
 
@@ -31,7 +31,8 @@ export function buildSummary(i: SummaryInput): string {
   out.push(`Sources: ${t.sources} in total, ${t.delivered} delivered (${t.percent}%)`)
   for (const s of i.stages) out.push(`• ${s.label}: ${s.count}`)
   out.push('')
-  out.push(`Records: ${t.records} extracted, ${t.records_approved} approved, ${t.records_sent_back} sent back for fixes (${sentPct}%)`)
+  const open = t.records_to_fix
+  out.push(`Records: ${t.records} extracted, ${t.records_approved} approved, ${t.records_sent_back} sent back for fixes (${sentPct}%)` + (open != null && t.records_sent_back ? `, ${open} still to fix` : ''))
   out.push(`Peer reviews: ${t.peers_done} of ${t.peers_total} submitted${t.peers_total ? ` (${peerPct}%)` : ''}`)
   out.push(`Sent to the client: ${t.submitted_to_client ?? 0}`)
   out.push(`Waiting 7+ days without an update: ${t.stuck}`)
@@ -47,7 +48,8 @@ export function buildSummary(i: SummaryInput): string {
       const bits = [s.stage]
       if (s.extractor) bits.push(`extractor ${nice(s.extractor)}`)
       if (s.peersTotal) bits.push(`peer reviews ${s.peersDone} of ${s.peersTotal}`)
-      bits.push(s.records ? rec(s.records) + (s.sentBack ? `, ${s.sentBack} sent back` : '') : 'no records')
+      bits.push(s.records ? rec(s.records) + (s.sentBack ? `, ${s.sentBack} sent back${s.toFix != null ? ` (${s.toFix} still to fix)` : ''}` : '') : 'no records')
+      if (s.stage === 'needs fixes' && s.sentBack && s.toFix === 0) bits.push('fixes done, not yet sent back to the reviewers')
       out.push(`• ${s.name}: ${bits.join(', ')}`)
     }
     if (i.sources.length > 12) out.push(`• and ${i.sources.length - 12} more`)

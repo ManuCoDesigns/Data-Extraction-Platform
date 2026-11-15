@@ -256,6 +256,12 @@ export function EscalationsPage() {
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4, flexWrap: 'wrap' }}>
                     <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--tx-1e293b)' }}>{e.source_name}</span>
                     <span style={{ fontSize: 11, color: '#94a3b8' }}>· {e.project_name} · {e.extractor_name}</span>
+                    {e.fixed && (
+                      <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
+                        background: 'var(--bg-eff6ff)', color: 'var(--tx-2563eb)', border: '1px solid var(--bd-bfdbfe)' }}>
+                        {e.source_status === 'changes_requested' ? 'Fixed, not sent back to reviewers yet' : 'Fixed'}
+                      </span>
+                    )}
                     {e.correction_count > 1 && (
                       <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 8px', borderRadius: 20,
                         background: 'linear-gradient(135deg,#ef4444,#dc2626)', color: '#fff' }}>

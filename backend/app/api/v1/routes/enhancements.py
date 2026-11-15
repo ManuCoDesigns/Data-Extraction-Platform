@@ -200,16 +200,17 @@ def workflow_monitor(project_id: str | None = None, days: int = Query(30, ge=1, 
 
     # Records per source: total, valid, approved, sent back at least once.
     rec = {}
-    for sid, total, valid, approved, returned in (
+    for sid, total, valid, approved, returned, to_fix in (
         db.query(ExtractionJob.source_id, func.count(ExtractedRecord.id),
                  func.coalesce(func.sum(case((ExtractedRecord.is_schema_valid == True, 1), else_=0)), 0),  # noqa: E712
                  func.coalesce(func.sum(case((ExtractedRecord.review_status == ReviewStatus.APPROVED, 1), else_=0)), 0),
-                 func.coalesce(func.sum(case((ExtractedRecord.correction_count > 0, 1), else_=0)), 0))
+                 func.coalesce(func.sum(case((ExtractedRecord.correction_count > 0, 1), else_=0)), 0),
+                 func.coalesce(func.sum(case((ExtractedRecord.review_status == ReviewStatus.REJECTED, 1), else_=0)), 0))
         .join(ExtractedRecord, ExtractedRecord.job_id == ExtractionJob.id)
         .filter(ExtractionJob.source_id.in_(ids), ExtractedRecord.is_escalation_only == False)  # noqa: E712
         .group_by(ExtractionJob.source_id).all()
     ):
-        rec[sid] = (int(total), int(valid), int(approved), int(returned))
+        rec[sid] = (int(total), int(valid), int(approved), int(returned), int(to_fix))
 
     stages = {k: 0 for k in MONITOR_STAGES}
     rows, by_project = [], {}
@@ -218,12 +219,12 @@ def workflow_monitor(project_id: str | None = None, days: int = Query(30, ge=1, 
         done = sum(1 for p in pr if p.status == "submitted")
         stage = _monitor_stage(s, done, len(pr))
         stages[stage] += 1
-        total, valid, approved, returned = rec.get(s.id, (0, 0, 0, 0))
+        total, valid, approved, returned, to_fix = rec.get(s.id, (0, 0, 0, 0, 0))
         upd = enh.aware(s.updated_at) if s.updated_at else None
         rows.append({
             "source_id": s.id, "project_id": s.project_id, "project": pnames.get(s.project_id), "name": s.name,
             "item_no": s.external_ref_id, "stage": stage, "extractor": unames.get(s.assigned_extractor_id),
-            "peers_done": done, "peers_total": len(pr), "records": total, "valid": valid, "approved": approved, "sent_back": returned,
+            "peers_done": done, "peers_total": len(pr), "records": total, "valid": valid, "approved": approved, "sent_back": returned, "to_fix": to_fix,
             "days_in_stage": max(0, (now - upd).days) if upd else None, "updated_at": s.updated_at,
             "submitted_to_client": bool(getattr(s, "xtrium_submitted_at", None)),
         })
@@ -272,7 +273,7 @@ def workflow_monitor(project_id: str | None = None, days: int = Query(30, ge=1, 
     return {
         "generated_at": now, "days": days, "project_id": project_id, "stages": stages,
         "totals": {"sources": len(srcs), "delivered": stages["delivered"], "percent": round(100 * stages["delivered"] / len(srcs)),
-                   "records": tot_rec, "records_approved": tot_app, "records_sent_back": tot_ret,
+                   "records": tot_rec, "records_approved": tot_app, "records_sent_back": tot_ret, "records_to_fix": sum(v[4] for v in rec.values()),
                    "peers_done": peers_done, "peers_total": peers_total, "stuck": stuck,
                    "submitted_to_client": sum(1 for r in rows if r["submitted_to_client"])},
         "series": {"buckets": [b.date().isoformat() for b in buckets], "step_days": step, **series},

@@ -152,6 +152,20 @@ function SourceDetailInner() {
       setEscalating(false)
     }
   }
+  const [handingBack, setHandingBack] = useState(false)
+  const handleSendBackToReviewers = async () => {
+    if (!sourceId) return
+    setHandingBack(true)
+    try {
+      await sourcesApi.sendBackToReviewers(sourceId)
+      toast.success('Sent back to the reviewers')
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Could not send it back')
+    } finally {
+      setHandingBack(false)
+    }
+  }
   const [showEditSource, setShowEditSource] = useState(false)
   const [editSourceForm, setEditSourceForm] = useState({ name: '', description: '', website_url: '' })
   const [showSchemaJson, setShowSchemaJson] = useState(false)
@@ -998,6 +1012,11 @@ function SourceDetailInner() {
           {(isExtractor || isReviewer) && (
             <Button variant="secondary" size="sm" onClick={() => setShowVersions(true)}>
               <HistoryIcon className="w-3.5 h-3.5" /> Versions
+            </Button>
+          )}
+          {isExtractor && source.status === 'changes_requested' && (
+            <Button size="sm" onClick={handleSendBackToReviewers} loading={handingBack}>
+              <CheckCircle className="w-3.5 h-3.5" /> I have fixed them: send back to reviewers
             </Button>
           )}
           {isExtractor && source.status !== 'approved' && (

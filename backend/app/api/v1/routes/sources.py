@@ -690,6 +690,8 @@ def list_escalations(
             "extractor_id": source.assigned_extractor_id,
             "extractor_name": (source.extractor.full_name if getattr(source, "extractor", None) else None) or "Unassigned",
             "correction_count": r.correction_count or 0,
+            "fixed": r.review_status != ReviewStatus.REJECTED,
+            "source_status": source.status.value,
             "message": latest_message,
             "by": latest_by,
             "role": latest_role,
@@ -3408,6 +3410,41 @@ def dismiss_flag(
 
     db.commit()
     return {"dismissed": removed, "remaining_flags": len(flags)}
+
+
+@router.post("/{source_id}/send-back-to-reviewers")
+def send_back_to_reviewers(
+    source_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    The extractor's "I have fixed the returned records" step. A source stays on "Changes Requested"
+    after the fixes until someone hands it back; this does that, so the reviewers can look again.
+    Allowed only when no record is still waiting for a fix.
+    """
+    source = _get_source_or_404(source_id, db, current_user)
+    if not _is_assigned_extractor(current_user, source):
+        raise HTTPException(status_code=403, detail="Only the assigned extractor or an admin can send this source back to the reviewers")
+    if source.status != SourceStatus.CHANGES_REQUESTED:
+        raise HTTPException(status_code=409, detail="This source is not waiting for fixes, so there is nothing to send back.")
+    still_open = (db.query(ExtractedRecord.id).join(ExtractionJob, ExtractedRecord.job_id == ExtractionJob.id)
+                  .filter(ExtractionJob.source_id == source.id, ExtractedRecord.is_escalation_only == False,  # noqa: E712
+                          ExtractedRecord.review_status == ReviewStatus.REJECTED).count())
+    if still_open:
+        raise HTTPException(status_code=409, detail=f"{still_open} record{'s are' if still_open != 1 else ' is'} still waiting for a fix. Fix {'them' if still_open != 1 else 'it'} first, then send the source back.")
+    now = datetime.now(timezone.utc)
+    source.status = SourceStatus.READY_FOR_REVIEW
+    source.updated_at = now
+    for pr in source.peer_reviews:
+        if pr.status != "submitted":
+            notify(db, pr.user_id, f"Back from the extractor: '{source.name}'",
+                   "The returned records were fixed. Please look at them again and submit your review.", src_link(source), "peer_requested", ACTION)
+    db.add(AuditLog(user_id=current_user.id, project_id=source.project_id, source_id=source.id, action=AuditAction.SOURCE_STATUS_CHANGED,
+                    before_value={"status": "changes_requested"}, after_value={"status": "ready_for_review", "via": "send_back_to_reviewers"}))
+    db.commit()
+    db.refresh(source)
+    return {"message": "Sent back to the reviewers", "source_id": source.id, "status": source.status.value}
 
 
 class EscalateNoDataRequest(BaseModel):

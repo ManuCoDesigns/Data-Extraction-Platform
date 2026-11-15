@@ -20,7 +20,7 @@ const STAGE = Object.fromEntries(STAGES.map(s => [s.key, s])) as Record<Stage, t
 
 interface Row {
   source_id: string; project_id: string; project: string; name: string; item_no?: string | number | null; stage: Stage; extractor?: string | null
-  peers_done: number; peers_total: number; records: number; valid: number; approved: number; sent_back: number; days_in_stage: number | null; updated_at?: string
+  peers_done: number; peers_total: number; records: number; valid: number; approved: number; sent_back: number; to_fix?: number; days_in_stage: number | null; updated_at?: string
 }
 interface Data {
   stages: Record<Stage, number>; totals: Record<string, number>
@@ -154,7 +154,7 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
       stuck: (data.sources ?? []).filter(r => r.stage !== 'delivered' && (r.days_in_stage ?? 0) >= 7).map(r => ({ name: r.name, project: r.project, days: r.days_in_stage ?? 0 })),
       people: people.filter(p => p.ext_open || p.peer_pending || p.ext_delivered).map(p => ({ name: p.name, extracting: p.ext_open, waiting: p.peer_pending, delivered: p.ext_delivered })),
       activity: { extracted: sum(data.series.extracted), peers: sum(data.series.peer_submitted), sentBack: sum(data.series.sent_back), delivered: sum(data.series.delivered) },
-      sources: (data.sources ?? []).filter(r => r.stage !== 'delivered').map(r => ({ name: r.name, extractor: r.extractor ?? null, stage: STAGE[r.stage].label.toLowerCase(), peersDone: r.peers_done, peersTotal: r.peers_total, records: r.records, sentBack: r.sent_back, days: r.days_in_stage })),
+      sources: (data.sources ?? []).filter(r => r.stage !== 'delivered').map(r => ({ name: r.name, extractor: r.extractor ?? null, stage: STAGE[r.stage].label.toLowerCase(), peersDone: r.peers_done, peersTotal: r.peers_total, records: r.records, sentBack: r.sent_back, toFix: r.to_fix, days: r.days_in_stage })),
     })
     if (await copyText(text)) toast.success('Summary copied. Paste it into Slack or an email.')
     else toast.error("Couldn't copy. Select the text yourself or try again.")
