@@ -144,6 +144,7 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
     } catch (e: any) { toast.error(e?.response?.data?.detail || "Couldn't send the reminder") } finally { setNudging(false) }
   }
 
+  const sum = (a: number[]) => a.reduce((x, y) => x + y, 0)
   const copySummary = async () => {
     if (!data) return
     const text = buildSummary({
@@ -152,6 +153,8 @@ export function WorkflowMonitor({ project, days, projects, onPickProject }: { pr
       projects: data.projects.map(p => ({ name: p.name, sources: p.sources, delivered: p.stages.delivered ?? 0, records: p.records, approved: p.approved })),
       stuck: (data.sources ?? []).filter(r => r.stage !== 'delivered' && (r.days_in_stage ?? 0) >= 7).map(r => ({ name: r.name, project: r.project, days: r.days_in_stage ?? 0 })),
       people: people.filter(p => p.ext_open || p.peer_pending || p.ext_delivered).map(p => ({ name: p.name, extracting: p.ext_open, waiting: p.peer_pending, delivered: p.ext_delivered })),
+      activity: { extracted: sum(data.series.extracted), peers: sum(data.series.peer_submitted), sentBack: sum(data.series.sent_back), delivered: sum(data.series.delivered) },
+      sources: (data.sources ?? []).filter(r => r.stage !== 'delivered').map(r => ({ name: r.name, extractor: r.extractor ?? null, stage: STAGE[r.stage].label.toLowerCase(), peersDone: r.peers_done, peersTotal: r.peers_total, records: r.records, sentBack: r.sent_back, days: r.days_in_stage })),
     })
     if (await copyText(text)) toast.success('Summary copied. Paste it into Slack or an email.')
     else toast.error("Couldn't copy. Select the text yourself or try again.")

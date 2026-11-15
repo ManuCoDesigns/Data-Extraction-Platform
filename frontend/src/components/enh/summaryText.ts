@@ -7,10 +7,16 @@ export interface SummaryInput {
   totals: Record<string, number>
   projects: { name: string; sources: number; delivered: number; records: number; approved: number }[]
   stuck: { name: string; project: string; days: number }[]
-  people: { name: string; extracting: number; waiting: number; delivered: number }[]
+  people: { name: string; extracting: number; waiting: number; delivered: number; sentBack?: number }[]
+  /** Sums of the activity series over the chosen period. */
+  activity?: { extracted: number; peers: number; sentBack: number; delivered: number }
+  /** Every source not yet delivered, so the reader sees which ones are behind the stage counts. */
+  sources?: { name: string; extractor: string | null; stage: string; peersDone: number; peersTotal: number; records: number; sentBack: number; days: number | null }[]
   now?: Date
 }
 
+// Some accounts are stored in capitals (SARAH IRUSH); show them as names.
+const nice = (n: string) => (n && n === n.toUpperCase() ? n.toLowerCase().replace(/\b\w/g, c => c.toUpperCase()) : n)
 const rec = (n: number) => `${n} ${n === 1 ? 'record' : 'records'}`
 
 export function buildSummary(i: SummaryInput): string {
@@ -20,7 +26,7 @@ export function buildSummary(i: SummaryInput): string {
   const peerPct = t.peers_total ? Math.round((100 * t.peers_done) / t.peers_total) : 0
   const out: string[] = []
   out.push(`Progress summary: ${i.scope}`)
-  out.push(`${date}, activity from the last ${i.days} days`)
+  out.push(`Status as of ${date}`)
   out.push('')
   out.push(`Sources: ${t.sources} in total, ${t.delivered} delivered (${t.percent}%)`)
   for (const s of i.stages) out.push(`• ${s.label}: ${s.count}`)
@@ -28,7 +34,24 @@ export function buildSummary(i: SummaryInput): string {
   out.push(`Records: ${t.records} extracted, ${t.records_approved} approved, ${t.records_sent_back} sent back for fixes (${sentPct}%)`)
   out.push(`Peer reviews: ${t.peers_done} of ${t.peers_total} submitted${t.peers_total ? ` (${peerPct}%)` : ''}`)
   out.push(`Sent to the client: ${t.submitted_to_client ?? 0}`)
-  out.push(`Waiting 7+ days: ${t.stuck}`)
+  out.push(`Waiting 7+ days without an update: ${t.stuck}`)
+  if (i.activity) {
+    const a = i.activity
+    out.push('')
+    out.push(`Last ${i.days} days: ${a.extracted} records extracted, ${a.peers} peer reviews submitted, ${a.sentBack} records sent back, ${a.delivered} ${a.delivered === 1 ? 'source' : 'sources'} delivered`)
+  }
+  if (i.sources && i.sources.length) {
+    out.push('')
+    out.push('Sources still open:')
+    for (const s of i.sources.slice(0, 12)) {
+      const bits = [s.stage]
+      if (s.extractor) bits.push(`extractor ${nice(s.extractor)}`)
+      if (s.peersTotal) bits.push(`peer reviews ${s.peersDone} of ${s.peersTotal}`)
+      if (s.records) bits.push(rec(s.records) + (s.sentBack ? `, ${s.sentBack} sent back` : ''))
+      out.push(`• ${s.name}: ${bits.join(', ')}`)
+    }
+    if (i.sources.length > 12) out.push(`• and ${i.sources.length - 12} more`)
+  }
   if (i.stuck.length) {
     out.push('')
     out.push('Waiting longest:')
@@ -43,7 +66,7 @@ export function buildSummary(i: SummaryInput): string {
   if (i.withNames && i.people.length) {
     out.push('')
     out.push('Who has what:')
-    for (const p of i.people) out.push(`• ${p.name}: extracting ${p.extracting}, peer reviews waiting ${p.waiting}, delivered ${p.delivered}`)
+    for (const p of i.people) out.push(`• ${nice(p.name)}: ${p.extracting} ${p.extracting === 1 ? 'source' : 'sources'} open, ${p.waiting} peer ${p.waiting === 1 ? 'review' : 'reviews'} waiting, ${p.delivered} delivered`)
   }
   return out.join('\n')
 }
