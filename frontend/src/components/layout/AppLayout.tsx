@@ -142,7 +142,7 @@ export function AppLayout() {
 
   useEffect(() => {
     if (!user) return
-    const loadEscalations = () => sourcesApi.escalations(true).then((d: any) => setEscalationCount(d?.count ?? 0)).catch(() => {})
+    const loadEscalations = () => sourcesApi.escalations(true).then((d: any) => setEscalationCount(d?.to_fix ?? d?.count ?? 0)).catch(() => {})
     loadEscalations()
     const iv = setInterval(loadEscalations, 60000)
     return () => clearInterval(iv)

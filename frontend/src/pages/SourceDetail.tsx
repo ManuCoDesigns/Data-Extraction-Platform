@@ -1457,9 +1457,11 @@ function SourceDetailInner() {
 
           {records.length === 0 ? (
             <EmptyState
-              title="No records yet"
-              description={isExtractor ? 'Upload a file or use Auto-Scrape Website to extract records.' : 'Waiting for the extractor to upload data.'}
-              action={isExtractor ? (
+              title={validityFilter === 'invalid' ? 'No records need fixes' : validityFilter === 'valid' ? 'No schema-valid records' : 'No records yet'}
+              description={validityFilter ? 'Nothing matches this filter. Choose All to see every record.' : isExtractor ? 'Upload a file or use Auto-Scrape Website to extract records.' : 'Waiting for the extractor to upload data.'}
+              action={validityFilter ? (
+                <Button variant="secondary" onClick={() => setValidityFilter('')}>Show all records</Button>
+              ) : isExtractor ? (
                 <div className="flex gap-2 flex-wrap justify-center">
                   <Button onClick={() => setShowUpload(true)}><Upload className="w-4 h-4" /> Upload File</Button>
                   {source.website_url && (

@@ -702,6 +702,7 @@ def list_escalations(
     return {
         "escalations": escalations,
         "count": len(escalations),
+        "to_fix": len([e for e in escalations if not e["fixed"]]),
     }
 
 
