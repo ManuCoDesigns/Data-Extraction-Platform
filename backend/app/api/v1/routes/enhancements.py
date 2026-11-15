@@ -253,7 +253,7 @@ def workflow_monitor(project_id: str | None = None, days: int = Query(30, ge=1, 
                           ExtractedRecord.created_at >= first).all()):
         i = idx(ts)
         if i is not None: series["extracted"][i] += 1
-    for (ts,) in db.query(SourcePeerReview.submitted_at).filter(SourcePeerReview.source_id.in_(ids), SourcePeerReview.submitted_at >= first).all():
+    for (ts,) in db.query(SourcePeerReview.submitted_at).filter(SourcePeerReview.source_id.in_(ids), SourcePeerReview.status == "submitted", SourcePeerReview.submitted_at >= first).all():
         i = idx(ts)
         if i is not None: series["peer_submitted"][i] += 1
     for (ts,) in (db.query(AuditLog.timestamp).join(ExtractedRecord, AuditLog.record_id == ExtractedRecord.id)

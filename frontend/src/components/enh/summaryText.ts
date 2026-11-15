@@ -47,7 +47,7 @@ export function buildSummary(i: SummaryInput): string {
       const bits = [s.stage]
       if (s.extractor) bits.push(`extractor ${nice(s.extractor)}`)
       if (s.peersTotal) bits.push(`peer reviews ${s.peersDone} of ${s.peersTotal}`)
-      if (s.records) bits.push(rec(s.records) + (s.sentBack ? `, ${s.sentBack} sent back` : ''))
+      bits.push(s.records ? rec(s.records) + (s.sentBack ? `, ${s.sentBack} sent back` : '') : 'no records')
       out.push(`• ${s.name}: ${bits.join(', ')}`)
     }
     if (i.sources.length > 12) out.push(`• and ${i.sources.length - 12} more`)
