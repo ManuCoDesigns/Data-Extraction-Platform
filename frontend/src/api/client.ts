@@ -490,6 +490,24 @@ function triggerBrowserDownload(blob: Blob, filename: string) {
 }
 
 // ─── Quality ──────────────────────────────────────────────────────────────────
+// Downloads ask for a file (blob), so an error reply arrives as a blob too. Read its message so the page can show the real reason.
+async function blobGet(url: string, params: any, timeout?: number) {
+  try {
+    return await api.get(url, { params, responseType: 'blob', ...(timeout ? { timeout } : {}) })
+  } catch (e: any) {
+    const d = e?.response?.data
+    if (d instanceof Blob) {
+      try {
+        const t = await d.text()
+        let detail = t
+        try { detail = JSON.parse(t)?.detail ?? t } catch { /* plain text */ }
+        e.response.data = { detail: typeof detail === 'string' ? detail : JSON.stringify(detail) }
+      } catch { /* keep original */ }
+    }
+    throw e
+  }
+}
+
 export const qualityApi = {
   recordFindings: (recordId: string) => api.get(`/quality/records/${recordId}/findings`).then(r => r.data),
   raise: (body: { record_id: string; field?: string; category: string; severity: string; note?: string }) => api.post('/quality/findings', body).then(r => r.data),
@@ -572,12 +590,12 @@ export const qualityApi = {
   batchReport: (batch: string, project_id?: string) => api.get('/quality/batch-report', { params: { batch, project_id } }).then(r => r.data),
   processReport: (params: { project_id?: string; source_id?: string; date_from?: string; date_to?: string }) => api.get('/quality/process-report', { params }).then(r => r.data),
   exportProcessReport: async (params: { project_id?: string; source_id?: string; date_from?: string; date_to?: string }) => {
-    const r = await api.get('/quality/process-report/export', { params, responseType: 'blob' })
+    const r = await blobGet('/quality/process-report/export', params)
     const url = URL.createObjectURL(new Blob([r.data]))
     const a = document.createElement('a'); a.href = url; a.download = `process_report_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
   },
   exportExtractorReport: async (params: { project_id?: string; source_id?: string; user_id?: string; days?: number; date_from?: string; date_to?: string }) => {
-    const r = await api.get('/quality/extractor-report/export', { params, responseType: 'blob' })
+    const r = await blobGet('/quality/extractor-report/export', params)
     const url = URL.createObjectURL(new Blob([r.data]))
     const a = document.createElement('a'); a.href = url; a.download = `extractor_report_${new Date().toISOString().slice(0, 10)}.xlsx`; a.click(); URL.revokeObjectURL(url)
   },
