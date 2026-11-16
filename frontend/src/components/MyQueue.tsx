@@ -32,6 +32,8 @@ export function classify(s: Source, userId: string | undefined): QueueItem {
   const isReviewer = isPeerOf(s, userId)
   const rank = RANK[s.status] ?? 9
   if (s.status === 'approved') return { source: s, role: isExtractor ? 'extract' : 'review', group: 'done', rank }
+  // Flagged in Link triage while still at the start: set aside until a lead decides, so it is not in the extraction queue.
+  if (isExtractor && s.parked && (s.status === 'not_started' || s.status === 'extracting')) return { source: s, role: 'extract', group: 'waiting', rank }
   if (isExtractor && EXTRACT_ACTION.has(s.status)) return { source: s, role: 'extract', group: 'action', rank }
   if (isReviewer && REVIEW_ACTION.has(s.status)) return { source: s, role: 'review', group: 'action', rank }
   return { source: s, role: isExtractor ? 'extract' : 'review', group: 'waiting', rank }
@@ -59,7 +61,7 @@ function Row({ item, projectName }: { item: QueueItem; projectName?: string }) {
         <span className="block text-sm font-semibold text-gray-900 truncate">{s.name}</span>
         {projectName && <span className="block text-[11px] text-gray-400 truncate">{projectName}</span>}
       </span>
-      <Badge variant={meta.color}>{meta.label}</Badge>
+      {s.parked && (s.status === 'not_started' || s.status === 'extracting') ? <Badge variant="amber">Flagged, waiting for your lead</Badge> : <Badge variant={meta.color}>{meta.label}</Badge>}
       <span className="hidden sm:block w-24 text-xs text-gray-500 text-right">
         {s.total_records > 0 ? `${s.valid_records}/${s.total_records} valid` : '—'}
       </span>

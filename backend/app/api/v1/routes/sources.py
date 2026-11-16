@@ -31,7 +31,7 @@ from app.models.all_models import (
     Source, SourceStatus, Project, ProjectMember, User, Schema, SchemaVersion,
     ExtractionJob, ExtractedRecord, JobStatus, SourceType as FileSourceType,
     ExtractionConfidence, ReviewStatus, AuditLog, AuditAction, Notification,
-    LLMCallLog, SubmissionBatch, UploadedFileEntry, SourcePeerReview,
+    LLMCallLog, SubmissionBatch, UploadedFileEntry, SourcePeerReview, SourceObservation,
 )
 from app.core.notify import notify, admin_user_ids, src_link, ACTION, INFO
 from app.schemas.api_schemas import (
@@ -222,12 +222,12 @@ def _is_assigned_reviewer(user: User, source: Source) -> bool:
 
 # ─── Serialization ───────────────────────────────────────────────────────────
 
-def _serialize_source(s: Source, peer=None) -> SourceOut:
+def _serialize_source(s: Source, peer=None, parked: bool = False) -> SourceOut:
     return SourceOut(
         peer_reviewed_records=peer[0] if peer else 0,
         peer_ids=sorted({r.user_id for r in s.peer_reviews} | ({s.assigned_reviewer_id} if s.assigned_reviewer_id else set())),
         peer_total=len(s.peer_reviews), peer_submitted=sum(1 for r in s.peer_reviews if r.status == 'submitted'),
-        peer_gated=bool(s.peer_reviews),
+        peer_gated=bool(s.peer_reviews), parked=bool(parked),
         peer_reviewed_at=peer[1] if peer else None,
         id=s.id, project_id=s.project_id, schema_id=s.schema_id,
         schema_name=s.schema.name if s.schema else None,
@@ -418,7 +418,16 @@ def list_sources(
         )
         for sid, n, at in rows:
             peer[sid] = (int(n), at)
-    return [_serialize_source(s, peer.get(s.id)) for s in sources]
+    # Sources the extractor flagged in Link triage (a blocking issue): set aside, so they leave the extraction queue until a lead decides.
+    from app.services import observations as _ob
+    parked: set = set()
+    for i in range(0, len(ids), 500):
+        for o in db.query(SourceObservation.source_id, SourceObservation.user_id, SourceObservation.kind).filter(SourceObservation.source_id.in_(ids[i:i + 500])).all():
+            if _ob.KINDS.get(o.kind, ("", "", False))[2]:
+                parked.add((o.source_id, o.user_id))
+    ext = {s.id: s.assigned_extractor_id for s in sources}
+    parked_ids = {sid for sid, uid in parked if ext.get(sid) and uid == ext[sid]}
+    return [_serialize_source(s, peer.get(s.id), s.id in parked_ids) for s in sources]
 
 
 @router.post("", response_model=SourceOut, status_code=201)

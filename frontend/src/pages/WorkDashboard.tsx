@@ -137,7 +137,7 @@ export function WorkDashboard() {
   const all = [...q.action, ...q.waiting]
   const returned = count(all, 'extract', 'changes_requested', 'needs_fixes')
   const toReview = count(all, 'review', 'ready_for_review', 'in_review')
-  const inProgress = count(all, 'extract', 'extracting', 'not_started')
+  const inProgress = count(q.action, 'extract', 'extracting', 'not_started')   // flagged (set aside) sources are not in progress
   const withReviewer = count(all, 'extract', 'ready_for_review', 'in_review', 'llm_verification')
   const waitingOnExtractor = count(all, 'review', 'not_started', 'extracting', 'needs_fixes', 'changes_requested')
   const approvedWeek = q.done.filter(i => i.source.approved_at && new Date(i.source.approved_at).getTime() >= weekAgo).length

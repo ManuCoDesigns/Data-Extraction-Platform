@@ -258,6 +258,7 @@ export interface Source {
   peer_total?: number
   peer_submitted?: number
   peer_gated?: boolean
+  parked?: boolean
   notes?: string
   created_at: string
   updated_at: string
