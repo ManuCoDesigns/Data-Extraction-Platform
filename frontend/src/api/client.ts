@@ -387,6 +387,10 @@ export const sourcesApi = {
     api.post(`/sources/${sourceId}/files/${fileId}/review`, { action, note }).then(r => r.data),
   sendBackToReviewers: (sourceId: string) =>
     api.post(`/sources/${sourceId}/send-back-to-reviewers`).then(r => r.data),
+  allowReupload: (sourceId: string, hours = 48, note = '') =>
+    api.post(`/sources/${sourceId}/allow-reupload`, { hours, note }).then(r => r.data),
+  closeReupload: (sourceId: string) =>
+    api.delete(`/sources/${sourceId}/allow-reupload`).then(r => r.data),
   escalateNoData: (sourceId: string, reason: string, note = '') =>
     api.post(`/sources/${sourceId}/escalate-no-data`, { reason, note }).then(r => r.data),
 }

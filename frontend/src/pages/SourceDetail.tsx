@@ -166,6 +166,20 @@ function SourceDetailInner() {
       setHandingBack(false)
     }
   }
+  const [reuploadBusy, setReuploadBusy] = useState(false)
+  const toggleReupload = async (open: boolean) => {
+    if (!sourceId) return
+    setReuploadBusy(true)
+    try {
+      if (open) { await sourcesApi.allowReupload(sourceId, 48); toast.success('Opened for one re-upload. The extractor has been told.') }
+      else { await sourcesApi.closeReupload(sourceId); toast.success('Re-upload closed') }
+      load()
+    } catch (err: any) {
+      toast.error(err?.response?.data?.detail || 'Could not change re-upload access')
+    } finally {
+      setReuploadBusy(false)
+    }
+  }
   const [showEditSource, setShowEditSource] = useState(false)
   const [editSourceForm, setEditSourceForm] = useState({ name: '', description: '', website_url: '' })
   const [showSchemaJson, setShowSchemaJson] = useState(false)
@@ -1008,6 +1022,20 @@ function SourceDetailInner() {
             <Button variant="secondary" size="sm" onClick={() => setShowUpload(true)}>
               <Upload className="w-3.5 h-3.5" /> Upload Data
             </Button>
+          )}
+          {isAdmin && source.status !== 'approved' && source.assigned_extractor_id && (
+            source.reupload_until
+              ? <Button variant="secondary" size="sm" onClick={() => toggleReupload(false)} loading={reuploadBusy}
+                  title="The extractor can replace the data once. Click to close it.">
+                  <Upload className="w-3.5 h-3.5" /> Re-upload open until {new Date(source.reupload_until).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}: close
+                </Button>
+              : <Button variant="secondary" size="sm" onClick={() => toggleReupload(true)} loading={reuploadBusy}
+                  title="Let the assigned extractor replace the data once, even when it is locked. The old data is kept as a version.">
+                  <Upload className="w-3.5 h-3.5" /> Allow re-upload
+                </Button>
+          )}
+          {!isAdmin && isExtractor && source.reupload_until && (
+            <span className="text-xs font-semibold text-emerald-700">An admin opened this source for one re-upload. Use Upload Data.</span>
           )}
           {(isExtractor || isReviewer) && (
             <Button variant="secondary" size="sm" onClick={() => setShowVersions(true)}>

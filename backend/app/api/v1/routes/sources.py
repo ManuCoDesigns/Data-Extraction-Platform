@@ -222,12 +222,18 @@ def _is_assigned_reviewer(user: User, source: Source) -> bool:
 
 # ─── Serialization ───────────────────────────────────────────────────────────
 
+def _reupload_open(s) -> bool:
+    from app.services import versions as _v
+    return _v.reupload_open(s)
+
+
 def _serialize_source(s: Source, peer=None, parked: bool = False) -> SourceOut:
     return SourceOut(
         peer_reviewed_records=peer[0] if peer else 0,
         peer_ids=sorted({r.user_id for r in s.peer_reviews} | ({s.assigned_reviewer_id} if s.assigned_reviewer_id else set())),
         peer_total=len(s.peer_reviews), peer_submitted=sum(1 for r in s.peer_reviews if r.status == 'submitted'),
         peer_gated=bool(s.peer_reviews), parked=bool(parked),
+        reupload_until=(s.reupload_until if _reupload_open(s) else None), reupload_note=(s.reupload_note if _reupload_open(s) else None),
         peer_reviewed_at=peer[1] if peer else None,
         id=s.id, project_id=s.project_id, schema_id=s.schema_id,
         schema_name=s.schema.name if s.schema else None,
@@ -788,6 +794,46 @@ def update_source(
 
 
 # ─── Upload + validate ───────────────────────────────────────────────────────
+
+@router.post("/{source_id}/allow-reupload", response_model=SourceOut)
+def allow_reupload(source_id: str, body: dict | None = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """An admin opens the source for one re-upload by its extractor. The old data is kept as a version and the peers go back to pending."""
+    from app.services import record_locks as _rl
+    if not _rl.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Only an admin can open a source for re-upload")
+    source = _get_source_or_404(source_id, db, current_user)
+    if source.status == SourceStatus.APPROVED:
+        raise HTTPException(status_code=409, detail="This source is already approved. Return it first, then open it for re-upload.")
+    if not source.assigned_extractor_id:
+        raise HTTPException(status_code=409, detail="This source has no extractor to upload. Assign one first.")
+    body = body or {}
+    hours = max(1, min(int(body.get("hours") or 48), 168))
+    note = (str(body.get("note") or "").strip() or None)
+    source.reupload_until = datetime.now(timezone.utc) + timedelta(hours=hours)
+    source.reupload_by = current_user.id
+    source.reupload_note = note[:300] if note else None
+    db.add(AuditLog(user_id=current_user.id, project_id=source.project_id, source_id=source.id, action=AuditAction.SOURCE_DATA_UPLOADED,
+                    after_value={"reupload_opened_for_hours": hours, "note": source.reupload_note, "extractor_id": source.assigned_extractor_id}))
+    from app.core.notify import ACTION, notify, src_link
+    notify(db, source.assigned_extractor_id, f"Re-upload opened on {source.name}",
+           f"{current_user.full_name} opened this source for one re-upload{(': ' + source.reupload_note) if source.reupload_note else ''}. Use Upload Data. It stays open for {hours} hours or until you upload.",
+           src_link(source), "reupload_opened", ACTION)
+    db.commit()
+    db.refresh(source)
+    return _serialize_source(source)
+
+
+@router.delete("/{source_id}/allow-reupload", response_model=SourceOut)
+def close_reupload(source_id: str, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    from app.services import record_locks as _rl
+    if not _rl.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Only an admin can close a re-upload")
+    source = _get_source_or_404(source_id, db, current_user)
+    source.reupload_until = source.reupload_by = source.reupload_note = None
+    db.commit()
+    db.refresh(source)
+    return _serialize_source(source)
+
 
 @router.post("/{source_id}/upload", response_model=SourceUploadSummary)
 async def upload_to_source(

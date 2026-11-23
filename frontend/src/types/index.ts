@@ -259,6 +259,8 @@ export interface Source {
   peer_submitted?: number
   peer_gated?: boolean
   parked?: boolean
+  reupload_until?: string | null
+  reupload_note?: string | null
   notes?: string
   created_at: string
   updated_at: string

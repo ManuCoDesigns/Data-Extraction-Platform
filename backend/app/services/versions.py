@@ -46,10 +46,23 @@ def self_replace_block(db: Session, source) -> str | None:
     return None
 
 
+def reupload_open(source) -> bool:
+    """True while an admin has opened this source for one re-upload."""
+    from datetime import datetime, timezone
+    until = getattr(source, "reupload_until", None)
+    if not until:
+        return False
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    return until > datetime.now(timezone.utc)
+
+
 def gate(db: Session, source, user, reason: str | None) -> str | None:
     """Replaces the plain bulk-edit check on an upload. Returns the reason to log when a lock was overridden."""
     from app.services import record_locks as rl
     why = rl.bulk_lock_reason(source)
+    if why and reupload_open(source):
+        return "Re-upload opened by an admin: " + why   # the admin allowed it, so no reason is needed; the old data is still kept as a version
     reason = (reason or "").strip()
     if not why or not reason or rl.is_admin(user):
         return rl.assert_bulk_editable(source, user)
@@ -96,6 +109,8 @@ def prepare_replace(db: Session, source, user, reason: str | None, filename: str
     reason = (reason or "").strip()
     label = reason if reason.startswith("Restored") else f"Replaced: {reason}" if reason else f"Replaced by a new upload ({filename})"
     rd = archive(db, source, user, label)
+    if getattr(source, "reupload_until", None):
+        source.reupload_until = source.reupload_by = source.reupload_note = None    # the one re-upload is used
     if rd is None:
         return None
     reset = []

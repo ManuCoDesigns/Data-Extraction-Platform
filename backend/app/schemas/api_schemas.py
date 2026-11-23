@@ -320,6 +320,8 @@ class SourceOut(BaseModel):
     peer_ids: list[str] = []                # everyone who peer reviews this source
     peer_total: int = 0
     peer_submitted: int = 0                 # how many have submitted their comment
+    reupload_until: Optional[datetime] = None   # set while an admin has opened the source for one re-upload
+    reupload_note: Optional[str] = None
     parked: bool = False                    # extractor flagged a blocking issue (broken link, no data...): set aside until a lead decides
     peer_gated: bool = False                # True once peers are assigned: admin approval waits for them
     created_by: str
