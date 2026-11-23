@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useParams, useNavigate } from 'react-router-dom'
 import {
   Plus, Globe, Database, LayoutGrid, Table as TableIcon,
-  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2, Zap, ListChecks, LayoutPanelLeft, Shuffle
+  Search, User as UserIcon, ChevronRight, AlertCircle, ArrowUpRight, Sparkles, Trash2, Zap, ListChecks, LayoutPanelLeft, Shuffle, Upload
 } from 'lucide-react'
 import { sourcesApi, projectsApi, schemasApi, xtriumApi } from '@/api/client'
 import type { Source, SourceStatus, Project, Schema, User } from '@/types'
@@ -12,6 +12,7 @@ import { useCapability } from '@/lib/permissions'
 import { MyQueue } from '@/components/MyQueue'
 import { SourcesWorkbench } from '@/components/SourcesWorkbench'
 import { RedoModal } from '@/components/enh/RedoModal'
+import { BulkReuploadModal } from '@/components/enh/BulkReuploadModal'
 import { AdminBatchUpload } from '@/components/enh/AdminBatchUpload'
 import { enhApi } from '@/api/client'
 import { saveNav } from '@/lib/sourceNav'
@@ -120,6 +121,7 @@ export function SourcesPage() {
   // ── Xtrium Catalog IQ pull ────────────────────────────────────────────────
   const [showXtriumPull, setShowXtriumPull] = useState(false)
   const [showRedo, setShowRedo] = useState(false)
+  const [showReupload, setShowReupload] = useState(false)
   const [xtriumProjectId, setXtriumProjectId] = useState(projectId ?? '')
   const [xtriumBatchSize, setXtriumBatchSize] = useState(25)
   const [pullingXtrium, setPullingXtrium] = useState(false)
@@ -279,6 +281,9 @@ export function SourcesPage() {
         {canManage && (
           <div className="flex items-center gap-2">
             <AdminBatchUpload projectId={projectId} onDone={() => window.location.reload()} />
+            <Button variant="secondary" onClick={() => setShowReupload(true)} title="Let several extractors replace the data on their sources once, even when it is locked">
+              <Upload className="w-4 h-4" /> Allow re-upload
+            </Button>
             <Button variant="secondary" onClick={() => setShowRedo(true)} title="Give sources a new extractor and reviewer, shuffled evenly across the team">
               <Shuffle className="w-4 h-4" /> Re-extract
             </Button>
@@ -607,6 +612,8 @@ export function SourcesPage() {
         </form>
       </Modal>
 
+      {showReupload && <BulkReuploadModal onClose={() => setShowReupload(false)} onDone={load}
+        sources={sources.filter(x => !projectFilter || x.project_id === projectFilter).map(x => ({ id: x.id, name: x.name, status: x.status, extractor: x.assigned_extractor_name, open: !!x.reupload_until }))} />}
       {showRedo && <RedoModal ids={[]} names={{}} onClose={() => setShowRedo(false)} onDone={load}
         sources={filtered.map(s => ({ id: s.id, name: s.name, status: s.status, extractor: s.assigned_extractor_name }))} />}
 

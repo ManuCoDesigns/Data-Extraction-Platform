@@ -795,6 +795,54 @@ def update_source(
 
 # ─── Upload + validate ───────────────────────────────────────────────────────
 
+def _open_reupload(db: Session, source: Source, user: User, hours: int, note: str | None) -> str | None:
+    """Opens one source for one re-upload by its extractor. Returns why it could not, or None when it is open."""
+    if source.status == SourceStatus.APPROVED:
+        return "already approved: return it first"
+    if not source.assigned_extractor_id:
+        return "no extractor assigned"
+    source.reupload_until = datetime.now(timezone.utc) + timedelta(hours=hours)
+    source.reupload_by = user.id
+    source.reupload_note = note[:300] if note else None
+    db.add(AuditLog(user_id=user.id, project_id=source.project_id, source_id=source.id, action=AuditAction.SOURCE_DATA_UPLOADED,
+                    after_value={"reupload_opened_for_hours": hours, "note": source.reupload_note, "extractor_id": source.assigned_extractor_id}))
+    from app.core.notify import ACTION, notify, src_link
+    notify(db, source.assigned_extractor_id, f"Re-upload opened on {source.name}",
+           f"{user.full_name} opened this source for one re-upload{(': ' + source.reupload_note) if source.reupload_note else ''}. Use Upload Data. It stays open for {hours} hours or until you upload.",
+           src_link(source), "reupload_opened", ACTION)
+    return None
+
+
+def _reupload_args(body: dict | None):
+    body = body or {}
+    hours = max(1, min(int(body.get("hours") or 48), 168))
+    note = (str(body.get("note") or "").strip() or None)
+    return hours, note
+
+
+@router.post("/allow-reupload-bulk")
+def allow_reupload_bulk(body: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Opens several sources at once, each for one re-upload by its own extractor. Sources that cannot be opened are listed with the reason."""
+    from app.services import record_locks as _rl
+    if not _rl.is_admin(current_user):
+        raise HTTPException(status_code=403, detail="Only an admin can open sources for re-upload")
+    ids = [str(i) for i in (body.get("source_ids") or [])][:500]
+    if not ids:
+        raise HTTPException(status_code=422, detail="Choose at least one source")
+    hours, note = _reupload_args(body)
+    opened, skipped = [], []
+    for sid in ids:
+        try:
+            src = _get_source_or_404(sid, db, current_user)
+        except HTTPException:
+            skipped.append({"id": sid, "name": "Unknown source", "why": "not found or no access"})
+            continue
+        why = _open_reupload(db, src, current_user, hours, note)
+        (skipped.append({"id": sid, "name": src.name, "why": why}) if why else opened.append({"id": sid, "name": src.name}))
+    db.commit()
+    return {"opened": opened, "skipped": skipped, "hours": hours}
+
+
 @router.post("/{source_id}/allow-reupload", response_model=SourceOut)
 def allow_reupload(source_id: str, body: dict | None = None, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """An admin opens the source for one re-upload by its extractor. The old data is kept as a version and the peers go back to pending."""
@@ -802,22 +850,10 @@ def allow_reupload(source_id: str, body: dict | None = None, db: Session = Depen
     if not _rl.is_admin(current_user):
         raise HTTPException(status_code=403, detail="Only an admin can open a source for re-upload")
     source = _get_source_or_404(source_id, db, current_user)
-    if source.status == SourceStatus.APPROVED:
-        raise HTTPException(status_code=409, detail="This source is already approved. Return it first, then open it for re-upload.")
-    if not source.assigned_extractor_id:
-        raise HTTPException(status_code=409, detail="This source has no extractor to upload. Assign one first.")
-    body = body or {}
-    hours = max(1, min(int(body.get("hours") or 48), 168))
-    note = (str(body.get("note") or "").strip() or None)
-    source.reupload_until = datetime.now(timezone.utc) + timedelta(hours=hours)
-    source.reupload_by = current_user.id
-    source.reupload_note = note[:300] if note else None
-    db.add(AuditLog(user_id=current_user.id, project_id=source.project_id, source_id=source.id, action=AuditAction.SOURCE_DATA_UPLOADED,
-                    after_value={"reupload_opened_for_hours": hours, "note": source.reupload_note, "extractor_id": source.assigned_extractor_id}))
-    from app.core.notify import ACTION, notify, src_link
-    notify(db, source.assigned_extractor_id, f"Re-upload opened on {source.name}",
-           f"{current_user.full_name} opened this source for one re-upload{(': ' + source.reupload_note) if source.reupload_note else ''}. Use Upload Data. It stays open for {hours} hours or until you upload.",
-           src_link(source), "reupload_opened", ACTION)
+    hours, note = _reupload_args(body)
+    why = _open_reupload(db, source, current_user, hours, note)
+    if why:
+        raise HTTPException(status_code=409, detail=f"This source is {why}." if why.startswith("already") else why[:1].upper() + why[1:] + ".")
     db.commit()
     db.refresh(source)
     return _serialize_source(source)
