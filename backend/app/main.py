@@ -19,17 +19,27 @@ async def lifespan(app: FastAPI):
         import sentry_sdk
         sentry_sdk.init(dsn=settings.SENTRY_DSN, environment=settings.ENVIRONMENT)
 
-    # Warm up the database connection pool on startup
-    # This prevents the first real request from taking 60+ seconds
-    try:
-        from app.db.session import SessionLocal
-        from sqlalchemy import text
+    # Warm up the database connection pool on startup. Retry for a short while: Railway can restart
+    # Postgres at the same time as this service, and the first attempts then get "connection refused".
+    import asyncio
+    from sqlalchemy import text
+    from app.db.session import SessionLocal
+
+    def _ping() -> None:
         db = SessionLocal()
-        db.execute(text("SELECT 1"))   # wake up the pool
-        db.close()
-        print("✓ Database pool warmed up")
-    except Exception as e:
-        print(f"DB warmup skipped: {e}")
+        try:
+            db.execute(text("SELECT 1"))
+        finally:
+            db.close()
+
+    for attempt in range(1, 7):
+        try:
+            await asyncio.to_thread(_ping)
+            print("✓ Database pool warmed up")
+            break
+        except Exception as e:
+            print(f"DB warmup attempt {attempt}/6 failed: {str(e).splitlines()[0][:140]}")
+            await asyncio.sleep(min(2 * attempt, 10))
 
     from app.core.scheduler import start_scheduler
     task = start_scheduler()
@@ -92,6 +102,37 @@ app.include_router(dispatch.router,                         prefix=PREFIX)
 app.include_router(admin_upload.router,                    prefix=PREFIX)
 app.include_router(briefs.router,                 prefix=PREFIX)
 app.include_router(versions.router,               prefix=PREFIX)
+
+
+# ─── Database unavailable ─────────────────────────────────────────────────────
+# When Postgres is restarting, a request fails with a connection error or a pool timeout. Answer with a clear 503
+# (this handler sits inside the CORS middleware, so the browser can read it) instead of a bare 500 that shows up as a CORS error.
+from sqlalchemy.exc import OperationalError, InterfaceError, TimeoutError as PoolTimeoutError  # noqa: E402
+
+
+@app.exception_handler(OperationalError)
+@app.exception_handler(InterfaceError)
+@app.exception_handler(PoolTimeoutError)
+async def database_unavailable(request: Request, exc: Exception):
+    msg = str(getattr(exc, "orig", exc)).lower()
+    if isinstance(exc, OperationalError) and "statement timeout" in msg:
+        return JSONResponse(status_code=504, content={"detail": "That took too long and was stopped. Try again, or narrow what you asked for."}, headers={"Retry-After": "5"})
+    return JSONResponse(status_code=503, content={"detail": "The database is restarting or busy. Wait a moment and try again. Your work is safe."}, headers={"Retry-After": "10"})
+
+
+@app.get("/health/db")
+def health_db():
+    """Reports whether the database answers. Not used by Railway's healthcheck, so a database restart does not restart this service."""
+    from sqlalchemy import text
+    from app.db.session import SessionLocal
+    db = SessionLocal()
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ok", "database": "up"}
+    except Exception:
+        return JSONResponse(status_code=503, content={"status": "degraded", "database": "down"})
+    finally:
+        db.close()
 
 
 @app.get("/health")
